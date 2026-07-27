@@ -16,6 +16,7 @@ Prefer current repo sources over memory:
 - `src/webskrap/client.py`: `WebSkrapClient`, sessions, fetch flow, screenshots.
 - `src/webskrap/models.py`: public Pydantic models, `SessionConfig`, result shape.
 - `src/webskrap/profiles.py`: bundled browser profiles.
+- `src/webskrap/consent.py`: cookie-banner auto-decline selectors and strategies.
 - `src/webskrap/cli.py`: current `webskrap` command behavior.
 - `src/webskrap/mcp_server.py`: MCP tools and argument shape.
 - `tests/`: behavior contracts when changing parsing, state, CLI, stealth, or safety.
@@ -76,6 +77,17 @@ config = SessionConfig(
 )
 ```
 
+Every `fetch()` auto-declines cookie consent notices before reading the page
+(`src/webskrap/consent.py`). Turn it off or retune the wait per call:
+
+```python
+config = SessionConfig(decline_cookies=False, decline_cookies_timeout_ms=2_000)
+```
+
+`FetchResult.cookie_notice_declined` reports the strategy that clicked (`"cmp"`,
+`"text"`, or `None`). `session.decline_cookies(page)` does the same on a page you
+drive yourself.
+
 Headed Patchright is strongest for strict detection surfaces:
 
 ```python
@@ -126,7 +138,7 @@ webskrap fetch https://example.com --channel chromium --format json
 
 `fetch --format json` prints bounded JSON to stdout using the MCP-compatible
 shape: `url`, `final_url`, `status`, `ok`, `title`, `headers`, `text`,
-`text_length`, `text_truncated`, and `elapsed_ms`.
+`text_length`, `text_truncated`, `elapsed_ms`, and `cookie_notice_declined`.
 
 Use `--stdout` for raw fetched content, and combine it with `--text-only` for
 readable body text.

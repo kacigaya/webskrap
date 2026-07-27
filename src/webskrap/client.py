@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
+from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.models import BrowserProfile, FetchResult, ResourcePolicy, SessionConfig, WaitUntil
 from webskrap.profiles import get_profile
 
@@ -83,6 +84,9 @@ class WebSkrapSession:
                 wait_until=wait_until,
                 timeout=timeout_ms or self.config.navigation_timeout_ms,
             )
+            declined = None
+            if self.config.decline_cookies:
+                declined = await self.decline_cookies(page)
             title = await page.title()
             text = await page.locator("body").inner_text() if text_only else await page.content()
             screenshot_path = await _maybe_screenshot(page, screenshot)
@@ -101,9 +105,22 @@ class WebSkrapSession:
                 cookies=cookies,
                 timings={"elapsed_ms": elapsed_ms},
                 screenshot_path=screenshot_path,
+                cookie_notice_declined=declined,
             )
         finally:
             await page.close()
+
+    async def decline_cookies(self, page: Page, *, timeout_ms: float | None = None) -> str | None:
+        """Click a cookie consent notice's reject control on ``page``.
+
+        Called automatically by :meth:`fetch` unless
+        ``SessionConfig.decline_cookies`` is False. Call it directly for pages
+        you drive yourself. Returns the strategy that clicked, or None.
+        """
+        self._ensure_open()
+        if timeout_ms is None:
+            timeout_ms = self.config.decline_cookies_timeout_ms
+        return await _decline_cookies(page, timeout_ms=timeout_ms)
 
     async def human_click(
         self,

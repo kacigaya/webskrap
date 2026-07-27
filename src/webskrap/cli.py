@@ -250,6 +250,21 @@ def fetch_command(
         ResourcePolicy,
         typer.Option("--resource-policy", help="Resource routing preset."),
     ] = ResourcePolicy.ALL,
+    decline_cookies: Annotated[
+        bool,
+        typer.Option(
+            "--decline-cookies/--no-decline-cookies",
+            help="Click the reject button of a cookie consent notice after load.",
+        ),
+    ] = True,
+    decline_cookies_timeout_ms: Annotated[
+        float,
+        typer.Option(
+            "--decline-cookies-timeout-ms",
+            min=0,
+            help="How long to wait for a cookie consent notice to appear.",
+        ),
+    ] = 2_000,
     patchright_context_profile: Annotated[
         bool,
         typer.Option(
@@ -305,6 +320,8 @@ def fetch_command(
             wait_until=wait_until,
             timeout_ms=timeout_ms,
             resource_policy=resource_policy,
+            decline_cookies=decline_cookies,
+            decline_cookies_timeout_ms=decline_cookies_timeout_ms,
             patchright_context_profile=patchright_context_profile,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
@@ -330,6 +347,8 @@ async def _fetch(
     wait_until: str,
     timeout_ms: float,
     resource_policy: ResourcePolicy,
+    decline_cookies: bool,
+    decline_cookies_timeout_ms: float,
     patchright_context_profile: bool,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
@@ -345,6 +364,8 @@ async def _fetch(
         user_data_dir=user_data_dir,
         navigation_timeout_ms=timeout_ms,
         resource_policy=resource_policy,
+        decline_cookies=decline_cookies,
+        decline_cookies_timeout_ms=decline_cookies_timeout_ms,
         patchright_context_profile=patchright_context_profile,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
@@ -381,6 +402,8 @@ async def _fetch(
     console.print(f"[bold]Status:[/bold] {result.status}")
     console.print(f"[bold]Final URL:[/bold] {result.final_url}")
     console.print(f"[bold]Title:[/bold] {result.title}")
+    if result.cookie_notice_declined:
+        console.print(f"[bold]Cookie notice:[/bold] declined ({result.cookie_notice_declined})")
     if result.screenshot_path:
         console.print(f"[bold]Screenshot:[/bold] {result.screenshot_path}")
     if output:

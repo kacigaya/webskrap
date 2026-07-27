@@ -102,6 +102,21 @@ webskrap fetch https://example.com --resource-policy documents -o page.html
 
 `lite` blocks images, fonts, and media. `documents` also blocks stylesheets.
 
+## Cookie banners
+
+`webskrap fetch` clicks the reject control of a cookie consent notice before
+reading the page, so banners do not bury the text and no optional cookies are
+accepted. The human output prints `Cookie notice: declined (...)` when it fired,
+and the JSON output carries `cookie_notice_declined`.
+
+```bash
+webskrap fetch https://example.com --no-decline-cookies
+webskrap fetch https://example.com --decline-cookies-timeout-ms 4000
+```
+
+The timeout is how long to wait for a late-injected notice, and the per-fetch
+cost on pages that have none. Use `0` for a single immediate check.
+
 ## Headless Patchright controls
 
 `webskrap fetch` always runs headless Patchright. Use real Chrome and a stable

@@ -49,6 +49,10 @@ page content in `text` (capped by `max_chars`, with `text_length` and
 `text_truncated` reporting the full size). By default `text` is clean visible
 text; set `text_only` to `false` to get raw HTML.
 
+Both also auto-decline cookie banners before reading the page, and report which
+strategy fired in `cookie_notice_declined`. Pass `decline_cookies: false` to
+leave the notice in place.
+
 ## Tool arguments
 
 `fetch` accepts:
@@ -63,6 +67,7 @@ text; set `text_only` to `false` to get raw HTML.
 | `timeout_ms` | `60000` | Navigation timeout. |
 | `max_chars` | `20000` | Maximum returned text characters. |
 | `text_only` | `true` | Return clean visible text; set `false` for raw HTML. |
+| `decline_cookies` | `true` | Click a cookie consent notice's reject button after load. |
 
 Example arguments:
 

@@ -109,11 +109,13 @@ class _BodyLocator:
 
 class _FetchPage:
     url = "https://example.test/final"
+    frames: list[object] = []
 
     def __init__(self) -> None:
         self.content_called = False
         self.closed = False
         self.locators: list[str] = []
+        self.consent_waits: list[float] = []
         self.default_timeout: float | None = None
         self.default_navigation_timeout: float | None = None
 
@@ -125,6 +127,10 @@ class _FetchPage:
 
     async def goto(self, *_args: object, **_kwargs: object) -> _Response:
         return _Response()
+
+    async def wait_for_selector(self, _selector: str, *, timeout: float) -> object:
+        self.consent_waits.append(timeout)
+        raise TimeoutError("no cookie notice on this page")
 
     async def title(self) -> str:
         return "Example"
@@ -199,6 +205,45 @@ async def test_fetch_text_only_uses_body_inner_text() -> None:
     assert page.locators == ["body"]
     assert page.content_called is False
     assert page.closed is True
+    assert result.cookie_notice_declined is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_declines_cookie_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeouts: list[float] = []
+
+    async def fake_decline(_page: object, *, timeout_ms: float) -> str:
+        timeouts.append(timeout_ms)
+        return "cmp"
+
+    monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
+    session = WebSkrapSession(
+        name="test",
+        context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
+        config=SessionConfig(decline_cookies_timeout_ms=1234),
+        profile=get_profile(None),
+    )
+
+    result = await session.fetch("https://example.test")
+
+    assert result.cookie_notice_declined == "cmp"
+    assert timeouts == [1234]
+
+
+@pytest.mark.asyncio
+async def test_fetch_skips_cookie_decline_when_disabled() -> None:
+    page = _FetchPage()
+    session = WebSkrapSession(
+        name="test",
+        context=_FetchContext(page),  # type: ignore[arg-type]
+        config=SessionConfig(decline_cookies=False),
+        profile=get_profile(None),
+    )
+
+    result = await session.fetch("https://example.test")
+
+    assert result.cookie_notice_declined is None
+    assert page.consent_waits == []
 
 
 @pytest.mark.asyncio

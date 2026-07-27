@@ -150,6 +150,48 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## Auto-decline cookie banners
+
+Every `session.fetch()` (and therefore the CLI and the MCP tools) clicks the
+reject control of a cookie consent notice before reading the page, so scraped
+text is not buried under a banner and no optional cookies are accepted.
+
+Detection is inspired by Brave's
+[cookiecrumbler](https://github.com/brave/cookiecrumbler), which finds consent
+notices; WebSkrap dismisses them. Two strategies, tried in every frame:
+
+1. Reject buttons of the common consent platforms (OneTrust, Cookiebot, Didomi,
+   Usercentrics, Sourcepoint, Quantcast, Osano, Complianz, CookieYes, ...).
+2. A clickable whose label matches a reject phrase ("Reject all", "Refuser
+   tout", "Ablehnen", "Continue without accepting", ...), scoped to a
+   cookie/consent container so unrelated "Decline" buttons are never touched.
+
+`FetchResult.cookie_notice_declined` reports which strategy clicked (`"cmp"`,
+`"text"`, or `None`).
+
+```python
+config = SessionConfig(
+    decline_cookies=True,             # default
+    decline_cookies_timeout_ms=2_000,  # wait for a late-injected notice; 0 = check once
+)
+
+result = await client.fetch("https://example.com", config=config)
+print(result.cookie_notice_declined)
+```
+
+The timeout is the per-fetch cost on pages without a notice. Pages that carry a
+consent-platform iframe are retried for up to 3s while it renders. For pages you
+drive yourself, call it directly:
+
+```python
+page = await session.context.new_page()
+await page.goto("https://example.com", wait_until="domcontentloaded")
+await session.decline_cookies(page)
+```
+
+Consent walls with no reject control on the first layer (pay-or-consent) are
+left alone.
+
 ## Custom profile
 
 ```python
@@ -179,6 +221,8 @@ config = SessionConfig(
     storage_state=None,
     proxy=ProxyConfig(server="http://127.0.0.1:8080"),
     resource_policy=ResourcePolicy.LITE,
+    decline_cookies=True,
+    decline_cookies_timeout_ms=2_000,
     ignore_https_errors=True,
     java_script_enabled=True,
     service_workers="allow",
@@ -375,6 +419,8 @@ webskrap fetch https://example.com --profile desktop-chrome
 webskrap fetch https://example.com --format json --max-chars 12000
 webskrap fetch https://example.com --stdout --text-only
 webskrap fetch https://example.com --screenshot example.png
+webskrap fetch https://example.com --no-decline-cookies
+webskrap fetch https://example.com --decline-cookies-timeout-ms 4000
 webskrap fetch https://example.com --channel chrome \
   --user-data-dir .webskrap/headless-profile
 webskrap fetch https://amiunique.org/fr/fingerprint \
@@ -405,8 +451,10 @@ clean visible page text by default, with no HTML tags, scripts, or style noise,
 so agents spend tokens on content, not markup (typically 5-10x fewer tokens than
 raw HTML). Pass `text_only=False` when you actually need the HTML. Use
 `stealth_fetch` for finer control over fingerprint surface, WebRTC, UA masking,
-and persistent profiles. Every result carries `status`, `final_url`, `title`,
-`text_length`, and truncation flags so the model knows exactly what it got.
+and persistent profiles. Both auto-decline cookie banners (`decline_cookies=False`
+to keep them). Every result carries `status`, `final_url`, `title`,
+`text_length`, `cookie_notice_declined`, and truncation flags so the model knows
+exactly what it got.
 
 ```bash
 pip install webskrap

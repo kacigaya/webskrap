@@ -14,14 +14,15 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 | Symbol | Description |
 | --- | --- |
 | `WebSkrapClient` | Owns the Playwright lifecycle. Use it as an async context manager and call `fetch()` for one-shot requests or `session()` for persistent contexts. |
-| `WebSkrapSession` | A persistent browser context kept open across requests. Exposes `fetch()`, `human_click()`, and the underlying Playwright `context`. |
-| `FetchResult` | Result of a fetch: `url`, `final_url`, `status`, `ok`, `headers`, `text`, `title`, `cookies`, `timings`, and `screenshot_path`. |
+| `WebSkrapSession` | A persistent browser context kept open across requests. Exposes `fetch()`, `human_click()`, `decline_cookies()`, and the underlying Playwright `context`. |
+| `FetchResult` | Result of a fetch: `url`, `final_url`, `status`, `ok`, `headers`, `text`, `title`, `cookies`, `timings`, `screenshot_path`, and `cookie_notice_declined`. |
+| `decline_cookies(page)` | Click the reject control of a cookie consent notice on any Playwright page. Returns the strategy that clicked, or `None`. |
 
 ## Configuration
 
 | Symbol | Description |
 | --- | --- |
-| `SessionConfig` | Per-session or per-call settings: driver, channel, headless, timeouts, `user_data_dir`, `storage_state`, `resource_policy`, proxy, and stealth options. |
+| `SessionConfig` | Per-session or per-call settings: driver, channel, headless, timeouts, `user_data_dir`, `storage_state`, `resource_policy`, `decline_cookies`, `decline_cookies_timeout_ms`, proxy, and stealth options. |
 | `ProxyConfig` | Proxy `server` with optional `username` and `password`. |
 | `ResourcePolicy` | Request-blocking preset: `ALL`, `LITE`, or `DOCUMENTS`. |
 | `WebRtcIPHandlingPolicy` | Allowed WebRTC ICE policy values: `default`, `default_public_and_private_interfaces`, `default_public_interface_only`, `disable_non_proxied_udp`. |

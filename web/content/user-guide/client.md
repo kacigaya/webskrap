@@ -98,6 +98,31 @@ config = SessionConfig(
 result = await client.fetch("https://example.com", config=config)
 ```
 
+### Cookie banners
+
+Every `fetch()` clicks the reject control of a cookie consent notice before
+reading the page, so banners do not bury the text and no optional cookies are
+accepted. It knows the common consent platforms (OneTrust, Cookiebot, Didomi,
+Usercentrics, Sourcepoint, ...) and falls back to matching reject wording inside
+a cookie/consent container, in every frame.
+
+```python
+config = SessionConfig(
+    decline_cookies=True,              # default
+    decline_cookies_timeout_ms=2_000,  # wait for a late notice; 0 = check once
+)
+result = await client.fetch("https://example.com", config=config)
+print(result.cookie_notice_declined)   # "cmp", "text", or None
+```
+
+For pages you drive yourself, call it on demand:
+
+```python
+page = await session.context.new_page()
+await page.goto("https://example.com", wait_until="domcontentloaded")
+await session.decline_cookies(page)
+```
+
 ## FetchResult
 
 `FetchResult` includes:
@@ -114,6 +139,7 @@ result = await client.fetch("https://example.com", config=config)
 | `cookies` | Browser-context cookies visible after the fetch. |
 | `timings` | Timing data, currently including `elapsed_ms`. |
 | `screenshot_path` | Screenshot path when screenshot capture was requested. |
+| `cookie_notice_declined` | Strategy that dismissed a cookie consent notice (`cmp`, `text`), or `None`. |
 
 Check `status` before assuming `headers` or HTTP semantics exist:
 

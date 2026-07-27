@@ -1,4 +1,5 @@
 from webskrap.client import WebSkrapClient, WebSkrapError, WebSkrapSession
+from webskrap.consent import decline_cookies
 from webskrap.models import (
     BrowserProfile,
     FetchResult,
@@ -21,6 +22,7 @@ __all__ = [
     "WebSkrapClient",
     "WebSkrapError",
     "WebSkrapSession",
+    "decline_cookies",
     "get_profile",
     "list_profiles",
 ]

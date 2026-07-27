@@ -38,6 +38,7 @@ async def fetch(
     timeout_ms: float = 60_000,
     max_chars: int = 20_000,
     text_only: bool = True,
+    decline_cookies: bool = True,
 ) -> dict[str, Any]:
     """Fetch a URL with the Patchright stealth driver and return page data.
 
@@ -58,6 +59,8 @@ async def fetch(
         timeout_ms: Navigation timeout in milliseconds.
         max_chars: Maximum characters of page text to return.
         text_only: Return clean visible text (default) instead of raw HTML.
+        decline_cookies: Click a cookie consent notice's reject button after
+            load, so the banner does not bury the page text.
     """
     config = SessionConfig(
         driver="patchright",
@@ -65,6 +68,7 @@ async def fetch(
         headless=True,
         navigation_timeout_ms=timeout_ms,
         resource_policy=parse_resource_policy(resource_policy),
+        decline_cookies=decline_cookies,
     )
     async with WebSkrapClient() as client:
         result = await client.fetch(
@@ -92,6 +96,7 @@ async def stealth_fetch(
     timeout_ms: float = 90_000,
     max_chars: int = 20_000,
     text_only: bool = True,
+    decline_cookies: bool = True,
 ) -> dict[str, Any]:
     """Fetch a URL with the Patchright stealth driver (CDP-leak-free).
 
@@ -114,6 +119,8 @@ async def stealth_fetch(
         timeout_ms: Navigation timeout in milliseconds.
         max_chars: Maximum characters of page text to return.
         text_only: Return clean visible text (default) instead of raw HTML.
+        decline_cookies: Click a cookie consent notice's reject button after
+            load, so the banner does not bury the page text.
     """
     config = SessionConfig(
         driver="patchright",
@@ -125,6 +132,7 @@ async def stealth_fetch(
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+        decline_cookies=decline_cookies,
     )
     async with WebSkrapClient() as client:
         result = await client.fetch(

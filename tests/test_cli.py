@@ -63,6 +63,7 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
         "text_length": 19,
         "text_truncated": True,
         "elapsed_ms": 12.3,
+        "cookie_notice_declined": None,
     }
 
     config = _FakeClient.calls[0]["config"]
@@ -70,6 +71,27 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
     assert config.headless is True
     assert config.channel == "chrome"
     assert config.patchright_focus_control is None
+    assert config.decline_cookies is True
+
+
+def test_fetch_no_decline_cookies_flag(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "fetch",
+            "https://example.test",
+            "--no-decline-cookies",
+            "--decline-cookies-timeout-ms",
+            "500",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    config = _FakeClient.calls[0]["config"]
+    assert config.decline_cookies is False
+    assert config.decline_cookies_timeout_ms == 500
 
 
 def test_fetch_stdout_prints_raw_content(monkeypatch: Any) -> None:

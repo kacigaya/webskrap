@@ -189,6 +189,16 @@ class SessionConfig(BaseModel):
     # is omitted entirely; Patchright builds that lack focus_control reject it.
     # Set True/False only when targeting a build that accepts the option.
     patchright_focus_control: bool | None = None
+    # Click the reject control of a cookie consent notice after navigation, so
+    # scraped text is not buried under a banner and no optional cookies are
+    # accepted. Only applies to pages fetched through WebSkrapSession.fetch;
+    # pages the caller drives itself are untouched.
+    decline_cookies: bool = True
+    # How long to wait for a consent notice to appear before giving up. CMP
+    # scripts inject the notice after DOMContentLoaded, so an immediate check
+    # misses most of them. This is the per-fetch cost on pages without a
+    # notice; set 0 for a single immediate check.
+    decline_cookies_timeout_ms: float = Field(default=2_000, ge=0)
 
     def launch_options(self) -> dict[str, Any]:
         options: dict[str, Any] = {
@@ -320,6 +330,9 @@ class FetchResult(BaseModel):
     cookies: list[dict[str, Any]]
     timings: dict[str, float]
     screenshot_path: Path | None = None
+    # Strategy that dismissed a cookie consent notice ("cmp" or "text"), or
+    # None when nothing was declined.
+    cookie_notice_declined: str | None = None
 
 
 def shape_fetch_result(result: FetchResult, max_chars: int) -> dict[str, Any]:
@@ -336,4 +349,5 @@ def shape_fetch_result(result: FetchResult, max_chars: int) -> dict[str, Any]:
         "text_length": len(text),
         "text_truncated": len(text) > limit,
         "elapsed_ms": round(result.timings.get("elapsed_ms", 0.0), 1),
+        "cookie_notice_declined": result.cookie_notice_declined,
     }
