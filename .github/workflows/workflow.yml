@@ -9,7 +9,12 @@ permissions:
   contents: read
 
 jobs:
+  # PyPI releases are immutable, so never publish a tree that does not pass.
+  test:
+    uses: ./.github/workflows/ci.yml
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
