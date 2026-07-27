@@ -136,6 +136,18 @@ async def test_zero_timeout_skips_the_wait() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stops_clicking_once_the_budget_is_spent(monkeypatch: pytest.MonkeyPatch) -> None:
+    # First call sets the deadline, every later one is far past it.
+    calls = iter([0.0])
+    monkeypatch.setattr("webskrap.consent.monotonic", lambda: next(calls, 10_000.0))
+    button = _Element()
+    page = _Page([_Frame(cmp=_Locator([button]))], notice_found=False)
+
+    assert await decline_cookies(page, timeout_ms=0) is None
+    assert button.clicked is False
+
+
+@pytest.mark.asyncio
 async def test_returns_none_when_nothing_matches() -> None:
     page = _Page([_Frame()])
 

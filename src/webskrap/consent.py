@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 from contextlib import suppress
+from time import monotonic
 from typing import Any
 
 # Reject/deny buttons of common consent management platforms.
@@ -163,8 +164,16 @@ SETTLE_MS = 300
 # A consent platform's iframe is visible before its contents finish rendering,
 # so retry while one is attached. Only pages that actually carry such a frame
 # pay this; everything else gets a single pass.
+# ponytail: fixed 3s poll ceiling for iframe render; wait on the reject locator
+# inside the frame if slow CMPs start slipping through
 POLL_INTERVAL_MS = 250
 POLL_ATTEMPTS = 12
+# Hard cap on everything after detection (polling plus click attempts), so the
+# total cost stays timeout_ms + this instead of growing with candidate count.
+POST_DETECT_BUDGET_MS = 3_000
+# A caller that already waited for networkidle gave CMP scripts their chance to
+# inject, so the detection wait on top of that is mostly dead time.
+SETTLED_PAGE_TIMEOUT_MS = 500
 
 
 async def decline_cookies(page: Any, *, timeout_ms: float = 2_000) -> str | None:
@@ -175,7 +184,16 @@ async def decline_cookies(page: Any, *, timeout_ms: float = 2_000) -> str | None
     the strategy that clicked (``"cmp"`` or ``"text"``), or ``None`` when no
     notice was found. Never raises: a page without a notice, or a notice this
     cannot handle, is not an error.
+
+    Total wall time is bounded by ``timeout_ms + POST_DETECT_BUDGET_MS``.
+
+    ponytail: only the notice's first layer is handled. Walls with no reject
+    control there (zeit.de and other pay-or-consent publishers) are left alone,
+    and walls that answer the reject click with a subscription upsell
+    (theguardian.com) stay up -- the return value reports the click, not a clean
+    page. Walking further needs per-CMP second-layer flows.
     """
+    deadline = monotonic() + (max(timeout_ms, 0.0) + POST_DETECT_BUDGET_MS) / 1000
     if timeout_ms > 0:
         try:
             await page.wait_for_selector(
@@ -186,13 +204,18 @@ async def decline_cookies(page: Any, *, timeout_ms: float = 2_000) -> str | None
 
     for attempt in range(POLL_ATTEMPTS):
         for frame in page.frames:
-            strategy = await _decline_in_frame(frame)
+            strategy = await _decline_in_frame(frame, deadline)
             if strategy is not None:
                 with suppress(Exception):  # settle wait is best-effort
                     await page.wait_for_timeout(SETTLE_MS)
                 return strategy
-        # Nothing left that can still render into a notice.
-        if timeout_ms <= 0 or attempt + 1 == POLL_ATTEMPTS or not _has_consent_frame(page):
+        # Nothing left that can still render into a notice, or out of budget.
+        if (
+            timeout_ms <= 0
+            or attempt + 1 == POLL_ATTEMPTS
+            or monotonic() >= deadline
+            or not _has_consent_frame(page)
+        ):
             break
         with suppress(Exception):
             await page.wait_for_timeout(POLL_INTERVAL_MS)
@@ -210,7 +233,7 @@ def _is_consent_frame(frame: Any) -> bool:
     return bool(CONSENT_FRAME_URL_PATTERN.search(getattr(frame, "url", "") or ""))
 
 
-async def _decline_in_frame(frame: Any) -> str | None:
+async def _decline_in_frame(frame: Any, deadline: float) -> str | None:
     text_scope = frame if _is_consent_frame(frame) else frame.locator(CONSENT_CONTAINER_CSS)
     candidates = (
         ("cmp", frame.locator(CMP_REJECT_CSS)),
@@ -222,11 +245,19 @@ async def _decline_in_frame(frame: Any) -> str | None:
         except Exception:  # noqa: BLE001 - detached frame or bad selector engine
             return None
         for index in range(total):
+            click_timeout = min(CLICK_TIMEOUT_MS, (deadline - monotonic()) * 1000)
+            if click_timeout <= 0:
+                return None
             element = locator.nth(index)
             try:
                 if not await element.is_visible():
                     continue
-                await element.click(timeout=CLICK_TIMEOUT_MS)
+                # Playwright dispatches real browser input events here, not a
+                # JavaScript el.click(), so this is not a synthesized-event
+                # tell. Deliberately not human_click: that takes a Page and
+                # notices live in frames, and consent widgets do not score
+                # cursor trajectory.
+                await element.click(timeout=click_timeout)
             except Exception:  # noqa: BLE001 - covered, detached, or navigating
                 continue
             return strategy

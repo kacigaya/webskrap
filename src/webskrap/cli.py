@@ -9,7 +9,7 @@ import time
 import urllib.request
 from importlib import metadata
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, NoReturn
 
 import typer
 from rich.console import Console
@@ -17,6 +17,7 @@ from rich.table import Table
 
 from webskrap.client import WebSkrapClient
 from webskrap.models import (
+    FetchResult,
     ResourcePolicy,
     SessionConfig,
     WaitUntil,
@@ -179,20 +180,32 @@ async def _doctor() -> dict[str, object]:
             "hint": "Run: webskrap install",
         }
 
-    try:
-        manager = async_playwright()
-        playwright = await manager.start()
-        browser = await playwright.chromium.launch(channel="chrome", headless=True)
-        await browser.close()
-        await playwright.stop()
-    except Exception as exc:
+    # The chrome channel is unavailable on some platforms (Linux ARM64), where
+    # bundled chromium still works. Report the best channel that launches
+    # instead of failing the whole check.
+    failure: Exception | None = None
+    for channel in ("chrome", None):
+        try:
+            manager = async_playwright()
+            playwright = await manager.start()
+            browser = await playwright.chromium.launch(channel=channel, headless=True)
+            await browser.close()
+            await playwright.stop()
+        except Exception as exc:  # noqa: BLE001 - try the next channel
+            failure = exc
+            continue
+        label = channel or "chromium"
         return {
-            "ok": False,
-            "message": f"Patchright headless Chrome did not launch: {exc}",
-            "hint": "Run: webskrap install",
+            "ok": True,
+            "message": f"Patchright headless {label} is ready.",
+            "channel": label,
         }
 
-    return {"ok": True, "message": "Patchright headless Chrome is ready."}
+    return {
+        "ok": False,
+        "message": f"Patchright headless Chrome did not launch: {failure}",
+        "hint": "Run: webskrap install",
+    }
 
 
 @app.command("fetch")
@@ -373,16 +386,15 @@ async def _fetch(
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )
 
-    async with WebSkrapClient() as client:
-        result = await client.fetch(
-            url,
-            profile=selected_profile,
-            config=config,
-            wait_until=_parse_wait_until(wait_until),
-            screenshot=screenshot or False,
-            timeout_ms=timeout_ms,
-            text_only=text_only,
-        )
+    result = await _fetch_with_channel_fallback(
+        config,
+        url=url,
+        profile=selected_profile,
+        wait_until=_parse_wait_until(wait_until),
+        screenshot=screenshot or False,
+        timeout_ms=timeout_ms,
+        text_only=text_only,
+    )
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -408,6 +420,58 @@ async def _fetch(
         console.print(f"[bold]Screenshot:[/bold] {result.screenshot_path}")
     if output:
         console.print(f"[bold]HTML:[/bold] {output}")
+
+
+LAUNCH_FAILURE_MARKERS = (
+    "executable doesn't exist",
+    "is not found at",
+    "playwright install",
+    "failed to launch",
+    "browsertype.launch",
+)
+
+
+def _is_launch_failure(exc: Exception) -> bool:
+    return any(marker in str(exc).lower() for marker in LAUNCH_FAILURE_MARKERS)
+
+
+def _fail_launch(exc: Exception) -> NoReturn:
+    """Report an unlaunchable browser the way `doctor` does, not as a traceback."""
+    detail = str(exc).strip().splitlines()
+    stderr = Console(stderr=True, highlight=False)
+    stderr.print(f"[red]Browser did not launch:[/red] {detail[0] if detail else exc}")
+    stderr.print("Run: [bold]webskrap install[/bold]")
+    raise typer.Exit(code=1)
+
+
+async def _run_fetch(config: SessionConfig, **kwargs: Any) -> FetchResult:
+    async with WebSkrapClient() as client:
+        return await client.fetch(config=config, **kwargs)
+
+
+async def _fetch_with_channel_fallback(config: SessionConfig, **kwargs: Any) -> FetchResult:
+    """Fetch, retrying on bundled chromium when the chosen channel cannot launch.
+
+    The default channel is `chrome`, which does not exist on every platform
+    (Linux ARM64 has no Chrome build). Falling back keeps `webskrap fetch`
+    working there instead of dumping a Playwright traceback.
+    """
+    try:
+        return await _run_fetch(config, **kwargs)
+    except Exception as exc:
+        if not _is_launch_failure(exc):
+            raise
+        if config.channel is None:
+            _fail_launch(exc)
+        Console(stderr=True, highlight=False).print(
+            f"[yellow]channel '{config.channel}' did not launch; retrying with chromium[/yellow]"
+        )
+        try:
+            return await _run_fetch(config.model_copy(update={"channel": None}), **kwargs)
+        except Exception as retry_exc:
+            if not _is_launch_failure(retry_exc):
+                raise
+            _fail_launch(retry_exc)
 
 
 def _parse_wait_until(value: str) -> WaitUntil:

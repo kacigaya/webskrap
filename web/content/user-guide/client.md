@@ -123,6 +123,17 @@ await page.goto("https://example.com", wait_until="domcontentloaded")
 await session.decline_cookies(page)
 ```
 
+`decline_cookies_timeout_ms` is how long to wait for a notice to appear, and so
+the per-fetch cost on pages that have none. Total time is bounded by that plus a
+3s internal budget for clicking, including retries while a consent platform's
+iframe renders. Fetches that already waited for `networkidle` shrink the wait to
+500ms, because the CMP script has had its chance to inject by then.
+
+Detection is inspired by Brave's
+[cookiecrumbler](https://github.com/brave/cookiecrumbler), which finds consent
+notices; WebSkrap dismisses them. Consent walls with no reject control on the
+first layer (pay-or-consent) are left alone.
+
 ## FetchResult
 
 `FetchResult` includes:

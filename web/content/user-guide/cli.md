@@ -117,6 +117,17 @@ webskrap fetch https://example.com --decline-cookies-timeout-ms 4000
 The timeout is how long to wait for a late-injected notice, and the per-fetch
 cost on pages that have none. Use `0` for a single immediate check.
 
+## Browser channels
+
+`--channel` defaults to `chrome`, which does not exist on every platform (Linux
+ARM64 has no Chrome build). When the channel cannot launch, `fetch` prints a
+notice on stderr and retries with bundled chromium, so piped stdout stays clean.
+If nothing launches you get a one-line error and `Run: webskrap install`, not a
+Playwright traceback.
+
+`webskrap doctor` reports the best channel that launches and names it in
+`channel`, so `chrome` being unavailable is no longer a failed check.
+
 ## Headless Patchright controls
 
 `webskrap fetch` always runs headless Patchright. Use real Chrome and a stable

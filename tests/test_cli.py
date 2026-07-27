@@ -94,6 +94,64 @@ def test_fetch_no_decline_cookies_flag(monkeypatch: Any) -> None:
     assert config.decline_cookies_timeout_ms == 500
 
 
+class _LaunchFailingClient(_FakeClient):
+    """Fails like Playwright does when a browser channel is not installed."""
+
+    fail_channels: tuple[str | None, ...] = ("chrome",)
+    attempts: list[str | None] = []
+
+    async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+        channel = kwargs["config"].channel
+        self.attempts.append(channel)
+        if channel in self.fail_channels:
+            raise RuntimeError(
+                f"Chromium distribution '{channel}' is not found at /opt/google/chrome\n"
+                'Run "playwright install chrome"'
+            )
+        return await super().fetch(url, **kwargs)
+
+
+def test_fetch_falls_back_to_chromium_when_channel_is_missing(monkeypatch: Any) -> None:
+    _FakeClient.calls = []
+    _LaunchFailingClient.attempts = []
+    _LaunchFailingClient.fail_channels = ("chrome",)
+    monkeypatch.setattr(cli, "WebSkrapClient", _LaunchFailingClient)
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--stdout"])
+
+    assert result.exit_code == 0, result.output
+    # The notice goes to stderr so piped stdout stays clean.
+    assert result.output.endswith("<html>abcdef</html>")
+    assert "retrying with chromium" in result.output
+    assert _LaunchFailingClient.attempts == ["chrome", None]
+
+
+def test_fetch_reports_launch_failure_without_a_traceback(monkeypatch: Any) -> None:
+    _FakeClient.calls = []
+    _LaunchFailingClient.fail_channels = ("chrome", None)
+    monkeypatch.setattr(cli, "WebSkrapClient", _LaunchFailingClient)
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test"])
+
+    assert result.exit_code == 1
+    assert "Browser did not launch" in result.output
+    assert "webskrap install" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_fetch_does_not_swallow_unrelated_errors(monkeypatch: Any) -> None:
+    class _BrokenClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            raise RuntimeError("net::ERR_NAME_NOT_RESOLVED")
+
+    monkeypatch.setattr(cli, "WebSkrapClient", _BrokenClient)
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, RuntimeError)
+
+
 def test_fetch_stdout_prints_raw_content(monkeypatch: Any) -> None:
     _fake_client(monkeypatch)
 

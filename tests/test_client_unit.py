@@ -8,6 +8,7 @@ from webskrap.client import (
     _bezier_path,
     _resource_route_handler,
 )
+from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.models import ResourcePolicy, SessionConfig
 from webskrap.profiles import get_profile
 
@@ -228,6 +229,29 @@ async def test_fetch_declines_cookie_notice(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert result.cookie_notice_declined == "cmp"
     assert timeouts == [1234]
+
+
+@pytest.mark.asyncio
+async def test_networkidle_shrinks_the_decline_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeouts: list[float] = []
+
+    async def fake_decline(_page: object, *, timeout_ms: float) -> None:
+        timeouts.append(timeout_ms)
+        return None
+
+    monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
+    session = WebSkrapSession(
+        name="test",
+        context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
+        config=SessionConfig(decline_cookies_timeout_ms=5_000),
+        profile=get_profile(None),
+    )
+
+    await session.fetch("https://example.test", wait_until="networkidle")
+    await session.fetch("https://example.test", wait_until="domcontentloaded")
+
+    # networkidle already waited out the CMP script; do not wait for it twice.
+    assert timeouts == [SETTLED_PAGE_TIMEOUT_MS, 5_000]
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
+from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.models import BrowserProfile, FetchResult, ResourcePolicy, SessionConfig, WaitUntil
 from webskrap.profiles import get_profile
@@ -86,7 +87,11 @@ class WebSkrapSession:
             )
             declined = None
             if self.config.decline_cookies:
-                declined = await self.decline_cookies(page)
+                budget = self.config.decline_cookies_timeout_ms
+                if wait_until == "networkidle":
+                    # The navigation already waited out the CMP script.
+                    budget = min(budget, SETTLED_PAGE_TIMEOUT_MS)
+                declined = await self.decline_cookies(page, timeout_ms=budget)
             title = await page.title()
             text = await page.locator("body").inner_text() if text_only else await page.content()
             screenshot_path = await _maybe_screenshot(page, screenshot)

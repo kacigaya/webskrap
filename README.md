@@ -152,45 +152,27 @@ asyncio.run(main())
 
 ## Auto-decline cookie banners
 
-Every `session.fetch()` (and therefore the CLI and the MCP tools) clicks the
-reject control of a cookie consent notice before reading the page, so scraped
-text is not buried under a banner and no optional cookies are accepted.
-
-Detection is inspired by Brave's
+Every `fetch()` (and therefore the CLI and the MCP tools) clicks the reject
+control of a cookie consent notice before reading the page, so scraped text is
+not buried under a banner and no optional cookies are accepted. It knows the
+common consent platforms (OneTrust, Cookiebot, Didomi, Usercentrics,
+Sourcepoint, ...) and falls back to matching reject wording inside a
+cookie/consent container, in every frame. Detection is inspired by Brave's
 [cookiecrumbler](https://github.com/brave/cookiecrumbler), which finds consent
-notices; WebSkrap dismisses them. Two strategies, tried in every frame:
-
-1. Reject buttons of the common consent platforms (OneTrust, Cookiebot, Didomi,
-   Usercentrics, Sourcepoint, Quantcast, Osano, Complianz, CookieYes, ...).
-2. A clickable whose label matches a reject phrase ("Reject all", "Refuser
-   tout", "Ablehnen", "Continue without accepting", ...), scoped to a
-   cookie/consent container so unrelated "Decline" buttons are never touched.
-
-`FetchResult.cookie_notice_declined` reports which strategy clicked (`"cmp"`,
-`"text"`, or `None`).
+notices; WebSkrap dismisses them.
 
 ```python
 config = SessionConfig(
-    decline_cookies=True,             # default
-    decline_cookies_timeout_ms=2_000,  # wait for a late-injected notice; 0 = check once
+    decline_cookies=True,              # default
+    decline_cookies_timeout_ms=2_000,  # wait for a late notice; 0 = check once
 )
-
 result = await client.fetch("https://example.com", config=config)
-print(result.cookie_notice_declined)
+print(result.cookie_notice_declined)   # "cmp", "text", or None
 ```
 
-The timeout is the per-fetch cost on pages without a notice. Pages that carry a
-consent-platform iframe are retried for up to 3s while it renders. For pages you
-drive yourself, call it directly:
-
-```python
-page = await session.context.new_page()
-await page.goto("https://example.com", wait_until="domcontentloaded")
-await session.decline_cookies(page)
-```
-
-Consent walls with no reject control on the first layer (pay-or-consent) are
-left alone.
+Full reference, including `session.decline_cookies(page)` for pages you drive
+yourself:
+[docs/user-guide/client](https://kacigaya.github.io/webskrap/docs/user-guide/client/).
 
 ## Custom profile
 
@@ -403,7 +385,11 @@ flags, but pages that need WebGL or canvas export may not work correctly.
 ## CLI
 
 `webskrap fetch` always runs headless Patchright stealth mode. `webskrap install`
-downloads the browser binaries, and `webskrap doctor` verifies this CLI setup.
+downloads the browser binaries, and `webskrap doctor` verifies this CLI setup and
+reports which browser channel launches.
+
+`--channel` defaults to `chrome`. Where Chrome does not exist (Linux ARM64),
+`fetch` warns on stderr and retries with bundled chromium instead of failing.
 
 ```bash
 pip install webskrap

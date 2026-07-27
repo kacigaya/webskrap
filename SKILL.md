@@ -129,8 +129,9 @@ webskrap fetch https://example.com --stdout --text-only
 webskrap fetch https://example.com --quiet --output page.html
 ```
 
-On Linux ARM64, the `chrome` channel can be unsupported. Prefer `chrome` where
-it launches, but use Chromium fallback on Linux ARM64:
+On Linux ARM64, the `chrome` channel can be unsupported. `fetch` detects a
+launch failure and retries with bundled chromium automatically; pass the channel
+explicitly to skip the failed first attempt:
 
 ```bash
 webskrap fetch https://example.com --channel chromium --format json
@@ -166,9 +167,14 @@ For non-trivial changes run:
 ```bash
 pytest -q
 ruff check .
+ruff format --check .
 python -m build
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same gate on push and pull request, and
+`Publish` calls it before uploading to PyPI. PyPI versions are immutable, so a
+red gate must never be bypassed.
+
 Use `WEBSKRAP_LIVE=1 pytest -q -m live` only when explicitly checking public
-third-party bot-detection behavior. Those tests are opt-in and can fail when
-external demos change.
+third-party bot-detection behavior, or `tests/test_consent_live.py` for CMP
+selector rot. Those tests are opt-in and can fail when external sites change.
