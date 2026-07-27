@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Menu } from "lucide-react";
+import { useRef } from "react";
 import { NAV } from "@/lib/docs-nav";
 import { cn } from "@/lib/utils";
 
@@ -37,5 +39,24 @@ export function DocsSidebar() {
         </div>
       ))}
     </nav>
+  );
+}
+
+export function MobileDocsMenu() {
+  const details = useRef<HTMLDetailsElement>(null);
+
+  return (
+    <details ref={details} className="relative md:hidden">
+      <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border hover:bg-accent [&::-webkit-details-marker]:hidden">
+        <Menu className="size-4" />
+        <span className="sr-only">Open documentation menu</span>
+      </summary>
+      <div
+        className="absolute right-0 top-11 max-h-[calc(100vh-6rem)] w-72 overflow-y-auto rounded-xl border bg-background p-4 shadow-lg"
+        onClick={() => details.current?.removeAttribute("open")}
+      >
+        <DocsSidebar />
+      </div>
+    </details>
   );
 }

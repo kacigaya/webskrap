@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { asset } from "@/lib/asset";
-import { DocsSidebar } from "@/components/docs-sidebar";
+import { DocsSidebar, MobileDocsMenu } from "@/components/docs-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const GITHUB_URL = "https://github.com/kacigaya/webskrap";
@@ -21,6 +21,7 @@ export default function DocsLayout({
             <span className="font-semibold tracking-tight">WebSkrap</span>
           </Link>
           <nav className="flex items-center gap-2">
+            <MobileDocsMenu />
             <ThemeToggle />
             <Button variant="outline" size="sm" render={<a href={GITHUB_URL} />}>
               GitHub
