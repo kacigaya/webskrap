@@ -52,7 +52,7 @@ export function MobileDocsMenu() {
         <span className="sr-only">Open documentation menu</span>
       </summary>
       <div
-        className="absolute right-0 top-11 max-h-[calc(100vh-6rem)] w-72 overflow-y-auto rounded-xl border bg-background p-4 shadow-lg"
+        className="fixed inset-x-4 top-24 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-xl border bg-background p-4 shadow-lg"
         onClick={() => details.current?.removeAttribute("open")}
       >
         <DocsSidebar />
