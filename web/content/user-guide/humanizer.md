@@ -18,6 +18,12 @@ click. It is useful for flows with hover-sensitive controls, scroll-dependent
 layouts, or simple behavioral checks that treat instant coordinate jumps as
 synthetic.
 
+The cursor follows a cubic Bezier curve with randomized control points and
+eased spacing, so it accelerates and slows near the target instead of tracing a
+straight, evenly spaced line. The algorithm is adapted from
+[HumanCursor](https://github.com/riflosnake/HumanCursor) and reimplemented for
+Playwright's async mouse without adding a dependency.
+
 ## Direct click fallback
 
 Pass `human=False` to keep the same call shape while delegating to Playwright's

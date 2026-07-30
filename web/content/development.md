@@ -44,6 +44,22 @@ WEBSKRAP_LIVE=1 pytest -q -m live
 They require network access, Patchright, an installed browser, and public demo
 sites that can change independently from WebSkrap.
 
+Generate the headed and headless stealth report:
+
+```bash
+WEBSKRAP_LIVE=1 python scripts/live_stealth_report.py --no-open --report-only
+```
+
+PowerShell:
+
+```powershell
+$env:WEBSKRAP_LIVE=1
+python scripts\live_stealth_report.py --no-open --report-only
+```
+
+Open `.webskrap/reports/live-stealth-results.html`. For proxy DNS checks, set
+`WEBSKRAP_LIVE_EXPECTED_PUBLIC_IP` or `WEBSKRAP_LIVE_EXPECTED_COUNTRY`.
+
 ## With uv
 
 The repository includes `uv.lock`, so you can run the same commands through

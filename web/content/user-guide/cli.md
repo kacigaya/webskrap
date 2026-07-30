@@ -161,3 +161,9 @@ webskrap fetch https://example.com \
   --launch-arg=--no-first-run \
   --launch-arg=--no-default-browser-check
 ```
+
+## Update notices
+
+The CLI checks PyPI at most once a day and prints an update notice to stderr
+when a newer WebSkrap release is available. The best-effort check is skipped in
+CI and when stderr is not a TTY. Set `WEBSKRAP_NO_UPDATE_CHECK=1` to disable it.
