@@ -37,7 +37,7 @@ class ProxyConfig(BaseModel):
 
     @field_validator("server")
     @classmethod
-    def validate_server(cls, value: str) -> str:
+    def validate_server(_cls, value: str) -> str:
         allowed_prefixes = ("http://", "https://", "socks4://", "socks5://")
         if not value.startswith(allowed_prefixes):
             msg = "proxy server must start with http://, https://, socks4://, or socks5://"
@@ -74,7 +74,7 @@ class BrowserProfile(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value: str) -> str:
+    def validate_name(_cls, value: str) -> str:
         if not value.strip():
             msg = "profile name cannot be empty"
             raise ValueError(msg)
@@ -82,7 +82,7 @@ class BrowserProfile(BaseModel):
 
     @field_validator("locale", "timezone_id")
     @classmethod
-    def validate_non_empty(cls, value: str) -> str:
+    def validate_non_empty(_cls, value: str) -> str:
         if not value.strip():
             msg = "value cannot be empty"
             raise ValueError(msg)
@@ -193,7 +193,7 @@ class SessionConfig(BaseModel):
     # scraped text is not buried under a banner and no optional cookies are
     # accepted. Only applies to pages fetched through WebSkrapSession.fetch;
     # pages the caller drives itself are untouched.
-    decline_cookies: bool = True
+    decline_cookies: bool = False
     # How long to wait for a consent notice to appear before giving up. CMP
     # scripts inject the notice after DOMContentLoaded, so an immediate check
     # misses most of them. This is the per-fetch cost on pages without a

@@ -5,12 +5,13 @@ import shutil
 import tempfile
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from random import uniform
 from typing import Any
 from uuid import uuid4
 
-from playwright.async_api import Browser, BrowserContext, Page, Playwright
+from playwright.async_api import Browser, BrowserContext, FloatRect, Page
 
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
@@ -22,9 +23,8 @@ def _async_playwright(driver: str):
     """Return the async_playwright factory for the chosen driver.
 
     ``patchright`` is a drop-in, API-compatible fork of Playwright that hides the
-    CDP ``Runtime.enable`` leak used by CDP-aware bot detectors. It requires the
-    ``patchright`` ships with WebSkrap, but needs its browser download
-    (``webskrap install``).
+    CDP ``Runtime.enable`` leak used by CDP-aware bot detectors. The package ships
+    with WebSkrap, but its browser still needs downloading (``webskrap install``).
     """
     if driver == "patchright":
         try:
@@ -40,6 +40,43 @@ def _async_playwright(driver: str):
 
 class WebSkrapError(RuntimeError):
     pass
+
+
+async def browser_doctor(
+    driver: str = "patchright",
+    channels: tuple[str | None, ...] = ("chrome", None),
+) -> dict[str, object]:
+    """Report the first Chromium channel that launches with ``driver``."""
+    failure: Exception | None = None
+    for channel in channels:
+        playwright = None
+        browser = None
+        launched = False
+        try:
+            playwright = await _async_playwright(driver).start()
+            browser = await playwright.chromium.launch(channel=channel, headless=True)
+            launched = True
+        except Exception as exc:  # noqa: BLE001 - report launch/import failures
+            failure = exc
+        finally:
+            if browser is not None:
+                with suppress(Exception):
+                    await browser.close()
+            if playwright is not None:
+                with suppress(Exception):
+                    await playwright.stop()
+        if launched:
+            channel_name = channel or "chromium"
+            return {
+                "ok": True,
+                "message": f"{driver.title()} headless {channel_name} is ready.",
+                "channel": channel_name,
+            }
+    return {
+        "ok": False,
+        "message": f"{driver.title()} Chromium did not launch: {failure}",
+        "hint": "Run: webskrap install",
+    }
 
 
 class WebSkrapSession:
@@ -64,7 +101,12 @@ class WebSkrapSession:
     async def __aenter__(self) -> WebSkrapSession:
         return self
 
-    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    async def __aexit__(
+        self,
+        _exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
         await self.close()
 
     async def fetch(
@@ -95,7 +137,7 @@ class WebSkrapSession:
             title = await page.title()
             text = await page.locator("body").inner_text() if text_only else await page.content()
             screenshot_path = await _maybe_screenshot(page, screenshot)
-            cookies = await self.context.cookies()
+            cookies = [dict(cookie) for cookie in await self.context.cookies()]
             elapsed_ms = (time.perf_counter() - started) * 1000
             status = response.status if response else None
             headers = dict(response.headers) if response else {}
@@ -185,13 +227,17 @@ class WebSkrapSession:
     async def close(self) -> None:
         if self._closed:
             return
-        self._closed = True
-        await self.context.close()
-        if self.browser is not None:
-            await self.browser.close()
-        if self._temp_user_data_dir is not None:
-            shutil.rmtree(self._temp_user_data_dir, ignore_errors=True)
-            self._temp_user_data_dir = None
+        try:
+            await self.context.close()
+        finally:
+            try:
+                if self.browser is not None:
+                    await self.browser.close()
+            finally:
+                if self._temp_user_data_dir is not None:
+                    shutil.rmtree(self._temp_user_data_dir, ignore_errors=True)
+                    self._temp_user_data_dir = None
+                self._closed = True
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -208,31 +254,86 @@ class WebSkrapClient:
     ) -> None:
         self.default_config = default_config or SessionConfig()
         self.profiles = dict(profiles or {})
-        self._playwright_manager = None
-        self._playwright: Playwright | None = None
+        self._playwright: Any | None = None
+        self._driver: str | None = None
+        self._start_lock = asyncio.Lock()
+        self._close_lock = asyncio.Lock()
+        self._closing = False
+        self._generation = 0
+        self._session_tasks: dict[str, asyncio.Task[WebSkrapSession]] = {}
         self._sessions: dict[str, WebSkrapSession] = {}
 
     async def __aenter__(self) -> WebSkrapClient:
-        await self.start()
         return self
 
-    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    async def __aexit__(
+        self,
+        _exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
         await self.close()
 
-    async def start(self) -> None:
-        if self._playwright is not None:
-            return
-        self._playwright_manager = _async_playwright(self.default_config.driver)
-        self._playwright = await self._playwright_manager.start()
+    async def start(
+        self,
+        driver: str | None = None,
+        *,
+        _generation: int | None = None,
+    ) -> None:
+        selected_driver = driver or self.default_config.driver
+        async with self._start_lock:
+            if self._closing or (_generation is not None and _generation != self._generation):
+                msg = "client is closing"
+                raise WebSkrapError(msg)
+            if self._playwright is not None:
+                if selected_driver != self._driver:
+                    msg = (
+                        f"client already started with driver='{self._driver}'; "
+                        f"cannot use driver='{selected_driver}'"
+                    )
+                    raise WebSkrapError(msg)
+                return
+            manager = _async_playwright(selected_driver)
+            playwright = await manager.start()
+            if self._closing or (_generation is not None and _generation != self._generation):
+                with suppress(Exception):
+                    await playwright.stop()
+                msg = "client closed while the browser driver was starting"
+                raise WebSkrapError(msg)
+            self._playwright = playwright
+            self._driver = selected_driver
 
     async def close(self) -> None:
-        for session in list(self._sessions.values()):
-            await session.close()
-        self._sessions.clear()
-        if self._playwright is not None:
-            await self._playwright.stop()
-        self._playwright_manager = None
-        self._playwright = None
+        async with self._close_lock:
+            self._closing = True
+            self._generation += 1
+            try:
+                pending = await asyncio.gather(
+                    *self._session_tasks.values(),
+                    return_exceptions=True,
+                )
+                sessions = list(self._sessions.values())
+                sessions.extend(
+                    result for result in pending if not isinstance(result, BaseException)
+                )
+                unique_sessions = {id(session): session for session in sessions}
+                results = await asyncio.gather(
+                    *(session.close() for session in unique_sessions.values()),
+                    return_exceptions=True,
+                )
+                self._sessions.clear()
+                self._session_tasks.clear()
+                async with self._start_lock:
+                    try:
+                        if self._playwright is not None:
+                            await self._playwright.stop()
+                    finally:
+                        self._playwright = None
+                        self._driver = None
+            finally:
+                self._closing = False
+        if error := next((result for result in results if isinstance(result, BaseException)), None):
+            raise error
 
     async def fetch(
         self,
@@ -266,14 +367,36 @@ class WebSkrapClient:
         config: SessionConfig | None = None,
         profile: str | BrowserProfile | None = None,
     ) -> WebSkrapSession:
-        if name in self._sessions:
-            return self._sessions[name]
-        await self.start()
+        if self._closing:
+            msg = "client is closing"
+            raise WebSkrapError(msg)
+
+        existing = self._sessions.get(name)
+        if existing is not None and not existing._closed:
+            return existing
+        self._sessions.pop(name, None)
+
+        generation = self._generation
         resolved_config = config or self.default_config
-        resolved_profile = self._resolve_profile(profile)
-        session = await self._create_session(name, resolved_config, resolved_profile)
-        self._sessions[name] = session
-        return session
+        await self.start(resolved_config.driver, _generation=generation)
+        task = self._session_tasks.get(name)
+        owns_task = task is None
+        if task is None:
+            resolved_profile = self._resolve_profile(profile)
+            task = asyncio.create_task(
+                self._create_session(name, resolved_config, resolved_profile)
+            )
+            self._session_tasks[name] = task
+        try:
+            session = await task
+            if generation != self._generation:
+                msg = "client closed while the session was starting"
+                raise WebSkrapError(msg)
+            self._sessions[name] = session
+            return session
+        finally:
+            if owns_task and self._session_tasks.get(name) is task:
+                self._session_tasks.pop(name)
 
     def _resolve_profile(self, profile: str | BrowserProfile | None) -> BrowserProfile:
         if isinstance(profile, BrowserProfile):
@@ -318,23 +441,35 @@ class WebSkrapClient:
             temp_user_data_dir = tempfile.mkdtemp(prefix="webskrap-patchright-")
             user_data_dir = Path(temp_user_data_dir)
 
-        if user_data_dir is not None:
-            user_data_dir.mkdir(parents=True, exist_ok=True)
-            context = await browser_type.launch_persistent_context(
-                str(user_data_dir),
-                **launch_options,
-                **context_options,
-            )
-            browser = None
-        else:
-            browser = await browser_type.launch(**launch_options)
-            context = await browser.new_context(**context_options)
+        browser = None
+        context = None
+        try:
+            if user_data_dir is not None:
+                user_data_dir.mkdir(parents=True, exist_ok=True)
+                context = await browser_type.launch_persistent_context(
+                    str(user_data_dir),
+                    **launch_options,
+                    **context_options,
+                )
+            else:
+                browser = await browser_type.launch(**launch_options)
+                context = await browser.new_context(**context_options)
 
-        context.set_default_timeout(config.default_timeout_ms)
-        context.set_default_navigation_timeout(config.navigation_timeout_ms)
+            context.set_default_timeout(config.default_timeout_ms)
+            context.set_default_navigation_timeout(config.navigation_timeout_ms)
 
-        if config.resource_policy != ResourcePolicy.ALL:
-            await context.route("**/*", _resource_route_handler(config.resource_policy))
+            if config.resource_policy != ResourcePolicy.ALL:
+                await context.route("**/*", _resource_route_handler(config.resource_policy))
+        except BaseException:
+            if context is not None:
+                with suppress(Exception):
+                    await context.close()
+            if browser is not None:
+                with suppress(Exception):
+                    await browser.close()
+            if temp_user_data_dir is not None:
+                shutil.rmtree(temp_user_data_dir, ignore_errors=True)
+            raise
         return WebSkrapSession(
             name=name,
             context=context,
@@ -385,8 +520,8 @@ def _resource_route_handler(policy: ResourcePolicy):
 
 
 def _human_click_point(
-    box: dict[str, float],
-    position: dict[str, float] | None,
+    box: FloatRect,
+    position: Mapping[str, float] | None,
 ) -> tuple[float, float]:
     if position is not None:
         return box["x"] + position["x"], box["y"] + position["y"]
@@ -449,9 +584,7 @@ def _mouse_click_options(click_options: dict[str, Any]) -> dict[str, Any]:
 async def _maybe_screenshot(page: Page, screenshot: bool | str | Path) -> Path | None:
     if not screenshot:
         return None
-    path = (
-        Path(f"webskrap-{int(time.time() * 1000)}.png") if screenshot is True else Path(screenshot)
-    )
+    path = Path(f"webskrap-{uuid4().hex}.png") if screenshot is True else Path(screenshot)
     path.parent.mkdir(parents=True, exist_ok=True)
     await page.screenshot(path=str(path), full_page=True)
     return path

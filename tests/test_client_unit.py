@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from webskrap.client import (
+    WebSkrapClient,
     WebSkrapError,
     WebSkrapSession,
     _bezier_path,
@@ -221,7 +224,7 @@ async def test_fetch_declines_cookie_notice(monkeypatch: pytest.MonkeyPatch) -> 
     session = WebSkrapSession(
         name="test",
         context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
-        config=SessionConfig(decline_cookies_timeout_ms=1234),
+        config=SessionConfig(decline_cookies=True, decline_cookies_timeout_ms=1234),
         profile=get_profile(None),
     )
 
@@ -243,7 +246,7 @@ async def test_networkidle_shrinks_the_decline_budget(monkeypatch: pytest.Monkey
     session = WebSkrapSession(
         name="test",
         context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
-        config=SessionConfig(decline_cookies_timeout_ms=5_000),
+        config=SessionConfig(decline_cookies=True, decline_cookies_timeout_ms=5_000),
         profile=get_profile(None),
     )
 
@@ -356,3 +359,153 @@ async def test_human_click_raises_for_missing_bounding_box() -> None:
 
     with pytest.raises(WebSkrapError, match="visible bounding box"):
         await _session().human_click(page, "label[for='radio1']")  # type: ignore[arg-type]
+
+
+class _ManagedSession:
+    def __init__(self) -> None:
+        self._closed = False
+
+    async def close(self) -> None:
+        self._closed = True
+
+
+class _Playwright:
+    async def stop(self) -> None:
+        return None
+
+
+class _Manager:
+    async def start(self) -> _Playwright:
+        return _Playwright()
+
+
+@pytest.mark.asyncio
+async def test_session_config_selects_the_started_driver(monkeypatch: pytest.MonkeyPatch) -> None:
+    drivers: list[str] = []
+
+    def fake_factory(driver: str) -> _Manager:
+        drivers.append(driver)
+        return _Manager()
+
+    async def fake_create(*_args: object) -> _ManagedSession:
+        return _ManagedSession()
+
+    monkeypatch.setattr("webskrap.client._async_playwright", fake_factory)
+    client = WebSkrapClient()
+    monkeypatch.setattr(client, "_create_session", fake_create)
+
+    await client.session("stealth", config=SessionConfig(driver="patchright"))
+    await client.close()
+
+    assert drivers == ["patchright"]
+
+
+@pytest.mark.asyncio
+async def test_closed_named_session_is_recreated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
+    client = WebSkrapClient()
+    monkeypatch.setattr(client, "_create_session", lambda *_args: _new_managed_session())
+
+    first = await client.session("reopen")
+    await first.close()
+    second = await client.session("reopen")
+    await client.close()
+
+    assert second is not first
+
+
+@pytest.mark.asyncio
+async def test_concurrent_named_session_is_created_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
+    client = WebSkrapClient()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    created = 0
+
+    async def create(*_args: object) -> _ManagedSession:
+        nonlocal created
+        created += 1
+        started.set()
+        await release.wait()
+        return _ManagedSession()
+
+    monkeypatch.setattr(client, "_create_session", create)
+    first_task = asyncio.create_task(client.session("shared"))
+    await started.wait()
+    second_task = asyncio.create_task(client.session("shared"))
+    await asyncio.sleep(0)
+    release.set()
+    first, second = await asyncio.gather(first_task, second_task)
+    await client.close()
+
+    assert first is second
+    assert created == 1
+
+
+@pytest.mark.asyncio
+async def test_close_cleans_session_that_is_still_starting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
+    client = WebSkrapClient()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    created = _ManagedSession()
+
+    async def create(*_args: object) -> _ManagedSession:
+        started.set()
+        await release.wait()
+        return created
+
+    monkeypatch.setattr(client, "_create_session", create)
+    session_task = asyncio.create_task(client.session("closing"))
+    await started.wait()
+    close_task = asyncio.create_task(client.close())
+    await asyncio.sleep(0)
+    release.set()
+
+    with pytest.raises(WebSkrapError, match="closed while the session was starting"):
+        await session_task
+    await close_task
+
+    assert created._closed is True
+
+
+@pytest.mark.asyncio
+async def test_close_stops_driver_that_is_still_starting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowPlaywright(_Playwright):
+        stopped = False
+
+        async def stop(self) -> None:
+            self.stopped = True
+
+    class SlowManager:
+        async def start(self) -> SlowPlaywright:
+            started.set()
+            await release.wait()
+            return playwright
+
+    playwright = SlowPlaywright()
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: SlowManager())
+    client = WebSkrapClient()
+    session_task = asyncio.create_task(client.session("starting"))
+    await started.wait()
+    close_task = asyncio.create_task(client.close())
+    await asyncio.sleep(0)
+    release.set()
+
+    with pytest.raises(WebSkrapError, match="driver was starting"):
+        await session_task
+    await close_task
+
+    assert playwright.stopped is True
+    assert client._playwright is None
+
+
+async def _new_managed_session() -> _ManagedSession:
+    return _ManagedSession()

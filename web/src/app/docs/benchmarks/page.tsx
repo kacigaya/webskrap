@@ -157,14 +157,14 @@ const DETECTION_ROWS: {
 ];
 
 const RESOURCE_ROUTING = [
-  { policy: "DOCUMENTS", time: "156.98", vs: "0.58x", best: true },
-  { policy: "LITE", time: "169.42", vs: "0.62x", best: false },
-  { policy: "ALL", time: "271.23", vs: "1.0x", best: false },
+  { policy: "DOCUMENTS", time: "140.87", vs: "0.43x", best: true },
+  { policy: "LITE", time: "260.49", vs: "0.80x", best: false },
+  { policy: "ALL", time: "325.58", vs: "1.0x", best: false },
 ];
 
 const SESSION_REUSE = [
-  { mode: "Warm session reuse", time: "215.74", vs: "1.0x", best: true },
-  { mode: "Cold launch per fetch", time: "411.68", vs: "1.91x", best: false },
+  { mode: "Warm session reuse", time: "180.62", vs: "1.0x", best: true },
+  { mode: "Cold launch per fetch", time: "315.28", vs: "1.75x", best: false },
 ];
 
 export default function BenchmarksPage() {
@@ -191,9 +191,10 @@ export default function BenchmarksPage() {
             >
               upstream README
             </a>
-            . WebSkrap values are from the local live report generated on 2026-06-26 with{" "}
+            . WebSkrap values are a snapshot from the local live report generated on
+            2026-06-26 with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
-              python scripts\live_stealth_report.py --no-open --report-only
+              python scripts/live_stealth_report.py --no-open --report-only
             </code>
             .
           </p>
@@ -304,7 +305,8 @@ export default function BenchmarksPage() {
           <p className="max-w-2xl text-sm text-muted-foreground">
             Run against a local HTTP server serving a synthetic page with many delayed
             sub-resources. No external sites are contacted, so results are deterministic.
-            Numbers are from a single machine — run them yourself with{" "}
+            This snapshot was generated on 2026-07-30 on a single ARM64 machine — run
+            it yourself with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">python benchmarks.py</code>.
           </p>
         </div>
@@ -338,8 +340,8 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              Blocking images, fonts, and media (LITE) cuts load time ~38%; also dropping
-              stylesheets (DOCUMENTS) reaches ~42%.
+              Blocking images, fonts, and media (LITE) cuts load time ~20%; also dropping
+              stylesheets (DOCUMENTS) reaches ~57%.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -372,7 +374,7 @@ export default function BenchmarksPage() {
           <FrameHeader>
             <FrameDescription>
               Reusing a persistent session avoids per-fetch browser/context startup, roughly
-              2x faster than launching cold each time.
+              1.75x faster than launching cold each time.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -384,7 +386,7 @@ export default function BenchmarksPage() {
           </FrameHeader>
           <Frame className="bg-transparent p-0">
             <FrameHeader className="flex-row items-baseline gap-3">
-              <span className="font-heading text-4xl font-bold tabular-nums">~109 ms</span>
+              <span className="font-heading text-4xl font-bold tabular-nums">~151 ms</span>
               <FrameDescription>average per page</FrameDescription>
             </FrameHeader>
           </Frame>

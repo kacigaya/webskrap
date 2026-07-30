@@ -2,20 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import sys
-import time
-import urllib.request
-from importlib import metadata
 from pathlib import Path
-from typing import Annotated, Any, Literal, NoReturn
+from typing import Annotated, Any, Literal, NoReturn, TypedDict
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from webskrap.client import WebSkrapClient
+from webskrap.client import WebSkrapClient, browser_doctor
 from webskrap.models import (
     FetchResult,
     ResourcePolicy,
@@ -33,73 +29,18 @@ from webskrap.profiles import get_profile, list_profiles
 app = typer.Typer(help="WebSkrap browser scraping toolkit.")
 console = Console()
 OutputFormat = Literal["human", "json"]
+
+
+class InstallResult(TypedDict):
+    ok: bool
+    command: list[str]
+    message: str
+
+
 INSTALL_COMMANDS = (
     (sys.executable, "-m", "playwright", "install", "chromium"),
     (sys.executable, "-m", "patchright", "install", "chromium"),
 )
-UPDATE_CHECK_URL = "https://pypi.org/pypi/webskrap/json"
-UPDATE_CHECK_INTERVAL = 86_400  # once per day
-UPDATE_CHECK_CACHE = Path.home() / ".webskrap" / "update-check.json"
-# ponytail: ~/.webskrap not XDG/APPDATA-aware; swap to platformdirs if that matters
-
-
-def _is_newer(latest: str, current: str) -> bool:
-    # ponytail: naive X.Y.Z compare; swap to packaging.version if pre-release tags ever ship
-    try:
-        return tuple(map(int, latest.split("."))) > tuple(map(int, current.split(".")))
-    except ValueError:
-        return False
-
-
-def _check_for_update() -> None:
-    """Best-effort 'update available' notice. Never raises, never touches stdout."""
-    try:
-        if (
-            os.environ.get("WEBSKRAP_NO_UPDATE_CHECK")
-            or os.environ.get("CI")
-            or not sys.stderr.isatty()
-        ):
-            return
-
-        current = metadata.version("webskrap")
-        latest: str | None = None
-
-        try:
-            cached = json.loads(UPDATE_CHECK_CACHE.read_text())
-            if time.time() - cached["checked_at"] < UPDATE_CHECK_INTERVAL:
-                latest = cached["latest"]
-        except Exception:
-            latest = None
-
-        if latest is None:
-            fetched: str | None = None
-            try:
-                with urllib.request.urlopen(UPDATE_CHECK_URL, timeout=2) as response:
-                    fetched = json.load(response)["info"]["version"]
-            except Exception:
-                fetched = None
-            # Stamp the attempt either way so a PyPI outage can't cause hammering.
-            latest = fetched or current
-            try:
-                UPDATE_CHECK_CACHE.parent.mkdir(parents=True, exist_ok=True)
-                UPDATE_CHECK_CACHE.write_text(
-                    json.dumps({"checked_at": time.time(), "latest": latest})
-                )
-            except Exception:
-                pass
-
-        if _is_newer(latest, current):
-            Console(stderr=True, highlight=False).print(
-                f"[yellow]webskrap {latest} available[/] (you have {current}) — "
-                "upgrade: [bold]pip install -U webskrap[/]"
-            )
-    except Exception:
-        return
-
-
-@app.callback()
-def _main() -> None:
-    _check_for_update()
 
 
 @app.command("install")
@@ -171,41 +112,7 @@ def doctor_command(
 
 
 async def _doctor() -> dict[str, object]:
-    try:
-        from patchright.async_api import async_playwright
-    except Exception as exc:
-        return {
-            "ok": False,
-            "message": f"Patchright import failed: {exc}",
-            "hint": "Run: webskrap install",
-        }
-
-    # The chrome channel is unavailable on some platforms (Linux ARM64), where
-    # bundled chromium still works. Report the best channel that launches
-    # instead of failing the whole check.
-    failure: Exception | None = None
-    for channel in ("chrome", None):
-        try:
-            manager = async_playwright()
-            playwright = await manager.start()
-            browser = await playwright.chromium.launch(channel=channel, headless=True)
-            await browser.close()
-            await playwright.stop()
-        except Exception as exc:  # noqa: BLE001 - try the next channel
-            failure = exc
-            continue
-        label = channel or "chromium"
-        return {
-            "ok": True,
-            "message": f"Patchright headless {label} is ready.",
-            "channel": label,
-        }
-
-    return {
-        "ok": False,
-        "message": f"Patchright headless Chrome did not launch: {failure}",
-        "hint": "Run: webskrap install",
-    }
+    return await browser_doctor()
 
 
 @app.command("fetch")
@@ -213,7 +120,11 @@ def fetch_command(
     url: Annotated[str, typer.Argument(help="URL to fetch.")],
     profile: Annotated[
         str,
-        typer.Option("--profile", "-p", help="Bundled profile name."),
+        typer.Option(
+            "--profile",
+            "-p",
+            help="Bundled profile metadata (requires --patchright-context-profile).",
+        ),
     ] = "desktop-chrome",
     channel: Annotated[
         str | None,
@@ -500,7 +411,7 @@ def _print_json(payload: object) -> None:
     typer.echo(json.dumps(payload, ensure_ascii=False))
 
 
-def _run_install_command(command: tuple[str, ...]) -> dict[str, object]:
+def _run_install_command(command: tuple[str, ...]) -> InstallResult:
     try:
         completed = subprocess.run(command, capture_output=True, text=True, check=False)
     except OSError as exc:
@@ -517,7 +428,7 @@ def _run_install_command(command: tuple[str, ...]) -> dict[str, object]:
     }
 
 
-def _print_install_result(results: list[dict[str, object]]) -> None:
+def _print_install_result(results: list[InstallResult]) -> None:
     for result in results:
         command = " ".join(str(part) for part in result["command"])
         if result["ok"]:
@@ -533,13 +444,7 @@ def _print_doctor_result(result: dict[str, object]) -> None:
     if result["ok"]:
         console.print(f"[green]{message}[/green]")
         return
-    if message.startswith("Patchright import failed: "):
-        detail = message.removeprefix("Patchright import failed: ")
-        console.print(f"[red]Patchright import failed:[/red] {detail}")
-    else:
-        console.print(
-            "[yellow]Patchright is installed, but headless Chrome did not launch.[/yellow]"
-        )
-        console.print(message.removeprefix("Patchright headless Chrome did not launch: "))
+    console.print("[yellow]Patchright is unavailable.[/yellow]")
+    console.print(message)
     if hint := result.get("hint"):
         console.print(str(hint))

@@ -7,6 +7,10 @@ description: Configure coherent desktop and mobile browser profiles for Python w
 
 Profiles describe browser-visible settings such as viewport, locale, timezone, language headers, and device characteristics.
 
+Patchright sessions use the browser's native context by default. Set
+`patchright_context_profile=True` when you intentionally want WebSkrap to apply
+the selected profile's locale, timezone, viewport, media, and user agent.
+
 ## Built-in profiles
 
 ```python

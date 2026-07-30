@@ -25,6 +25,7 @@ export function DocsSidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                aria-current={active ? "page" : undefined}
                 className={cn(
                   "rounded-md px-2 py-1.5 transition-colors",
                   active

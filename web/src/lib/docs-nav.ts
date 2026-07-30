@@ -1,9 +1,9 @@
-export interface NavItem {
+interface NavItem {
   title: string;
   href: string;
 }
 
-export interface NavSection {
+interface NavSection {
   title?: string;
   items: NavItem[];
 }

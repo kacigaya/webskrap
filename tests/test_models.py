@@ -50,6 +50,10 @@ def test_session_config_maps_proxy_and_storage_state() -> None:
     assert options["storage_state"] == {"cookies": [], "origins": []}
 
 
+def test_cookie_decline_is_opt_in() -> None:
+    assert SessionConfig().decline_cookies is False
+
+
 def test_patchright_context_omits_profile_by_default() -> None:
     profile = BrowserProfile(
         name="test",

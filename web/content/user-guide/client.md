@@ -100,15 +100,14 @@ result = await client.fetch("https://example.com", config=config)
 
 ### Cookie banners
 
-Every `fetch()` clicks the reject control of a cookie consent notice before
-reading the page, so banners do not bury the text and no optional cookies are
-accepted. It knows the common consent platforms (OneTrust, Cookiebot, Didomi,
-Usercentrics, Sourcepoint, ...) and falls back to matching reject wording inside
-a cookie/consent container, in every frame.
+Cookie rejection is opt-in in the Python API. When enabled, `fetch()` clicks the
+reject control before reading the page, so banners do not bury the text and no
+optional cookies are accepted. The CLI and MCP server enable this behavior by
+default.
 
 ```python
 config = SessionConfig(
-    decline_cookies=True,              # default
+    decline_cookies=True,
     decline_cookies_timeout_ms=2_000,  # wait for a late notice; 0 = check once
 )
 result = await client.fetch("https://example.com", config=config)

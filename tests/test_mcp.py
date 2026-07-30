@@ -13,7 +13,12 @@ class _FakeClient:
     async def __aenter__(self) -> _FakeClient:
         return self
 
-    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    async def __aexit__(
+        self,
+        _exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
         return None
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:

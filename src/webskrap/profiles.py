@@ -25,7 +25,7 @@ _PROFILES: dict[str, BrowserProfile] = {
         name="mobile-chrome",
         user_agent=(
             "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            "(KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36"
         ),
         viewport=Viewport(width=412, height=915),
         screen=Viewport(width=412, height=915),

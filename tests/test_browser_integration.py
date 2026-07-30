@@ -96,11 +96,8 @@ def test_server() -> str:
 
 @pytest.mark.asyncio
 async def test_fetch_local_page(test_server: str) -> None:
-    try:
-        async with WebSkrapClient() as client:
-            result = await client.fetch(test_server)
-    except Exception as exc:
-        pytest.skip(f"Playwright browser unavailable: {exc}")
+    async with WebSkrapClient() as client:
+        result = await client.fetch(test_server)
 
     assert result.status == 200
     assert result.title == "Hello"
@@ -110,11 +107,9 @@ async def test_fetch_local_page(test_server: str) -> None:
 
 @pytest.mark.asyncio
 async def test_declines_cmp_cookie_notice(test_server: str) -> None:
-    try:
-        async with WebSkrapClient() as client:
-            result = await client.fetch(f"{test_server}/cmp-banner", text_only=True)
-    except Exception as exc:
-        pytest.skip(f"Playwright browser unavailable: {exc}")
+    config = SessionConfig(decline_cookies=True)
+    async with WebSkrapClient() as client:
+        result = await client.fetch(f"{test_server}/cmp-banner", config=config, text_only=True)
 
     assert result.cookie_notice_declined == "cmp"
     assert "Reject All Cookies" not in result.text
@@ -123,11 +118,13 @@ async def test_declines_cmp_cookie_notice(test_server: str) -> None:
 
 @pytest.mark.asyncio
 async def test_declines_late_text_cookie_notice(test_server: str) -> None:
-    try:
-        async with WebSkrapClient() as client:
-            result = await client.fetch(f"{test_server}/late-text-banner", text_only=True)
-    except Exception as exc:
-        pytest.skip(f"Playwright browser unavailable: {exc}")
+    config = SessionConfig(decline_cookies=True)
+    async with WebSkrapClient() as client:
+        result = await client.fetch(
+            f"{test_server}/late-text-banner",
+            config=config,
+            text_only=True,
+        )
 
     assert result.cookie_notice_declined == "text"
     assert "Continue without accepting" not in result.text
@@ -137,15 +134,12 @@ async def test_declines_late_text_cookie_notice(test_server: str) -> None:
 
 @pytest.mark.asyncio
 async def test_decline_cookies_can_be_disabled(test_server: str) -> None:
-    try:
-        async with WebSkrapClient() as client:
-            result = await client.fetch(
-                f"{test_server}/cmp-banner",
-                config=SessionConfig(decline_cookies=False),
-                text_only=True,
-            )
-    except Exception as exc:
-        pytest.skip(f"Playwright browser unavailable: {exc}")
+    async with WebSkrapClient() as client:
+        result = await client.fetch(
+            f"{test_server}/cmp-banner",
+            config=SessionConfig(decline_cookies=False),
+            text_only=True,
+        )
 
     assert result.cookie_notice_declined is None
     assert "Reject All Cookies" in result.text
@@ -158,12 +152,19 @@ async def test_persistent_session_reuses_cookies(test_server: str, tmp_path: Pat
         resource_policy=ResourcePolicy.LITE,
     )
 
-    try:
-        async with WebSkrapClient() as client:
-            session = await client.session("local", config=config)
-            await session.fetch(f"{test_server}/set-cookie")
-            result = await session.fetch(f"{test_server}/echo-cookie")
-    except Exception as exc:
-        pytest.skip(f"Playwright browser unavailable: {exc}")
+    async with WebSkrapClient() as client:
+        session = await client.session("local", config=config)
+        await session.fetch(f"{test_server}/set-cookie")
+        result = await session.fetch(f"{test_server}/echo-cookie")
 
     assert "webskrap_test=1" in result.text
+
+
+@pytest.mark.asyncio
+async def test_per_call_patchright_config_starts_patchright() -> None:
+    config = SessionConfig(driver="patchright", channel=None, decline_cookies=False)
+
+    async with WebSkrapClient() as client:
+        session = await client.session("patchright", config=config)
+
+    assert type(session.context).__module__.startswith("patchright.")

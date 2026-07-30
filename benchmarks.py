@@ -128,7 +128,7 @@ def benchmark(func):
 
 
 def _config(policy: ResourcePolicy) -> SessionConfig:
-    return SessionConfig(headless=True, resource_policy=policy)
+    return SessionConfig(headless=True, resource_policy=policy, decline_cookies=False)
 
 
 @benchmark

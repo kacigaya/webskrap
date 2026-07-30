@@ -23,9 +23,18 @@ jobs:
         run: uv run --extra dev ruff check .
       - name: Format
         run: uv run --extra dev ruff format --check .
-      # Browser and live tests need downloaded browsers and third-party
-      # services; the deselected suite is the deterministic contract.
+      - name: Type check
+        run: uvx --from pyright==1.1.411 pyright --pythonpath .venv/bin/python src/webskrap
+      - name: Audit dependencies
+        run: uv run --extra dev --with pip-audit==2.9.0 pip-audit
+      # Keep third-party live tests opt-in; local browser tests run below.
       - name: Test
         run: uv run --extra dev pytest -q -m "not browser and not live"
+      - name: Install browsers
+        run: |
+          uv run playwright install --with-deps chromium
+          uv run patchright install chromium
+      - name: Browser test
+        run: uv run --extra dev pytest -q tests/test_browser_integration.py
       - name: Build
         run: uv run --with build python -m build

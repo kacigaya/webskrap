@@ -18,7 +18,12 @@ class _FakeClient:
     async def __aenter__(self) -> _FakeClient:
         return self
 
-    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+    async def __aexit__(
+        self,
+        _exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
         return None
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
@@ -290,65 +295,3 @@ def test_install_human_output(monkeypatch: Any) -> None:
     assert "patchright" in result.output
     assert "install" in result.output
     assert "chromium" in result.output
-
-
-class _FakeResponse:
-    def __init__(self, version: str) -> None:
-        self._version = version
-
-    def __enter__(self) -> _FakeResponse:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        return None
-
-    def read(self) -> bytes:
-        return json.dumps({"info": {"version": self._version}}).encode()
-
-
-def test_is_newer_truth_table() -> None:
-    assert cli._is_newer("0.6.0", "0.5.6") is True
-    assert cli._is_newer("0.5.7", "0.5.6") is True
-    assert cli._is_newer("0.5.6", "0.5.6") is False
-    assert cli._is_newer("0.5.5", "0.5.6") is False
-    assert cli._is_newer("1.0.0rc1", "0.5.6") is False  # malformed -> False
-
-
-def _enable_update_check(monkeypatch: Any, tmp_path: Any) -> None:
-    monkeypatch.delenv("WEBSKRAP_NO_UPDATE_CHECK", raising=False)
-    monkeypatch.delenv("CI", raising=False)
-    monkeypatch.setattr(cli.sys.stderr, "isatty", lambda: True, raising=False)
-    monkeypatch.setattr(cli, "UPDATE_CHECK_CACHE", tmp_path / "update-check.json")
-    monkeypatch.setattr(cli.metadata, "version", lambda _name: "0.5.6")
-
-
-def test_update_check_opt_out_skips_network(monkeypatch: Any, tmp_path: Any) -> None:
-    _enable_update_check(monkeypatch, tmp_path)
-    monkeypatch.setenv("WEBSKRAP_NO_UPDATE_CHECK", "1")
-
-    def boom(*_a: Any, **_k: Any) -> Any:
-        raise AssertionError("network must not be called")
-
-    monkeypatch.setattr(cli.urllib.request, "urlopen", boom)
-    cli._check_for_update()  # no raise = pass
-
-
-def test_update_check_notifies_and_caches(monkeypatch: Any, tmp_path: Any, capsys: Any) -> None:
-    _enable_update_check(monkeypatch, tmp_path)
-    calls = {"n": 0}
-
-    def fake_urlopen(*_a: Any, **_k: Any) -> _FakeResponse:
-        calls["n"] += 1
-        return _FakeResponse("0.9.9")
-
-    monkeypatch.setattr(cli.urllib.request, "urlopen", fake_urlopen)
-
-    cli._check_for_update()
-    err = capsys.readouterr().err
-    assert "0.9.9 available" in err
-    assert "0.5.6" in err
-    assert (tmp_path / "update-check.json").exists()
-
-    # Fresh cache -> no second network call.
-    cli._check_for_update()
-    assert calls["n"] == 1

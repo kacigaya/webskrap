@@ -77,11 +77,11 @@ config = SessionConfig(
 )
 ```
 
-Every `fetch()` auto-declines cookie consent notices before reading the page
-(`src/webskrap/consent.py`). Turn it off or retune the wait per call:
+Cookie rejection is opt-in in the Python API (`src/webskrap/consent.py`).
+The CLI and MCP server enable it by default:
 
 ```python
-config = SessionConfig(decline_cookies=False, decline_cookies_timeout_ms=2_000)
+config = SessionConfig(decline_cookies=True, decline_cookies_timeout_ms=2_000)
 ```
 
 `FetchResult.cookie_notice_declined` reports the strategy that clicked (`"cmp"`,
@@ -158,7 +158,7 @@ MCP tools:
 
 - `fetch`: Patchright stealth fetch (headless Chrome, waits for networkidle).
 - `stealth_fetch`: stealth fetch with finer fingerprint/WebRTC/UA controls.
-- `doctor`: Playwright/Chromium MCP readiness check.
+- `doctor`: Patchright/Chromium MCP readiness check.
 
 ## Validation
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from webskrap.client import WebSkrapClient, WebSkrapError
+from webskrap.client import WebSkrapClient, WebSkrapError, browser_doctor
 from webskrap.models import SessionConfig, shape_fetch_result
 from webskrap.parsing import (
     parse_resource_policy,
@@ -52,7 +52,7 @@ async def fetch(
 
     Args:
         url: The URL to load.
-        profile: Bundled profile (desktop-chrome, desktop-edge, mobile-chrome).
+        profile: Profile label; native Patchright defaults remain authoritative.
         channel: Browser channel, e.g. chrome. Use chromium on Linux ARM64.
         wait_until: commit, domcontentloaded, load, or networkidle.
         resource_policy: all, lite (block images/fonts/media), or documents.
@@ -146,27 +146,9 @@ async def stealth_fetch(
 
 
 @mcp.tool()
-async def doctor() -> dict[str, Any]:
-    """Check that Playwright and Chromium are installed and can launch."""
-    try:
-        from playwright.async_api import async_playwright
-    except Exception as exc:  # noqa: BLE001 - report any import failure
-        return {"ok": False, "message": f"Playwright import failed: {exc}"}
-
-    try:
-        manager = async_playwright()
-        playwright = await manager.start()
-        browser = await playwright.chromium.launch(headless=True)
-        await browser.close()
-        await playwright.stop()
-    except Exception as exc:  # noqa: BLE001 - report any launch failure
-        return {
-            "ok": False,
-            "message": f"Chromium did not launch: {exc}",
-            "hint": "Run: webskrap install",
-        }
-
-    return {"ok": True, "message": "Playwright and Chromium are ready."}
+async def doctor() -> dict[str, object]:
+    """Check that Patchright and Chromium are installed and can launch."""
+    return await browser_doctor()
 
 
 def main() -> None:

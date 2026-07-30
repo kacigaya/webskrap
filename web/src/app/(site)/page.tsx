@@ -108,7 +108,13 @@ export default function Home() {
       <header className="sticky top-0 z-20 px-4 pt-4">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between rounded-2xl border bg-background/70 px-5 py-3 shadow-sm backdrop-blur-md">
           <div className="flex items-center gap-2.5">
-            <Image src={asset("/webskrap-logo.png")} alt="WebSkrap" width={28} height={28} />
+            <Image
+              src={asset("/webskrap-logo.png")}
+              alt="WebSkrap"
+              width={642}
+              height={686}
+              className="h-7 w-auto"
+            />
             <span className="font-semibold tracking-tight">WebSkrap</span>
           </div>
           <nav className="flex items-center gap-2">
@@ -128,9 +134,9 @@ export default function Home() {
         <Image
           src={asset("/webskrap-logo.png")}
           alt="WebSkrap logo"
-          width={96}
-          height={96}
-          className="mb-8"
+          width={642}
+          height={686}
+          className="mb-8 h-24 w-auto"
           loading="eager"
         />
         <Badge variant="secondary" className="mb-6">

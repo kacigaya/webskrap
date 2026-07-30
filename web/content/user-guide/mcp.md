@@ -42,7 +42,7 @@ python -m webskrap.mcp_server
 | --- | --- |
 | `fetch` | Fetch a URL with the Patchright stealth driver (waits for `networkidle`). |
 | `stealth_fetch` | Same stealth driver with finer fingerprint/WebRTC/UA controls. |
-| `doctor` | Check that Playwright and Chromium can launch. |
+| `doctor` | Check that Patchright and Chromium can launch. |
 
 Both fetch tools return `status`, `final_url`, `title`, `ok`, `headers`, and the
 page content in `text` (capped by `max_chars`, with `text_length` and
@@ -60,7 +60,7 @@ leave the notice in place.
 | Argument | Default | Notes |
 | --- | --- | --- |
 | `url` | required | URL to load. |
-| `profile` | `desktop-chrome` | Bundled profile name. |
+| `profile` | `desktop-chrome` | Profile label; native Patchright defaults remain authoritative. |
 | `channel` | `chrome` | Browser channel; use `chromium` on Linux ARM64. |
 | `wait_until` | `networkidle` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
 | `resource_policy` | `all` | `all`, `lite`, or `documents`. |
