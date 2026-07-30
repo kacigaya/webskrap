@@ -111,7 +111,7 @@ config = SessionConfig(
     decline_cookies_timeout_ms=2_000,  # wait for a late notice; 0 = check once
 )
 result = await client.fetch("https://example.com", config=config)
-print(result.cookie_notice_declined)   # "cmp", "text", or None
+print(result.cookie_notice_declined)  # "cmp", "text", or None
 ```
 
 For pages you drive yourself, call it on demand:

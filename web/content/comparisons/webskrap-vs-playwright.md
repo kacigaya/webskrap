@@ -38,10 +38,12 @@ WebSkrap packages common scraping needs into a smaller API:
 import asyncio
 from webskrap import WebSkrapClient
 
+
 async def main() -> None:
     async with WebSkrapClient() as client:
         result = await client.fetch("https://example.com")
         print(result.title)
+
 
 asyncio.run(main())
 ```
