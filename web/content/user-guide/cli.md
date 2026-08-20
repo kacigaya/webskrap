@@ -162,6 +162,50 @@ webskrap fetch https://example.com \
   --launch-arg=--no-default-browser-check
 ```
 
+## Interactive browser sessions
+
+`webskrap browser` drives a persistent browser with commands modeled on the
+official [Playwright CLI](https://playwright.dev/agent-cli/introduction),
+implemented natively on Playwright for Python. `open` launches a detached
+Chromium that keeps running between commands; every other command reconnects
+to it over CDP, acts on the current page, and exits.
+
+```bash
+webskrap browser open https://example.com
+webskrap browser snapshot
+webskrap browser click e15
+webskrap browser fill "input[name=q]" "playwright"
+webskrap browser press Enter
+webskrap browser screenshot page.png --full-page
+webskrap browser close
+```
+
+`snapshot` prints an aria snapshot of the page in which each element carries a
+ref like `[ref=e15]`. Interaction commands (`click`, `dblclick`, `hover`,
+`fill`, `type`, `select`, `check`, `uncheck`) accept either a ref or any
+Playwright selector. Refs describe the current page, so take a fresh
+`snapshot` after the page changes.
+
+Navigation uses `goto`, `back`, `forward`, and `reload`; `press` sends a key
+to the page, and `eval` runs JavaScript and prints the JSON result. All
+commands support `--format json` for scripting and agents, and fail with exit
+code 1 and a one-line error instead of a traceback.
+
+Sessions are named with `-s/--session` (default `default`) and listed with
+`webskrap browser list`. Each session stores its browser profile under
+`~/.webskrap/browser/<name>/` (override the root with `WEBSKRAP_BROWSER_DIR`),
+so cookies and logins persist across `open`/`close`. Use
+`webskrap browser close --delete-data` to remove a session's profile, or
+`close --all` to stop every session.
+
+Deliberate limitations versus the official Playwright CLI: one page per
+session (no tab commands), bundled Chromium only, no network mocking,
+tracing, or video commands, and `back`/`forward` always reload the page (the
+back/forward cache is disabled so history navigation stays deterministic).
+
+The [MCP server](/docs/user-guide/mcp#interactive-browser-tools) exposes the
+same sessions to agents as `browser_*` tools.
+
 ## Update notices
 
 The CLI checks PyPI at most once a day and prints an update notice to stderr

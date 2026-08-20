@@ -7,9 +7,14 @@ Code, ...) at that command to drive scraping through the tools below.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
+from uuid import uuid4
 
+from playwright.async_api import Page
+
+from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError, browser_doctor
 from webskrap.models import SessionConfig, shape_fetch_result
 from webskrap.parsing import (
@@ -18,6 +23,8 @@ from webskrap.parsing import (
     parse_webrtc_ip_handling_policy,
 )
 from webskrap.profiles import get_profile
+
+T = TypeVar("T")
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -149,6 +156,215 @@ async def stealth_fetch(
 async def doctor() -> dict[str, object]:
     """Check that Patchright and Chromium are installed and can launch."""
     return await browser_doctor()
+
+
+async def _browser_action(
+    session: str,
+    action: Callable[[Page], Awaitable[T]],
+    timeout_ms: float,
+) -> T:
+    """Run a page action, flattening Playwright errors to one-line messages."""
+    try:
+        return await browser_session.run_page_action(session, action, timeout_ms=timeout_ms)
+    except WebSkrapError:
+        raise
+    except Exception as exc:
+        raise WebSkrapError(str(exc).strip().splitlines()[0] or type(exc).__name__) from exc
+
+
+@mcp.tool()
+async def browser_open(
+    url: str | None = None,
+    session: str = "default",
+) -> dict[str, Any]:
+    """Start (or reuse) a persistent headless browser session.
+
+    The browser is a detached Chromium that keeps running between tool calls
+    (and between MCP server restarts); every browser_* tool reconnects to it
+    over CDP. The session's profile persists on disk, so cookies and logins
+    survive close/open. Shares sessions with the `webskrap browser` CLI.
+
+    Args:
+        url: Optional URL to open after launch.
+        session: Session name; letters, digits, '.', '_' or '-'.
+    """
+    payload = await browser_session.open_session(session, headless=True)
+    if url:
+        payload.update(
+            await _browser_action(
+                session,
+                lambda page: browser_session.goto(page, url, "load"),
+                browser_session.DEFAULT_NAVIGATION_TIMEOUT_MS,
+            )
+        )
+    return payload
+
+
+@mcp.tool()
+async def browser_goto(
+    url: str,
+    session: str = "default",
+    wait_until: str = "load",
+    timeout_ms: float = 30_000,
+) -> dict[str, Any]:
+    """Navigate the session's current page to a URL.
+
+    Args:
+        url: The URL to navigate to.
+        session: Browser session name.
+        wait_until: commit, domcontentloaded, load, or networkidle.
+        timeout_ms: Navigation timeout in milliseconds.
+    """
+    parsed_wait_until = parse_wait_until(wait_until)
+    return await _browser_action(
+        session,
+        lambda page: browser_session.goto(page, url, parsed_wait_until),
+        timeout_ms,
+    )
+
+
+@mcp.tool()
+async def browser_snapshot(
+    session: str = "default",
+    depth: int | None = None,
+    max_chars: int = 20_000,
+) -> dict[str, Any]:
+    """Return an aria snapshot of the current page with eN element refs.
+
+    Each element carries a ref like [ref=e15]; pass that ref (e.g. "e15") as
+    the target of browser_interact. Refs describe the current DOM, so take a
+    fresh snapshot after the page changes.
+
+    Args:
+        session: Browser session name.
+        depth: Maximum snapshot tree depth.
+        max_chars: Maximum characters of snapshot text to return.
+    """
+    result = await _browser_action(
+        session,
+        lambda page: browser_session.snapshot(page, depth=depth),
+        browser_session.DEFAULT_ACTION_TIMEOUT_MS,
+    )
+    truncated = len(result["snapshot"]) > max_chars
+    if truncated:
+        result["snapshot"] = result["snapshot"][:max_chars]
+    result["snapshot_truncated"] = truncated
+    return result
+
+
+@mcp.tool()
+async def browser_interact(
+    action: str,
+    target: str,
+    values: list[str] | None = None,
+    session: str = "default",
+    timeout_ms: float = 10_000,
+) -> dict[str, Any]:
+    """Interact with an element on the session's current page.
+
+    Args:
+        action: click, dblclick, hover, check, uncheck, fill, type, or select.
+        target: Snapshot ref (e.g. "e15") or any Playwright selector.
+        values: Value arguments: none for click/dblclick/hover/check/uncheck,
+            exactly one for fill/type, one or more for select.
+        session: Browser session name.
+        timeout_ms: Action timeout in milliseconds.
+    """
+    resolved_values = values or []
+    browser_session.element_arguments(action, resolved_values)
+
+    async def run(page: Page) -> dict[str, Any]:
+        await browser_session.element_action(page, action, target, resolved_values)
+        return await browser_session.page_state(page)
+
+    return await _browser_action(session, run, timeout_ms)
+
+
+@mcp.tool()
+async def browser_press(
+    key: str,
+    session: str = "default",
+    timeout_ms: float = 10_000,
+) -> dict[str, Any]:
+    """Press a keyboard key on the session's current page.
+
+    Args:
+        key: Key to press, e.g. Enter, Tab, or Control+a.
+        session: Browser session name.
+        timeout_ms: Action timeout in milliseconds.
+    """
+
+    async def run(page: Page) -> dict[str, Any]:
+        await page.keyboard.press(key)
+        return await browser_session.page_state(page)
+
+    return await _browser_action(session, run, timeout_ms)
+
+
+@mcp.tool()
+async def browser_screenshot(
+    path: str | None = None,
+    session: str = "default",
+    full_page: bool = False,
+) -> dict[str, Any]:
+    """Screenshot the session's current page to a PNG file.
+
+    Args:
+        path: Output PNG path; auto-generated in the working directory when
+            omitted.
+        session: Browser session name.
+        full_page: Capture the full scrollable page.
+    """
+    target = Path(path) if path else Path(f"webskrap-{uuid4().hex}.png")
+
+    async def run(page: Page) -> dict[str, Any]:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=str(target), full_page=full_page)
+        return {**await browser_session.page_state(page), "path": str(target)}
+
+    return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
+
+
+@mcp.tool()
+async def browser_eval(
+    expression: str,
+    session: str = "default",
+    timeout_ms: float = 10_000,
+) -> dict[str, Any]:
+    """Evaluate JavaScript on the session's current page.
+
+    Args:
+        expression: JavaScript expression or function to evaluate.
+        session: Browser session name.
+        timeout_ms: Action timeout in milliseconds.
+    """
+    result = await _browser_action(session, lambda page: page.evaluate(expression), timeout_ms)
+    return {"result": result}
+
+
+@mcp.tool()
+async def browser_close(
+    session: str = "default",
+    delete_data: bool = False,
+    all_sessions: bool = False,
+) -> dict[str, Any]:
+    """Close a browser session (its profile persists unless delete_data).
+
+    Args:
+        session: Browser session name; ignored when all_sessions is set.
+        delete_data: Also delete the session's on-disk profile data.
+        all_sessions: Close every session.
+    """
+    names = browser_session.list_session_names() if all_sessions else [session]
+    return {
+        "closed": [browser_session.close_session(name, delete_data=delete_data) for name in names]
+    }
+
+
+@mcp.tool()
+async def browser_list() -> dict[str, Any]:
+    """List persistent browser sessions and whether each is running."""
+    return {"sessions": browser_session.list_sessions()}
 
 
 def main() -> None:

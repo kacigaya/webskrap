@@ -18,6 +18,9 @@ Prefer current repo sources over memory:
 - `src/webskrap/profiles.py`: bundled browser profiles.
 - `src/webskrap/consent.py`: cookie-banner auto-decline selectors and strategies.
 - `src/webskrap/cli.py`: current `webskrap` command behavior.
+- `src/webskrap/browser_session.py`: persistent browser sessions (detached
+  Chromium + CDP reconnect) shared by the CLI and MCP server.
+- `src/webskrap/browser_cli.py`: `webskrap browser` interactive commands.
 - `src/webskrap/mcp_server.py`: MCP tools and argument shape.
 - `tests/`: behavior contracts when changing parsing, state, CLI, stealth, or safety.
 
@@ -144,6 +147,33 @@ shape: `url`, `final_url`, `status`, `ok`, `title`, `headers`, `text`,
 Use `--stdout` for raw fetched content, and combine it with `--text-only` for
 readable body text.
 
+## Interactive browser CLI
+
+`webskrap browser` drives a persistent browser with commands modeled on the
+official Playwright CLI, implemented natively on Playwright for Python. `open`
+launches a detached Chromium that keeps running between commands; every other
+command reconnects over CDP, acts on the current page, and exits.
+
+```bash
+webskrap browser open https://example.com
+webskrap browser snapshot            # aria snapshot with [ref=eN] element refs
+webskrap browser click e15           # refs or any Playwright selector
+webskrap browser fill "input[name=q]" "playwright"
+webskrap browser press Enter
+webskrap browser eval "document.title"
+webskrap browser screenshot page.png --full-page
+webskrap browser close               # profile persists; --delete-data removes it
+```
+
+Commands: `open`, `close`, `list`, `goto`, `back`, `forward`, `reload`,
+`snapshot`, `click`, `dblclick`, `hover`, `fill`, `type`, `select`, `check`,
+`uncheck`, `press`, `screenshot`, `eval`. All accept `-s/--session` (default
+`default`) and `--format json`; failures exit 1 with a one-line error. Session
+profiles live under `~/.webskrap/browser/<name>/` (`WEBSKRAP_BROWSER_DIR`
+overrides the root). Refs go stale when the DOM changes; snapshot again.
+Limitations: one page per session, bundled Chromium only, no tabs, network
+mocking, tracing, or video; history navigation always reloads.
+
 ## MCP
 
 Install MCP support when an MCP client should call WebSkrap directly:
@@ -159,6 +189,11 @@ MCP tools:
 - `fetch`: Patchright stealth fetch (headless Chrome, waits for networkidle).
 - `stealth_fetch`: stealth fetch with finer fingerprint/WebRTC/UA controls.
 - `doctor`: Patchright/Chromium MCP readiness check.
+- `browser_open`, `browser_goto`, `browser_snapshot`, `browser_interact`,
+  `browser_press`, `browser_screenshot`, `browser_eval`, `browser_close`,
+  `browser_list`: persistent interactive browser sessions, sharing state and
+  behavior with `webskrap browser` (headless only over MCP; `browser_interact`
+  takes `action` + `target` ref/selector + optional `values`).
 
 ## Validation
 
