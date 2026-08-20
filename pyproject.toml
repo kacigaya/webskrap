@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "webskrap"
-version = "0.9.0"
+version = "0.9.1"
 description = "A Playwright-based Python scraping framework with coherent browser profiles and session controls."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -52,8 +52,9 @@ Issues = "https://github.com/kacigaya/webskrap/issues"
 packages = ["src/webskrap"]
 
 [tool.hatch.build.targets.sdist]
-# The web/ frontend ships only to GitHub Pages, never to PyPI.
-exclude = ["web", ".github"]
+# The web/ frontend ships only to GitHub Pages, never to PyPI. assets/ holds
+# the README logo, which no install step reads.
+exclude = ["web", ".github", "assets"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
