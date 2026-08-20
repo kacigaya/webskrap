@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
+import pytest
+
 from webskrap import mcp_server
+from webskrap.client import WebSkrapError
 from webskrap.models import FetchResult
 
 
@@ -79,3 +83,89 @@ def test_stealth_fetch_defaults_to_clean_text(monkeypatch: Any) -> None:
 
     assert _FakeClient.calls[0]["text_only"] is True
     assert result["text"] == "Readable body"
+
+
+def test_browser_tools_are_registered() -> None:
+    names = {tool.name for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    assert {
+        "browser_open",
+        "browser_goto",
+        "browser_snapshot",
+        "browser_interact",
+        "browser_press",
+        "browser_screenshot",
+        "browser_eval",
+        "browser_close",
+        "browser_list",
+    } <= names
+
+
+def test_browser_interact_rejects_unknown_action() -> None:
+    with pytest.raises(WebSkrapError, match="unknown action"):
+        asyncio.run(mcp_server.browser_interact("explode", "e1"))
+
+
+def test_browser_interact_validates_value_arity() -> None:
+    with pytest.raises(WebSkrapError, match="exactly one value"):
+        asyncio.run(mcp_server.browser_interact("fill", "e1"))
+    with pytest.raises(WebSkrapError, match="no value"):
+        asyncio.run(mcp_server.browser_interact("click", "e1", values=["x"]))
+
+
+def test_browser_action_without_open_session(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_goto("https://example.test"))
+
+
+def test_browser_list_empty(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    assert asyncio.run(mcp_server.browser_list()) == {"sessions": []}
+
+
+@pytest.mark.browser
+def test_browser_mcp_lifecycle(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+    page = (
+        "data:text/html,<title>mcp-test</title>"
+        "<button onclick=\"this.textContent='clicked'\">Press me</button>"
+    )
+
+    opened = asyncio.run(mcp_server.browser_open())
+    assert opened["reused"] is False
+    try:
+        goto = asyncio.run(mcp_server.browser_goto(page))
+        assert goto["title"] == "mcp-test"
+
+        snapshot = asyncio.run(mcp_server.browser_snapshot())
+        assert snapshot["snapshot_truncated"] is False
+        ref = snapshot["snapshot"].split('button "Press me" [ref=')[1].split("]")[0]
+
+        short = asyncio.run(mcp_server.browser_snapshot(max_chars=10))
+        assert short["snapshot_truncated"] is True
+        assert len(short["snapshot"]) == 10
+
+        clicked = asyncio.run(mcp_server.browser_interact("click", ref))
+        assert clicked["title"] == "mcp-test"
+
+        evaluated = asyncio.run(
+            mcp_server.browser_eval("document.querySelector('button').textContent")
+        )
+        assert evaluated == {"result": "clicked"}
+
+        shot_path = tmp_path / "shot.png"
+        shot = asyncio.run(mcp_server.browser_screenshot(path=str(shot_path)))
+        assert shot["path"] == str(shot_path)
+        assert shot_path.stat().st_size > 0
+
+        listed = asyncio.run(mcp_server.browser_list())
+        assert listed["sessions"][0]["running"] is True
+    finally:
+        closed = asyncio.run(mcp_server.browser_close())
+
+    assert closed["closed"] == [{"session": "default", "deleted_data": False}]
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_snapshot())

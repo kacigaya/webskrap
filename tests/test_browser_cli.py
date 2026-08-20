@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from webskrap import browser_cli, cli
+from webskrap import browser_session, cli
 
 runner = CliRunner()
 
@@ -52,9 +52,9 @@ def test_browser_commands_are_registered() -> None:
 
 
 def test_target_selector_maps_refs_and_passes_selectors_through() -> None:
-    assert browser_cli._target_selector("e12") == "aria-ref=e12"
-    assert browser_cli._target_selector("text=Login") == "text=Login"
-    assert browser_cli._target_selector("e12x") == "e12x"
+    assert browser_session.target_selector("e12") == "aria-ref=e12"
+    assert browser_session.target_selector("text=Login") == "text=Login"
+    assert browser_session.target_selector("e12x") == "e12x"
 
 
 def test_invalid_session_name_is_rejected(tmp_path: Path) -> None:
@@ -90,9 +90,9 @@ def test_session_running_rejects_recycled_and_dead_pids(tmp_path: Path) -> None:
     session_dir = tmp_path / "default"
     # Alive PID whose command line does not reference this session's user-data
     # directory: must not count as (or ever be killed as) the session browser.
-    assert not browser_cli._session_running(session_dir, {"pid": os.getpid(), "port": 1})
-    assert not browser_cli._session_running(session_dir, {"pid": 2**22 - 1, "port": 1})
-    assert not browser_cli._session_running(session_dir, None)
+    assert not browser_session.session_running(session_dir, {"pid": os.getpid(), "port": 1})
+    assert not browser_session.session_running(session_dir, {"pid": 2**22 - 1, "port": 1})
+    assert not browser_session.session_running(session_dir, None)
 
 
 def test_goto_rejects_invalid_wait_until(tmp_path: Path) -> None:

@@ -1,35 +1,33 @@
-"""Persistent interactive browser commands (`webskrap browser ...`).
+"""Typer commands for persistent browser sessions (`webskrap browser ...`).
 
 A native Python take on the official Playwright CLI (`@playwright/cli`):
 `open` launches a detached Chromium that outlives each CLI invocation, and
 every other command reconnects to it over CDP, acts on the current page, and
-exits. Snapshots use Playwright's AI aria snapshot, so elements carry `eN`
-refs that interaction commands accept directly (`webskrap browser click e12`).
+exits. The session/page logic lives in :mod:`webskrap.browser_session`, shared
+with the MCP server; this module only parses arguments and formats output.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import os
-import re
-import shutil
-import signal
-import subprocess
-import time
-from collections.abc import Awaitable, Callable
-from contextlib import suppress
-from datetime import UTC, datetime
+from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
 from typing import Annotated, Any, Literal, NoReturn, TypeVar
 from uuid import uuid4
 
 import typer
-from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import Page
 from rich.console import Console
 from rich.table import Table
 
+from webskrap import browser_session
+from webskrap.browser_session import (
+    DEFAULT_ACTION_TIMEOUT_MS,
+    DEFAULT_NAVIGATION_TIMEOUT_MS,
+    ELEMENT_ACTIONS,
+)
+from webskrap.client import WebSkrapError
 from webskrap.models import WaitUntil
 from webskrap.parsing import parse_wait_until
 
@@ -43,83 +41,20 @@ stderr_console = Console(stderr=True, highlight=False)
 T = TypeVar("T")
 OutputFormat = Literal["human", "json"]
 
-SESSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
-DEVTOOLS_PORT_FILE = "DevToolsActivePort"
-LAUNCH_TIMEOUT_S = 20.0
-CLOSE_TIMEOUT_S = 5.0
-DEFAULT_ACTION_TIMEOUT_MS = 10_000.0
-DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000.0
-
 SessionOption = Annotated[str, typer.Option("--session", "-s", help="Browser session name.")]
 FormatOption = Annotated[str, typer.Option("--format", help="Output format: human or json.")]
 ActionTimeoutOption = Annotated[float, typer.Option("--timeout-ms", min=1, help="Action timeout.")]
 
-
-def _sessions_root() -> Path:
-    if override := os.environ.get("WEBSKRAP_BROWSER_DIR"):
-        return Path(override)
-    return Path.home() / ".webskrap" / "browser"
-
-
-def _session_dir(name: str) -> Path:
-    # Session names become directory names, so reject path separators and
-    # anything else that could escape the sessions root.
-    if not SESSION_NAME_PATTERN.fullmatch(name):
-        _fail(f"invalid session name '{name}': use letters, digits, '.', '_' or '-'")
-    return _sessions_root() / name
-
-
-def _state_path(session_dir: Path) -> Path:
-    return session_dir / "state.json"
-
-
-def _read_state(session_dir: Path) -> dict[str, Any] | None:
-    try:
-        state = json.loads(_state_path(session_dir).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(state, dict) or "pid" not in state or "port" not in state:
-        return None
-    return state
-
-
-def _write_state(session_dir: Path, state: dict[str, Any]) -> None:
-    # Atomic replace: a command must never read a half-written state file.
-    temp_path = _state_path(session_dir).with_suffix(".json.tmp")
-    temp_path.write_text(json.dumps(state), encoding="utf-8")
-    os.replace(temp_path, _state_path(session_dir))
-
-
-def _session_running(session_dir: Path, state: dict[str, Any] | None) -> bool:
-    """True when the recorded PID is alive and is this session's browser.
-
-    PIDs get recycled, so before trusting (or killing) one, require its
-    command line to reference this session's user-data directory.
-    """
-    if state is None:
-        return False
-    pid = state["pid"]
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except FileNotFoundError:
-        return False
-    except OSError:
-        # No /proc (non-Linux): fall back to a liveness-only check.
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
-        return True
-    return str(session_dir / "user-data").encode() in cmdline
-
-
-def _is_session_dir(path: Path) -> bool:
-    return (
-        path.is_dir()
-        and SESSION_NAME_PATTERN.fullmatch(path.name) is not None
-        and (_state_path(path).exists() or (path / "user-data").is_dir())
-    )
+_ELEMENT_COMMAND_HELP = {
+    "click": "Click an element.",
+    "dblclick": "Double-click an element.",
+    "hover": "Hover over an element.",
+    "check": "Check a checkbox or radio.",
+    "uncheck": "Uncheck a checkbox.",
+    "fill": "Fill an input with a value.",
+    "type": "Type text into an element key by key.",
+    "select": "Select option value(s) in a <select>.",
+}
 
 
 def _fail(message: str) -> NoReturn:
@@ -133,101 +68,27 @@ def _parse_output_format(value: str) -> OutputFormat:
     return value
 
 
+def _parse_wait_until(value: str) -> WaitUntil:
+    try:
+        return parse_wait_until(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
+
+
 def _print_json(payload: object) -> None:
     typer.echo(json.dumps(payload, ensure_ascii=False))
 
 
-async def _chromium_executable() -> str:
-    async with async_playwright() as playwright:
-        path = playwright.chromium.executable_path
-    if Path(path).exists():
-        return path
+def _run(coroutine: Coroutine[Any, Any, T]) -> T:
+    """Run a browser-session coroutine, converting failures to CLI errors."""
     try:
-        from patchright.async_api import async_playwright as patchright_playwright
-    except ImportError:  # pragma: no cover - patchright ships with webskrap
-        _fail("Chromium is not installed. Run: webskrap install")
-    async with patchright_playwright() as playwright:
-        path = playwright.chromium.executable_path
-    if Path(path).exists():
-        return path
-    _fail("Chromium is not installed. Run: webskrap install")
-
-
-def _signal_group(pid: int, sig: signal.Signals) -> None:
-    """Signal the browser's whole process group; a vanished group is fine.
-
-    The browser is launched with ``start_new_session=True``, so its PID is the
-    group leader. Signalling only the leader (e.g. SIGKILL) would orphan
-    renderer children that keep holding the profile's SingletonLock.
-    """
-    try:
-        os.killpg(pid, sig)
-    except ProcessLookupError:
-        pass
-    except PermissionError:
-        with suppress(ProcessLookupError):
-            os.kill(pid, sig)
-
-
-def _launch_browser(session_dir: Path, *, executable: str, headless: bool) -> tuple[int, int]:
-    """Start a detached Chromium and return its (pid, CDP port)."""
-    user_data_dir = session_dir / "user-data"
-    user_data_dir.mkdir(parents=True, exist_ok=True)
-    port_file = user_data_dir / DEVTOOLS_PORT_FILE
-    port_file.unlink(missing_ok=True)
-    log_path = session_dir / "browser.log"
-
-    command = [
-        executable,
-        "--remote-debugging-port=0",
-        f"--user-data-dir={user_data_dir}",
-        # Playwright launches Chromium with the sandbox disabled by default
-        # (chromium_sandbox=False); mirror that so `open` works wherever
-        # `webskrap fetch` does.
-        "--no-sandbox",
-        "--no-first-run",
-        "--no-default-browser-check",
-        # A bfcache restore re-fires no load events, stranding the
-        # go_back/go_forward load wait. Playwright's own launcher keeps bfcache
-        # and tracks restores internally, but that tracking is unavailable when
-        # attaching over CDP, so trade bfcache for deterministic load events.
-        "--disable-features=BackForwardCache",
-    ]
-    if headless:
-        command.append("--headless=new")
-    command.append("about:blank")
-
-    with log_path.open("wb") as log:
-        process = subprocess.Popen(
-            command,
-            stdout=log,
-            stderr=log,
-            start_new_session=True,
-        )
-    try:
-        return process.pid, _wait_for_devtools_port(port_file, process, log_path)
-    except BaseException:
-        # Ctrl-C or a startup failure must not orphan a detached browser that
-        # holds the profile lock with no state file pointing at it.
-        _signal_group(process.pid, signal.SIGKILL)
+        return asyncio.run(coroutine)
+    except (typer.Exit, typer.Abort, typer.BadParameter):
         raise
-
-
-def _wait_for_devtools_port(
-    port_file: Path, process: subprocess.Popen[bytes], log_path: Path
-) -> int:
-    deadline = time.monotonic() + LAUNCH_TIMEOUT_S
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            _fail(f"browser exited during startup; see {log_path}")
-        try:
-            first_line = port_file.read_text(encoding="utf-8").splitlines()[0].strip()
-        except (OSError, IndexError):
-            first_line = ""
-        if first_line.isdigit():
-            return int(first_line)
-        time.sleep(0.05)
-    _fail(f"browser did not report a DevTools port within {LAUNCH_TIMEOUT_S:.0f}s")
+    except Exception as exc:
+        # One-line error and exit code 1 for every failure, Playwright or
+        # otherwise (e.g. an unwritable screenshot path).
+        _fail(str(exc).strip().splitlines()[0] or type(exc).__name__)
 
 
 def _run_page_command(
@@ -236,67 +97,7 @@ def _run_page_command(
     *,
     timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
 ) -> T:
-    try:
-        return asyncio.run(_run_page_action(session, action, timeout_ms))
-    except (typer.Exit, typer.Abort, typer.BadParameter):
-        raise
-    except Exception as exc:
-        # One-line error and exit code 1 for every action failure, Playwright
-        # or otherwise (e.g. an unwritable screenshot path).
-        _fail(str(exc).strip().splitlines()[0] or type(exc).__name__)
-
-
-async def _run_page_action(
-    session: str,
-    action: Callable[[Page], Awaitable[T]],
-    timeout_ms: float,
-) -> T:
-    session_dir = _session_dir(session)
-    state = _read_state(session_dir)
-    if state is None:
-        _fail(f"session '{session}' is not open. Run: webskrap browser open")
-    async with async_playwright() as playwright:
-        try:
-            browser = await playwright.chromium.connect_over_cdp(
-                f"http://127.0.0.1:{state['port']}"
-            )
-        except PlaywrightError:
-            _fail(
-                f"session '{session}' is not reachable. "
-                "Run: webskrap browser close, then webskrap browser open"
-            )
-        try:
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = context.pages[-1] if context.pages else await context.new_page()
-            page.set_default_timeout(timeout_ms)
-            page.set_default_navigation_timeout(timeout_ms)
-            return await action(page)
-        finally:
-            await browser.close()
-
-
-def _target_selector(target: str) -> str:
-    """Map a snapshot ref like `e12` to its selector; pass selectors through."""
-    if SNAPSHOT_REF_PATTERN.fullmatch(target):
-        return f"aria-ref={target}"
-    return target
-
-
-async def _resolve_locator(page: Page, target: str):
-    """Return a locator for a snapshot ref (`e12`) or a Playwright selector.
-
-    Refs only resolve against an aria snapshot taken on the current CDP
-    connection, and each command runs on a fresh one, so retake the snapshot
-    first. Refs are stable for an unchanged DOM; after a DOM change they are
-    stale and the caller should run `snapshot` again.
-    """
-    if SNAPSHOT_REF_PATTERN.fullmatch(target):
-        await page.locator("body").aria_snapshot(mode="ai")
-    return page.locator(_target_selector(target))
-
-
-async def _page_state(page: Page) -> dict[str, Any]:
-    return {"url": page.url, "title": await page.title()}
+    return _run(browser_session.run_page_action(session, action, timeout_ms=timeout_ms))
 
 
 def _emit_state(state: dict[str, Any], output_format: OutputFormat) -> None:
@@ -320,39 +121,12 @@ def open_command(
 ) -> None:
     """Start (or reuse) a persistent browser session."""
     output_format = _parse_output_format(format)
-    session_dir = _session_dir(session)
-    existing = _read_state(session_dir)
-    state = existing if _session_running(session_dir, existing) else None
-    reused = state is not None
-
-    if state is None:
-        executable = asyncio.run(_chromium_executable())
-        pid, port = _launch_browser(session_dir, executable=executable, headless=not headed)
-        state = {
-            "pid": pid,
-            "port": port,
-            "headless": not headed,
-            "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        }
-        try:
-            _write_state(session_dir, state)
-        except BaseException:
-            # Without a state file the running browser would be unreachable
-            # and would hold the profile lock against the next open.
-            _signal_group(pid, signal.SIGKILL)
-            raise
-
-    payload: dict[str, Any] = {
-        "session": session,
-        "pid": state["pid"],
-        "port": state["port"],
-        "reused": reused,
-    }
+    payload = _run(browser_session.open_session(session, headless=not headed))
     if url:
         payload.update(
             _run_page_command(
                 session,
-                lambda page: _goto(page, url, "load"),
+                lambda page: browser_session.goto(page, url, "load"),
                 timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
         )
@@ -360,22 +134,10 @@ def open_command(
     if output_format == "json":
         _print_json(payload)
         return
-    verb = "Reusing" if reused else "Opened"
-    console.print(f"{verb} session [bold]{session}[/bold] (pid {state['pid']})")
+    verb = "Reusing" if payload["reused"] else "Opened"
+    console.print(f"{verb} session [bold]{session}[/bold] (pid {payload['pid']})")
     if url:
         _emit_state(payload, output_format)
-
-
-def _parse_wait_until(value: str) -> WaitUntil:
-    try:
-        return parse_wait_until(value)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
-
-
-async def _goto(page: Page, url: str, wait_until: WaitUntil) -> dict[str, Any]:
-    response = await page.goto(url, wait_until=wait_until)
-    return {"status": response.status if response else None, **await _page_state(page)}
 
 
 @browser_app.command("close")
@@ -389,20 +151,17 @@ def close_command(
 ) -> None:
     """Close a browser session (its profile data persists unless --delete-data)."""
     output_format = _parse_output_format(format)
-    if all_sessions:
-        root = _sessions_root()
-        # Only touch directories that look like sessions (state file or a
-        # browser profile). A stray directory under the root must be neither
-        # deleted by --delete-data nor able to abort closing real sessions.
-        names = (
-            sorted(p.name for p in root.iterdir() if _is_session_dir(p)) if root.is_dir() else []
-        )
-    else:
-        if _read_state(_session_dir(session)) is None and not delete_data:
-            _fail(f"session '{session}' is not open")
-        names = [session]
-
-    closed = [_close_session(name, delete_data=delete_data) for name in names]
+    try:
+        if all_sessions:
+            names = browser_session.list_session_names()
+        else:
+            directory = browser_session.session_dir(session)
+            if browser_session.read_state(directory) is None and not delete_data:
+                _fail(f"session '{session}' is not open")
+            names = [session]
+        closed = [browser_session.close_session(name, delete_data=delete_data) for name in names]
+    except WebSkrapError as exc:
+        _fail(str(exc))
     if output_format == "json":
         _print_json({"closed": closed})
         return
@@ -410,45 +169,11 @@ def close_command(
         console.print(f"closed [bold]{entry['session']}[/bold]")
 
 
-def _close_session(name: str, *, delete_data: bool) -> dict[str, Any]:
-    session_dir = _session_dir(name)
-    state = _read_state(session_dir)
-    if state is not None and _session_running(session_dir, state):
-        _terminate(session_dir, state["pid"])
-    _state_path(session_dir).unlink(missing_ok=True)
-    if delete_data:
-        shutil.rmtree(session_dir, ignore_errors=True)
-    return {"session": name, "deleted_data": delete_data}
-
-
-def _terminate(session_dir: Path, pid: int) -> None:
-    _signal_group(pid, signal.SIGTERM)
-    deadline = time.monotonic() + CLOSE_TIMEOUT_S
-    while time.monotonic() < deadline:
-        if not _session_running(session_dir, {"pid": pid, "port": 0}):
-            return
-        time.sleep(0.05)
-    _signal_group(pid, signal.SIGKILL)
-
-
 @browser_app.command("list")
 def list_command(format: FormatOption = "human") -> None:
     """List browser sessions."""
     output_format = _parse_output_format(format)
-    root = _sessions_root()
-    sessions = []
-    if root.is_dir():
-        for path in sorted(p for p in root.iterdir() if _is_session_dir(p)):
-            state = _read_state(path)
-            running = _session_running(path, state)
-            sessions.append(
-                {
-                    "session": path.name,
-                    "running": running,
-                    "pid": state["pid"] if running and state else None,
-                    "port": state["port"] if running and state else None,
-                }
-            )
+    sessions = browser_session.list_sessions()
     if output_format == "json":
         _print_json({"sessions": sessions})
         return
@@ -482,7 +207,9 @@ def goto_command(
     output_format = _parse_output_format(format)
     parsed_wait_until = _parse_wait_until(wait_until)
     state = _run_page_command(
-        session, lambda page: _goto(page, url, parsed_wait_until), timeout_ms=timeout_ms
+        session,
+        lambda page: browser_session.goto(page, url, parsed_wait_until),
+        timeout_ms=timeout_ms,
     )
     _emit_state(state, output_format)
 
@@ -498,7 +225,7 @@ def _navigation_command(name: str, help_text: str, method: str) -> None:
 
         async def action(page: Page) -> dict[str, Any]:
             await getattr(page, method)()
-            return await _page_state(page)
+            return await browser_session.page_state(page)
 
         _emit_state(_run_page_command(session, action, timeout_ms=timeout_ms), output_format)
 
@@ -518,12 +245,7 @@ def snapshot_command(
 ) -> None:
     """Print an aria snapshot of the page with `eN` element refs."""
     output_format = _parse_output_format(format)
-
-    async def action(page: Page) -> dict[str, Any]:
-        snapshot = await page.locator("body").aria_snapshot(mode="ai", depth=depth)
-        return {**await _page_state(page), "snapshot": snapshot}
-
-    result = _run_page_command(session, action)
+    result = _run_page_command(session, lambda page: browser_session.snapshot(page, depth=depth))
     if output_format == "json":
         _print_json(result)
         return
@@ -531,34 +253,7 @@ def snapshot_command(
     typer.echo(result["snapshot"])
 
 
-# (command, Locator method, value arity, help)
-_ELEMENT_COMMANDS: tuple[tuple[str, str, str, str], ...] = (
-    ("click", "click", "none", "Click an element."),
-    ("dblclick", "dblclick", "none", "Double-click an element."),
-    ("hover", "hover", "none", "Hover over an element."),
-    ("check", "check", "none", "Check a checkbox or radio."),
-    ("uncheck", "uncheck", "none", "Uncheck a checkbox."),
-    ("fill", "fill", "one", "Fill an input with a value."),
-    ("type", "press_sequentially", "one", "Type text into an element key by key."),
-    ("select", "select_option", "many", "Select option value(s) in a <select>."),
-)
-
-
-def _element_arguments(name: str, arity: str, values: list[str]) -> list[Any]:
-    if arity == "none":
-        if values:
-            _fail(f"'{name}' takes no value argument")
-        return []
-    if arity == "one":
-        if len(values) != 1:
-            _fail(f"'{name}' takes exactly one value argument")
-        return [values[0]]
-    if not values:
-        _fail(f"'{name}' takes at least one value argument")
-    return [values]
-
-
-def _register_element_command(name: str, method: str, arity: str, help_text: str) -> None:
+def _register_element_command(name: str, help_text: str) -> None:
     """Register an interaction command taking a snapshot ref or selector."""
 
     @browser_app.command(name, help=help_text)
@@ -570,18 +265,22 @@ def _register_element_command(name: str, method: str, arity: str, help_text: str
         format: FormatOption = "human",
     ) -> None:
         output_format = _parse_output_format(format)
-        arguments = _element_arguments(name, arity, value or [])
+        values = value or []
+        try:
+            # Fail on a bad value count before connecting to the browser.
+            browser_session.element_arguments(name, values)
+        except WebSkrapError as exc:
+            _fail(str(exc))
 
         async def action(page: Page) -> dict[str, Any]:
-            locator = await _resolve_locator(page, target)
-            await getattr(locator, method)(*arguments)
-            return await _page_state(page)
+            await browser_session.element_action(page, name, target, values)
+            return await browser_session.page_state(page)
 
         _emit_state(_run_page_command(session, action, timeout_ms=timeout_ms), output_format)
 
 
-for _name, _method, _arity, _help in _ELEMENT_COMMANDS:
-    _register_element_command(_name, _method, _arity, _help)
+for _name in ELEMENT_ACTIONS:
+    _register_element_command(_name, _ELEMENT_COMMAND_HELP[_name])
 
 
 @browser_app.command("press")
@@ -596,7 +295,7 @@ def press_command(
 
     async def action(page: Page) -> dict[str, Any]:
         await page.keyboard.press(key)
-        return await _page_state(page)
+        return await browser_session.page_state(page)
 
     _emit_state(_run_page_command(session, action, timeout_ms=timeout_ms), output_format)
 
@@ -617,7 +316,7 @@ def screenshot_command(
     async def action(page: Page) -> dict[str, Any]:
         target.parent.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(target), full_page=full_page)
-        return {**await _page_state(page), "path": str(target)}
+        return {**await browser_session.page_state(page), "path": str(target)}
 
     result = _run_page_command(session, action)
     if output_format == "json":
