@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from webskrap.browser_cli import browser_app
 from webskrap.client import WebSkrapClient, browser_doctor
 from webskrap.models import (
     FetchResult,
@@ -27,6 +28,7 @@ from webskrap.parsing import (
 from webskrap.profiles import get_profile, list_profiles
 
 app = typer.Typer(help="WebSkrap browser scraping toolkit.")
+app.add_typer(browser_app, name="browser")
 console = Console()
 OutputFormat = Literal["human", "json"]
 

@@ -35,6 +35,6 @@ jobs:
           uv run playwright install --with-deps chromium
           uv run patchright install chromium
       - name: Browser test
-        run: uv run --extra dev pytest -q tests/test_browser_integration.py
+        run: uv run --extra dev pytest -q -m "browser and not live"
       - name: Build
         run: uv run --with build python -m build
