@@ -5,7 +5,7 @@ description: Documentation for WebSkrap, a Python web scraping and browser autom
 
 # WebSkrap
 
-Async-first Python scraping on Playwright that also works as a web tool for LLMs and agents. You get coherent browser profiles, persistent sessions, resource routing, and Patchright-powered stealth. The MCP server runs that same stealth path, so agents get live pages back as plain text instead of raw HTML. Both the CLI and the MCP server can also drive persistent interactive browser sessions with Playwright CLI-style commands: aria snapshots with element refs, clicks, form fills, and screenshots against a browser that keeps running between calls.
+Async-first Python scraping on Playwright that also works as a web tool for LLMs and agents. You get coherent browser profiles, persistent sessions, resource routing, and Patchright-powered stealth. The MCP server runs that same stealth path, so agents get live pages back as plain text instead of raw HTML. The CLI and the MCP server also drive persistent interactive sessions with Playwright CLI-style commands. Take an aria snapshot, click an element by its ref, fill a form, screenshot the result, all against a browser that keeps running between calls.
 
 ## Install
 

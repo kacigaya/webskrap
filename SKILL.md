@@ -37,7 +37,7 @@ Prefer current repo sources over memory:
 
 ## Python API
 
-Install normal API/browser support:
+Install the package and its browsers:
 
 ```bash
 pip install webskrap
@@ -150,7 +150,7 @@ readable body text.
 ## Interactive browser CLI
 
 `webskrap browser` drives a persistent browser with commands modeled on the
-official Playwright CLI, implemented natively on Playwright for Python. `open`
+official Playwright CLI, written natively on Playwright for Python. `open`
 launches a detached Chromium that keeps running between commands; every other
 command reconnects over CDP, acts on the current page, and exits.
 
@@ -171,8 +171,8 @@ Commands: `open`, `close`, `list`, `goto`, `back`, `forward`, `reload`,
 `default`) and `--format json`; failures exit 1 with a one-line error. Session
 profiles live under `~/.webskrap/browser/<name>/` (`WEBSKRAP_BROWSER_DIR`
 overrides the root). Refs go stale when the DOM changes; snapshot again.
-Limitations: one page per session, bundled Chromium only, no tabs, network
-mocking, tracing, or video; history navigation always reloads.
+Limitations: one page per session, bundled Chromium only, and no commands for
+tabs, network mocking, tracing, or video. History navigation always reloads.
 
 ## MCP
 

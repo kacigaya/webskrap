@@ -7,7 +7,7 @@ description: Use WebSkrap as an MCP web scraping server for LLM agents that need
 
 WebSkrap includes an MCP server so AI agents can fetch live web pages with a browser-backed scraper and receive clean page text instead of raw HTML.
 
-This is useful for coding agents, research agents, and automation workflows that need current page content but should avoid flooding the language model with scripts, styles, and markup noise.
+Use it when an agent needs current page content without the scripts, styles, and markup noise that would otherwise fill the model's context.
 
 ## Start the MCP server
 
@@ -17,7 +17,8 @@ webskrap install
 webskrap-mcp
 ```
 
-The MCP server exposes tools such as `fetch`, `stealth_fetch`, and `doctor`.
+The server exposes `fetch`, `stealth_fetch`, and `doctor`, plus `browser_*` tools for
+persistent interactive sessions.
 
 ## CLI output for agents
 
@@ -31,7 +32,7 @@ The JSON includes `url`, `final_url`, `status`, `ok`, `title`, `headers`, `text`
 
 ## Why clean text matters
 
-Raw HTML can be thousands of tokens of boilerplate. WebSkrap focuses on browser-backed fetching with output formats that are easier for LLMs and agents to consume.
+Raw HTML spends thousands of tokens on tags, inline scripts, and styles the model never reads. Both fetch tools return visible page text by default, typically 5-10x smaller than the HTML they came from. Pass `text_only=false` when the markup itself is the point.
 
 ## Related docs
 

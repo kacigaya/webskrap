@@ -46,7 +46,7 @@ const FEATURES = [
   {
     title: "MCP server",
     description:
-      "fetch and stealth_fetch tools for Claude, Codex, and any MCP agent. They return clean page text, not raw HTML.",
+      "fetch and stealth_fetch return clean page text to Claude, Codex, and any MCP agent. browser_* tools drive a live session.",
   },
   {
     title: "Built for LLMs",
@@ -151,8 +151,8 @@ export default function Home() {
           clean page text to LLM agents through MCP.
         </p>
         <p className="mt-4 max-w-2xl text-base text-muted-foreground">
-          Scrape the web like a real browser with Playwright, Patchright stealth sessions,
-          resource routing, browser profiles, and clean CLI output for crawlers and agents.
+          Fetch a page in one call, or keep a browser open across calls and drive it with
+          snapshots, clicks, and form fills from the CLI or an MCP client.
         </p>
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
           <Button size="xl" render={<Link href={DOCS_URL} />}>

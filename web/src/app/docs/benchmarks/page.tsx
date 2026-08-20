@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/table";
 
 export const metadata: Metadata = {
-  title: "Benchmarks — WebSkrap",
+  title: "Benchmarks | WebSkrap",
 };
 
 // Map a status string to a badge variant by keyword. ponytail: keyword match, add cases if new statuses appear.
@@ -305,7 +305,7 @@ export default function BenchmarksPage() {
           <p className="max-w-2xl text-sm text-muted-foreground">
             Run against a local HTTP server serving a synthetic page with many delayed
             sub-resources. No external sites are contacted, so results are deterministic.
-            This snapshot was generated on 2026-07-30 on a single ARM64 machine — run
+            This snapshot was generated on 2026-07-30 on a single ARM64 machine. Run
             it yourself with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">python benchmarks.py</code>.
           </p>

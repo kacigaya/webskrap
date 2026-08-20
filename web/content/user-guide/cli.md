@@ -180,7 +180,7 @@ webskrap browser screenshot page.png --full-page
 webskrap browser close
 ```
 
-`snapshot` prints an aria snapshot of the page in which each element carries a
+`snapshot` prints an aria snapshot of the page where each element carries a
 ref like `[ref=e15]`. Interaction commands (`click`, `dblclick`, `hover`,
 `fill`, `type`, `select`, `check`, `uncheck`) accept either a ref or any
 Playwright selector. Refs describe the current page, so take a fresh
@@ -199,15 +199,10 @@ so cookies and logins persist across `open`/`close`. Use
 `close --all` to stop every session.
 
 Deliberate limitations versus the official Playwright CLI: one page per
-session (no tab commands), bundled Chromium only, no network mocking,
-tracing, or video commands, and `back`/`forward` always reload the page (the
-back/forward cache is disabled so history navigation stays deterministic).
+session (no tab commands), bundled Chromium only, and no commands for network
+mocking, tracing, or video. `back` and `forward` always reload the page,
+because the back/forward cache is disabled to keep history navigation
+deterministic.
 
 The [MCP server](/docs/user-guide/mcp#interactive-browser-tools) exposes the
 same sessions to agents as `browser_*` tools.
-
-## Update notices
-
-The CLI checks PyPI at most once a day and prints an update notice to stderr
-when a newer WebSkrap release is available. The best-effort check is skipped in
-CI and when stderr is not a TTY. Set `WEBSKRAP_NO_UPDATE_CHECK=1` to disable it.

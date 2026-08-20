@@ -5,7 +5,7 @@ description: Compare WebSkrap and Playwright for Python web scraping, browser au
 
 # WebSkrap vs Playwright for Python Web Scraping
 
-Playwright is a powerful browser automation library. WebSkrap builds on top of Playwright and Patchright to provide a higher-level Python web scraping toolkit.
+Playwright is a browser automation library. WebSkrap builds on Playwright and Patchright and adds a higher-level Python scraping API on top.
 
 ## When Playwright is enough
 
@@ -15,7 +15,7 @@ Use Playwright directly when you need full low-level browser control and want to
 from playwright.async_api import async_playwright
 ```
 
-This is ideal for custom browser automation, testing flows, or highly specific scraping logic.
+That fits custom browser automation, testing flows, and scraping logic with unusual requirements.
 
 ## What WebSkrap adds
 

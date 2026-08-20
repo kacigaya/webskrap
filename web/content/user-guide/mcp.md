@@ -10,13 +10,13 @@ server. MCP clients such as Claude Desktop, Claude Code, and Codex can call it t
 drive a real browser directly. It runs over stdio and exposes fetch tools for
 one-shot scraping plus `browser_*` tools for persistent interactive sessions.
 
-**Built for LLMs.** Both `fetch` and `stealth_fetch` run the same CDP-leak-free
-Patchright stealth path the CLI uses (headless Chrome, `networkidle` wait), so
-JS-heavy and anti-bot pages that block naive scrapers still load. They return
-clean visible page text by default — no HTML tags, scripts, or CSS noise — so
-the model spends tokens on content, not markup (typically 5-10x fewer tokens
-than raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control.
-Pass `text_only=false` when you actually need the HTML.
+Both `fetch` and `stealth_fetch` run the same CDP-leak-free Patchright stealth
+path the CLI uses (headless Chrome, `networkidle` wait), so JS-heavy and
+anti-bot pages that block naive scrapers still load. They return clean visible
+page text by default, with no HTML tags, scripts, or CSS noise, so the model
+spends tokens on content instead of markup (typically 5-10x fewer tokens than
+raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control. Pass
+`text_only=false` when you need the HTML.
 
 ## Install
 
@@ -119,7 +119,7 @@ and store their profile under `~/.webskrap/browser/<name>/`
 A typical flow:
 
 1. `browser_open` with an optional `url`.
-2. `browser_snapshot` — each element carries a ref like `[ref=e15]`.
+2. `browser_snapshot`, where each element carries a ref like `[ref=e15]`.
 3. `browser_interact` with `action: "click"` and `target: "e15"` (or any
    Playwright selector). `fill` and `type` take one entry in `values`;
    `select` takes one or more.
@@ -130,10 +130,10 @@ Snapshots are truncated to `max_chars` (default 20000) and report
 `snapshot_truncated`; refs describe the current DOM, so take a fresh snapshot
 after the page changes. Failed actions return a one-line error.
 
-Limitations (same as the CLI): one page per session, bundled Chromium only,
-headless only over MCP, no tab, network-mocking, tracing, or video tools, and
-history navigation always reloads. The CLI additionally offers `back`,
-`forward`, `reload`, and headed mode.
+Limitations, the same as the CLI: one page per session, bundled Chromium only,
+and no tools for tabs, network mocking, tracing, or video. MCP sessions are
+always headless. The CLI additionally offers `back`, `forward`, `reload`, and
+headed mode.
 
 ## Register with a client
 
