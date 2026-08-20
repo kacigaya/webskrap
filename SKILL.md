@@ -1,6 +1,6 @@
 ---
 name: webskrap
-description: Use when writing, debugging, documenting, or reviewing Python scraping and browser automation code with WebSkrap. Covers async fetches, persistent sessions, Playwright/Patchright drivers, browser profiles, resource policies, screenshots, proxies, timeouts, LLM-friendly CLI output, MCP server usage, and safe examples that avoid CAPTCHA solving, login-wall bypassing, credential bypassing, or access-control circumvention.
+description: Use when writing, debugging, documenting, or reviewing Python scraping and browser automation code with WebSkrap. Covers async fetches, persistent sessions, Playwright/Patchright drivers, browser profiles, resource policies, screenshots, proxies, timeouts, LLM-friendly CLI output, MCP server usage.
 ---
 
 # WebSkrap
