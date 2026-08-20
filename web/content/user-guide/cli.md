@@ -203,6 +203,9 @@ session (no tab commands), bundled Chromium only, no network mocking,
 tracing, or video commands, and `back`/`forward` always reload the page (the
 back/forward cache is disabled so history navigation stays deterministic).
 
+The [MCP server](/docs/user-guide/mcp#interactive-browser-tools) exposes the
+same sessions to agents as `browser_*` tools.
+
 ## Update notices
 
 The CLI checks PyPI at most once a day and prints an update notice to stderr

@@ -7,7 +7,8 @@ description: Run WebSkrap as an MCP server so LLM agents can fetch live browser-
 
 WebSkrap ships a [Model Context Protocol](https://modelcontextprotocol.io)
 server. MCP clients such as Claude Desktop, Claude Code, and Codex can call it to
-drive a real browser directly. It runs over stdio and exposes three tools.
+drive a real browser directly. It runs over stdio and exposes fetch tools for
+one-shot scraping plus `browser_*` tools for persistent interactive sessions.
 
 **Built for LLMs.** Both `fetch` and `stealth_fetch` run the same CDP-leak-free
 Patchright stealth path the CLI uses (headless Chrome, `networkidle` wait), so
@@ -43,6 +44,15 @@ python -m webskrap.mcp_server
 | `fetch` | Fetch a URL with the Patchright stealth driver (waits for `networkidle`). |
 | `stealth_fetch` | Same stealth driver with finer fingerprint/WebRTC/UA controls. |
 | `doctor` | Check that Patchright and Chromium can launch. |
+| `browser_open` | Start (or reuse) a persistent headless browser session. |
+| `browser_goto` | Navigate the session's current page. |
+| `browser_snapshot` | Aria snapshot of the page with `eN` element refs. |
+| `browser_interact` | Click, fill, type, select, hover, check, or uncheck an element. |
+| `browser_press` | Press a keyboard key on the page. |
+| `browser_screenshot` | Screenshot the current page to a PNG file. |
+| `browser_eval` | Evaluate JavaScript and return the result. |
+| `browser_close` | Close a session (`delete_data` removes its profile). |
+| `browser_list` | List sessions and whether each is running. |
 
 Both fetch tools return `status`, `final_url`, `title`, `ok`, `headers`, and the
 page content in `text` (capped by `max_chars`, with `text_length` and
@@ -95,6 +105,35 @@ Patchright options:
   "webrtc_ip_handling_policy": null
 }
 ```
+
+## Interactive browser tools
+
+The `browser_*` tools drive the same persistent sessions as
+[`webskrap browser`](/docs/user-guide/cli#interactive-browser-sessions) in the
+CLI: `browser_open` launches a detached headless Chromium that keeps running
+between tool calls (and between MCP server restarts), and every other tool
+reconnects to it over CDP. Sessions are named (`session`, default `default`)
+and store their profile under `~/.webskrap/browser/<name>/`
+(root overridable with `WEBSKRAP_BROWSER_DIR`), so cookies and logins persist.
+
+A typical flow:
+
+1. `browser_open` with an optional `url`.
+2. `browser_snapshot` — each element carries a ref like `[ref=e15]`.
+3. `browser_interact` with `action: "click"` and `target: "e15"` (or any
+   Playwright selector). `fill` and `type` take one entry in `values`;
+   `select` takes one or more.
+4. `browser_eval` or `browser_screenshot` to read results.
+5. `browser_close` when done (`delete_data: true` to drop the profile).
+
+Snapshots are truncated to `max_chars` (default 20000) and report
+`snapshot_truncated`; refs describe the current DOM, so take a fresh snapshot
+after the page changes. Failed actions return a one-line error.
+
+Limitations (same as the CLI): one page per session, bundled Chromium only,
+headless only over MCP, no tab, network-mocking, tracing, or video tools, and
+history navigation always reloads. The CLI additionally offers `back`,
+`forward`, `reload`, and headed mode.
 
 ## Register with a client
 
