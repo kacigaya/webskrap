@@ -94,6 +94,28 @@ def test_session_running_rejects_recycled_and_dead_pids(tmp_path: Path) -> None:
     assert not browser_cli._session_running(session_dir, None)
 
 
+def test_goto_rejects_invalid_wait_until(tmp_path: Path) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["browser", "goto", "https://example.test", "--wait-until", "sometime"],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert "commit" in result.output
+
+
+def test_close_all_skips_stray_directories(tmp_path: Path) -> None:
+    (tmp_path / "not a session").mkdir()
+
+    result = runner.invoke(
+        cli.app, ["browser", "close", "--all", "--format", "json"], env=_env(tmp_path)
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"closed": []}
+
+
 def test_close_unknown_session_fails(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["browser", "close", "-s", "ghost"], env=_env(tmp_path))
 

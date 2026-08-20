@@ -18,6 +18,7 @@ import signal
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, NoReturn, TypeVar
@@ -29,6 +30,7 @@ from playwright.async_api import Page, async_playwright
 from rich.console import Console
 from rich.table import Table
 
+from webskrap.models import WaitUntil
 from webskrap.parsing import parse_wait_until
 
 browser_app = typer.Typer(
@@ -320,8 +322,15 @@ def open_command(
         _emit_state(payload, output_format)
 
 
-async def _goto(page: Page, url: str, wait_until: str) -> dict[str, Any]:
-    response = await page.goto(url, wait_until=parse_wait_until(wait_until))
+def _parse_wait_until(value: str) -> WaitUntil:
+    try:
+        return parse_wait_until(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
+
+
+async def _goto(page: Page, url: str, wait_until: WaitUntil) -> dict[str, Any]:
+    response = await page.goto(url, wait_until=wait_until)
     return {"status": response.status if response else None, **await _page_state(page)}
 
 
@@ -338,7 +347,17 @@ def close_command(
     output_format = _parse_output_format(format)
     if all_sessions:
         root = _sessions_root()
-        names = sorted(p.name for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+        # Skip stray directories that are not valid session names, so one
+        # foreign entry cannot abort closing the real sessions.
+        names = (
+            sorted(
+                p.name
+                for p in root.iterdir()
+                if p.is_dir() and SESSION_NAME_PATTERN.fullmatch(p.name)
+            )
+            if root.is_dir()
+            else []
+        )
     else:
         if _read_state(_session_dir(session)) is None and not delete_data:
             _fail(f"session '{session}' is not open")
@@ -364,13 +383,19 @@ def _close_session(name: str, *, delete_data: bool) -> dict[str, Any]:
 
 
 def _terminate(session_dir: Path, pid: int) -> None:
-    os.kill(pid, signal.SIGTERM)
+    # The browser can exit between the running check and each kill; a vanished
+    # process is a successful close, not an error.
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
     deadline = time.monotonic() + CLOSE_TIMEOUT_S
     while time.monotonic() < deadline:
         if not _session_running(session_dir, {"pid": pid, "port": 0}):
             return
         time.sleep(0.05)
-    os.kill(pid, signal.SIGKILL)
+    with suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
 
 
 @browser_app.command("list")
@@ -422,8 +447,9 @@ def goto_command(
 ) -> None:
     """Navigate the current page."""
     output_format = _parse_output_format(format)
+    parsed_wait_until = _parse_wait_until(wait_until)
     state = _run_page_command(
-        session, lambda page: _goto(page, url, wait_until), timeout_ms=timeout_ms
+        session, lambda page: _goto(page, url, parsed_wait_until), timeout_ms=timeout_ms
     )
     _emit_state(state, output_format)
 
