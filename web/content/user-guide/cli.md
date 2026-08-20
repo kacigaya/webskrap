@@ -199,8 +199,9 @@ so cookies and logins persist across `open`/`close`. Use
 `close --all` to stop every session.
 
 Deliberate limitations versus the official Playwright CLI: one page per
-session (no tab commands), bundled Chromium only, and no network mocking,
-tracing, or video commands.
+session (no tab commands), bundled Chromium only, no network mocking,
+tracing, or video commands, and `back`/`forward` always reload the page (the
+back/forward cache is disabled so history navigation stays deterministic).
 
 ## Update notices
 

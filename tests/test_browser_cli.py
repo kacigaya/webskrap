@@ -15,6 +15,7 @@ INTERACTIVE_PAGE = (
     "data:text/html,<title>cli-test</title>"
     "<button onclick=\"this.textContent='clicked'\">Press me</button>"
     '<input aria-label="Name">'
+    '<select aria-label="Pet"><option>cat</option><option>dog</option></select>'
 )
 
 
@@ -105,15 +106,24 @@ def test_goto_rejects_invalid_wait_until(tmp_path: Path) -> None:
     assert "commit" in result.output
 
 
-def test_close_all_skips_stray_directories(tmp_path: Path) -> None:
+def test_close_all_and_list_ignore_non_session_directories(tmp_path: Path) -> None:
     (tmp_path / "not a session").mkdir()
+    (tmp_path / "backup").mkdir()
+
+    listed = runner.invoke(cli.app, ["browser", "list", "--format", "json"], env=_env(tmp_path))
+    assert listed.exit_code == 0, listed.output
+    assert json.loads(listed.output) == {"sessions": []}
 
     result = runner.invoke(
-        cli.app, ["browser", "close", "--all", "--format", "json"], env=_env(tmp_path)
+        cli.app,
+        ["browser", "close", "--all", "--delete-data", "--format", "json"],
+        env=_env(tmp_path),
     )
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {"closed": []}
+    assert (tmp_path / "not a session").is_dir()
+    assert (tmp_path / "backup").is_dir()
 
 
 def test_close_unknown_session_fails(tmp_path: Path) -> None:
@@ -173,6 +183,15 @@ def test_browser_session_lifecycle(tmp_path: Path) -> None:
             env=env,
         )
         assert json.loads(value.output)["result"] == "Gaya"
+
+        selected = runner.invoke(cli.app, ["browser", "select", "select", "dog"], env=env)
+        assert selected.exit_code == 0, selected.output
+        pet = runner.invoke(
+            cli.app,
+            ["browser", "eval", "document.querySelector('select').value", "--format", "json"],
+            env=env,
+        )
+        assert json.loads(pet.output)["result"] == "dog"
 
         # Regression: bfcache restores re-fire no load events; the browser is
         # launched with bfcache disabled so history navigation cannot hang.

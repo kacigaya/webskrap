@@ -85,7 +85,10 @@ def _read_state(session_dir: Path) -> dict[str, Any] | None:
 
 
 def _write_state(session_dir: Path, state: dict[str, Any]) -> None:
-    _state_path(session_dir).write_text(json.dumps(state), encoding="utf-8")
+    # Atomic replace: a command must never read a half-written state file.
+    temp_path = _state_path(session_dir).with_suffix(".json.tmp")
+    temp_path.write_text(json.dumps(state), encoding="utf-8")
+    os.replace(temp_path, _state_path(session_dir))
 
 
 def _session_running(session_dir: Path, state: dict[str, Any] | None) -> bool:
@@ -109,6 +112,14 @@ def _session_running(session_dir: Path, state: dict[str, Any] | None) -> bool:
             return False
         return True
     return str(session_dir / "user-data").encode() in cmdline
+
+
+def _is_session_dir(path: Path) -> bool:
+    return (
+        path.is_dir()
+        and SESSION_NAME_PATTERN.fullmatch(path.name) is not None
+        and (_state_path(path).exists() or (path / "user-data").is_dir())
+    )
 
 
 def _fail(message: str) -> NoReturn:
@@ -142,6 +153,22 @@ async def _chromium_executable() -> str:
     _fail("Chromium is not installed. Run: webskrap install")
 
 
+def _signal_group(pid: int, sig: signal.Signals) -> None:
+    """Signal the browser's whole process group; a vanished group is fine.
+
+    The browser is launched with ``start_new_session=True``, so its PID is the
+    group leader. Signalling only the leader (e.g. SIGKILL) would orphan
+    renderer children that keep holding the profile's SingletonLock.
+    """
+    try:
+        os.killpg(pid, sig)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        with suppress(ProcessLookupError):
+            os.kill(pid, sig)
+
+
 def _launch_browser(session_dir: Path, *, executable: str, headless: bool) -> tuple[int, int]:
     """Start a detached Chromium and return its (pid, CDP port)."""
     user_data_dir = session_dir / "user-data"
@@ -160,8 +187,10 @@ def _launch_browser(session_dir: Path, *, executable: str, headless: bool) -> tu
         "--no-sandbox",
         "--no-first-run",
         "--no-default-browser-check",
-        # Playwright also disables the back/forward cache: a bfcache restore
-        # re-fires no load events, which strands go_back/go_forward waits.
+        # A bfcache restore re-fires no load events, stranding the
+        # go_back/go_forward load wait. Playwright's own launcher keeps bfcache
+        # and tracks restores internally, but that tracking is unavailable when
+        # attaching over CDP, so trade bfcache for deterministic load events.
         "--disable-features=BackForwardCache",
     ]
     if headless:
@@ -175,7 +204,13 @@ def _launch_browser(session_dir: Path, *, executable: str, headless: bool) -> tu
             stderr=log,
             start_new_session=True,
         )
-    return process.pid, _wait_for_devtools_port(port_file, process, log_path)
+    try:
+        return process.pid, _wait_for_devtools_port(port_file, process, log_path)
+    except BaseException:
+        # Ctrl-C or a startup failure must not orphan a detached browser that
+        # holds the profile lock with no state file pointing at it.
+        _signal_group(process.pid, signal.SIGKILL)
+        raise
 
 
 def _wait_for_devtools_port(
@@ -192,7 +227,6 @@ def _wait_for_devtools_port(
         if first_line.isdigit():
             return int(first_line)
         time.sleep(0.05)
-    process.terminate()
     _fail(f"browser did not report a DevTools port within {LAUNCH_TIMEOUT_S:.0f}s")
 
 
@@ -204,8 +238,12 @@ def _run_page_command(
 ) -> T:
     try:
         return asyncio.run(_run_page_action(session, action, timeout_ms))
-    except PlaywrightError as exc:
-        _fail(str(exc).strip().splitlines()[0])
+    except (typer.Exit, typer.Abort, typer.BadParameter):
+        raise
+    except Exception as exc:
+        # One-line error and exit code 1 for every action failure, Playwright
+        # or otherwise (e.g. an unwritable screenshot path).
+        _fail(str(exc).strip().splitlines()[0] or type(exc).__name__)
 
 
 async def _run_page_action(
@@ -296,7 +334,13 @@ def open_command(
             "headless": not headed,
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
-        _write_state(session_dir, state)
+        try:
+            _write_state(session_dir, state)
+        except BaseException:
+            # Without a state file the running browser would be unreachable
+            # and would hold the profile lock against the next open.
+            _signal_group(pid, signal.SIGKILL)
+            raise
 
     payload: dict[str, Any] = {
         "session": session,
@@ -347,16 +391,11 @@ def close_command(
     output_format = _parse_output_format(format)
     if all_sessions:
         root = _sessions_root()
-        # Skip stray directories that are not valid session names, so one
-        # foreign entry cannot abort closing the real sessions.
+        # Only touch directories that look like sessions (state file or a
+        # browser profile). A stray directory under the root must be neither
+        # deleted by --delete-data nor able to abort closing real sessions.
         names = (
-            sorted(
-                p.name
-                for p in root.iterdir()
-                if p.is_dir() and SESSION_NAME_PATTERN.fullmatch(p.name)
-            )
-            if root.is_dir()
-            else []
+            sorted(p.name for p in root.iterdir() if _is_session_dir(p)) if root.is_dir() else []
         )
     else:
         if _read_state(_session_dir(session)) is None and not delete_data:
@@ -383,19 +422,13 @@ def _close_session(name: str, *, delete_data: bool) -> dict[str, Any]:
 
 
 def _terminate(session_dir: Path, pid: int) -> None:
-    # The browser can exit between the running check and each kill; a vanished
-    # process is a successful close, not an error.
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
+    _signal_group(pid, signal.SIGTERM)
     deadline = time.monotonic() + CLOSE_TIMEOUT_S
     while time.monotonic() < deadline:
         if not _session_running(session_dir, {"pid": pid, "port": 0}):
             return
         time.sleep(0.05)
-    with suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGKILL)
+    _signal_group(pid, signal.SIGKILL)
 
 
 @browser_app.command("list")
@@ -405,7 +438,7 @@ def list_command(format: FormatOption = "human") -> None:
     root = _sessions_root()
     sessions = []
     if root.is_dir():
-        for path in sorted(p for p in root.iterdir() if p.is_dir()):
+        for path in sorted(p for p in root.iterdir() if _is_session_dir(p)):
             state = _read_state(path)
             running = _session_running(path, state)
             sessions.append(
