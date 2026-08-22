@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Dependabot configuration for the Python, GitHub Actions, and docs-site
+  dependency trees, grouped so routine minor and patch bumps arrive as one
+  weekly pull request and majors stay separate. `pip-audit` already failed CI
+  on a known vulnerability; this is what opens the pull request that fixes it.
+
 ## [1.0.0] - 2026-08-22
 
 First stable release. The public API is what `webskrap.__all__` exports plus

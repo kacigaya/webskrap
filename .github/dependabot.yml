@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  # Runtime and dev dependencies. pip-audit already fails CI on a known
+  # vulnerability; this is what actually opens the PR that fixes it.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per week for routine bumps; anything major stays separate so a
+      # breaking change is reviewed on its own.
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Actions are pinned by tag, so a compromised or abandoned action is only
+  # caught by watching for updates.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The docs site ships only to GitHub Pages, never to PyPI, but it is still
+  # published JavaScript. `bun audit` runs in the Pages workflow.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      web-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
