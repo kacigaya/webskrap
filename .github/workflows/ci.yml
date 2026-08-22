@@ -11,7 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  # Static checks and packaging do not vary by interpreter, so they run once.
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -27,14 +28,45 @@ jobs:
         run: uvx --from pyright==1.1.411 pyright --pythonpath .venv/bin/python src/webskrap
       - name: Audit dependencies
         run: uv run --extra dev --with pip-audit==2.9.0 pip-audit
+      - name: Build
+        run: uv build
+      - name: Check package metadata
+        run: uv run --with twine twine check dist/*
+
+  # The package advertises 3.11-3.13, so the suite runs on each of them.
+  # Browser downloads are skipped here; the browser job below covers them once.
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
       # Keep third-party live tests opt-in; local browser tests run below.
       - name: Test
         run: uv run --extra dev pytest -q -m "not browser and not live"
+
+  # Browser tests need a Chromium download, so they run on one interpreter.
+  # The coverage gate lives here because it is the only job that exercises the
+  # whole library, browser paths included.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
       - name: Install browsers
         run: |
           uv run playwright install --with-deps chromium
           uv run patchright install chromium
-      - name: Browser test
-        run: uv run --extra dev pytest -q -m "browser and not live"
-      - name: Build
-        run: uv run --with build python -m build
+      - name: Test with coverage
+        run: >
+          uv run --extra dev pytest -q -m "not live"
+          --cov=webskrap --cov-report=term-missing --cov-fail-under=85

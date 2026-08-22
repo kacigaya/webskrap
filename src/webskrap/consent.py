@@ -258,7 +258,10 @@ async def _decline_in_frame(frame: Any, deadline: float) -> str | None:
                 # notices live in frames, and consent widgets do not score
                 # cursor trajectory.
                 await element.click(timeout=click_timeout)
-            except Exception:  # noqa: BLE001 - covered, detached, or navigating
+            # S112/BLE001: one unclickable candidate (covered, detached, or the
+            # page already navigating) must not abandon the remaining ones, and
+            # the library logs nothing by design.
+            except Exception:  # noqa: BLE001, S112
                 continue
             return strategy
     return None

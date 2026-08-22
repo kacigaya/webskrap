@@ -130,6 +130,27 @@ Snapshots are truncated to `max_chars` (default 20000) and report
 `snapshot_truncated`; refs describe the current DOM, so take a fresh snapshot
 after the page changes. Failed actions return a one-line error.
 
+### Screenshot output is confined
+
+`browser_screenshot` writes only under `./webskrap-output`, relative to the
+directory the server runs in. Set `WEBSKRAP_OUTPUT_DIR` to move that root, and
+point it somewhere you are willing to have written to — not a source tree or
+`$HOME`.
+
+`path` is a relative destination inside that root. Nested paths work
+(`runs/today/page.png`, directories created as needed); absolute paths, `..`
+traversal, and symlinks leaving the root are rejected before the browser is
+touched. The model driving these tools reads untrusted pages, so its file
+destinations are treated as untrusted input.
+
+### Chromium sandbox
+
+MCP sessions keep Chromium's OS sandbox. Hosts that cannot sandbox must set
+`WEBSKRAP_CHROMIUM_SANDBOX=0` in the server's environment; it is deliberately
+not a tool argument, so a page cannot talk the model into weakening renderer
+isolation. Session profiles under `~/.webskrap/browser/<name>/` are created
+`0700` on POSIX.
+
 Limitations, the same as the CLI: one page per session, bundled Chromium only,
 and no tools for tabs, network mocking, tracing, or video. MCP sessions are
 always headless. The CLI additionally offers `back`, `forward`, `reload`, and

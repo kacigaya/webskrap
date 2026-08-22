@@ -194,9 +194,30 @@ code 1 and a one-line error instead of a traceback.
 Sessions are named with `-s/--session` (default `default`) and listed with
 `webskrap browser list`. Each session stores its browser profile under
 `~/.webskrap/browser/<name>/` (override the root with `WEBSKRAP_BROWSER_DIR`),
-so cookies and logins persist across `open`/`close`. Use
-`webskrap browser close --delete-data` to remove a session's profile, or
-`close --all` to stop every session.
+so cookies and logins persist across `open`/`close`. Those directories are
+created `0700` on POSIX, because they hold cookies and logged-in state; they
+are not encrypted, so use `webskrap browser close --delete-data` to remove a
+session's profile, or `close --all` to stop every session. A root you set up
+yourself via `WEBSKRAP_BROWSER_DIR` keeps whatever permissions you gave it.
+
+### Chromium sandbox
+
+`open` keeps Chromium's OS sandbox, which is what contains a renderer
+compromised by a hostile page. Some environments cannot start it — containers
+without unprivileged user namespaces, or images that disable them — and there
+the browser exits during startup with a message saying so.
+
+```bash
+webskrap browser open --no-sandbox            # this session only
+WEBSKRAP_CHROMIUM_SANDBOX=0 webskrap browser open   # every session on this host
+```
+
+`--no-sandbox` wins over the environment variable, and a session started
+without the sandbox prints a warning. `webskrap browser list` shows a
+`Sandbox` column for running sessions. Prefer fixing the host: sandboxing is
+the difference between a compromised renderer and a compromised machine.
+WebSkrap never drops the sandbox on its own, and never retries a failed launch
+without it.
 
 Deliberate limitations versus the official Playwright CLI: one page per
 session (no tab commands), bundled Chromium only, and no commands for network

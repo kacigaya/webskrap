@@ -16,7 +16,7 @@ import os
 import re
 import shutil
 import signal
-import subprocess
+import subprocess  # noqa: S404 - launches Chromium with a fixed argv, never a shell
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -29,6 +29,7 @@ from playwright.async_api import Locator, Page, async_playwright
 
 from webskrap.client import WebSkrapError
 from webskrap.models import WaitUntil
+from webskrap.paths import secure_directory
 
 T = TypeVar("T")
 
@@ -39,6 +40,16 @@ LAUNCH_TIMEOUT_S = 20.0
 CLOSE_TIMEOUT_S = 5.0
 DEFAULT_ACTION_TIMEOUT_MS = 10_000.0
 DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000.0
+SANDBOX_ENV = "WEBSKRAP_CHROMIUM_SANDBOX"
+# Chromium prints one of these when its setuid/namespace sandbox cannot start
+# (unprivileged user namespaces off, or running as root in a container).
+SANDBOX_FAILURE_MARKERS = (
+    "no usable sandbox",
+    "sandboxhelper",
+    "setuid sandbox",
+    "clone_newuser",
+    "--no-sandbox",
+)
 
 # name -> (Locator method, value arity: "none" | "one" | "many")
 ELEMENT_ACTIONS: dict[str, tuple[str, str]] = {
@@ -54,12 +65,38 @@ ELEMENT_ACTIONS: dict[str, tuple[str, str]] = {
 
 
 def sessions_root() -> Path:
+    """Return the directory holding every persistent session's profile data.
+
+    ``WEBSKRAP_BROWSER_DIR`` overrides the default ``~/.webskrap/browser``.
+    """
     if override := os.environ.get("WEBSKRAP_BROWSER_DIR"):
         return Path(override)
     return Path.home() / ".webskrap" / "browser"
 
 
+def sandbox_enabled(chromium_sandbox: bool | None = None) -> bool:
+    """Resolve whether a session's Chromium keeps its OS sandbox.
+
+    An explicit ``chromium_sandbox`` argument wins. Otherwise the
+    ``WEBSKRAP_CHROMIUM_SANDBOX`` environment variable decides, so deployments
+    that cannot sandbox (unprivileged containers) can opt out for callers such
+    as the MCP server, which deliberately does not expose the switch to models.
+    Sandboxing is on unless something explicitly turns it off.
+    """
+    if chromium_sandbox is not None:
+        return chromium_sandbox
+    value = os.environ.get(SANDBOX_ENV)
+    if value is None:
+        return True
+    return value.strip().lower() not in ("0", "false", "no", "off")
+
+
 def session_dir(name: str) -> Path:
+    """Return a session's directory, rejecting names that escape the root.
+
+    Raises:
+        WebSkrapError: If ``name`` is not letters, digits, ``.``, ``_`` or ``-``.
+    """
     # Session names become directory names, so reject path separators and
     # anything else that could escape the sessions root.
     if not SESSION_NAME_PATTERN.fullmatch(name):
@@ -68,11 +105,27 @@ def session_dir(name: str) -> Path:
     return sessions_root() / name
 
 
+def create_session_dir(name: str) -> Path:
+    """Create a session's directory tree owner-only and return it.
+
+    Profile data under it holds cookies and logged-in state, so the session
+    directory is created (or tightened to) ``0700``. The sessions root is only
+    tightened when WebSkrap creates it: a ``WEBSKRAP_BROWSER_DIR`` the user
+    already set up may be shared on purpose, and the per-session directories
+    inside it are what actually hold the cookies.
+    """
+    directory = session_dir(name)
+    secure_directory(sessions_root(), tighten_existing=False)
+    return secure_directory(directory)
+
+
 def state_path(directory: Path) -> Path:
+    """Return the path of a session directory's state file."""
     return directory / "state.json"
 
 
 def read_state(directory: Path) -> dict[str, Any] | None:
+    """Return a session's recorded state, or None when missing or unreadable."""
     try:
         state = json.loads(state_path(directory).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -83,6 +136,7 @@ def read_state(directory: Path) -> dict[str, Any] | None:
 
 
 def write_state(directory: Path, state: dict[str, Any]) -> None:
+    """Write a session's state file so readers never see a partial file."""
     # Atomic replace: a concurrent action must never read a half-written file.
     temp_path = state_path(directory).with_suffix(".json.tmp")
     temp_path.write_text(json.dumps(state), encoding="utf-8")
@@ -113,6 +167,7 @@ def session_running(directory: Path, state: dict[str, Any] | None) -> bool:
 
 
 def is_session_dir(path: Path) -> bool:
+    """True when ``path`` looks like a session directory this tool manages."""
     return (
         path.is_dir()
         and SESSION_NAME_PATTERN.fullmatch(path.name) is not None
@@ -121,6 +176,12 @@ def is_session_dir(path: Path) -> bool:
 
 
 async def chromium_executable() -> str:
+    """Return the Chromium binary path, preferring Playwright's download.
+
+    Raises:
+        WebSkrapError: If neither Playwright nor Patchright has Chromium
+            installed.
+    """
     async with async_playwright() as playwright:
         path = playwright.chromium.executable_path
     if Path(path).exists():
@@ -154,10 +215,29 @@ def signal_group(pid: int, sig: signal.Signals) -> None:
             os.kill(pid, sig)
 
 
-def launch_browser(directory: Path, *, executable: str, headless: bool) -> tuple[int, int]:
-    """Start a detached Chromium and return its (pid, CDP port)."""
-    user_data_dir = directory / "user-data"
-    user_data_dir.mkdir(parents=True, exist_ok=True)
+def launch_browser(
+    directory: Path,
+    *,
+    executable: str,
+    headless: bool,
+    chromium_sandbox: bool = True,
+) -> tuple[int, int]:
+    """Start a detached Chromium and return its (pid, CDP port).
+
+    Args:
+        directory: Session directory; the profile lives in ``user-data`` below it.
+        executable: Chromium binary to run.
+        headless: Launch without a visible window.
+        chromium_sandbox: Keep Chromium's OS sandbox. Passing False adds
+            ``--no-sandbox``, which lets a compromised renderer processing a
+            hostile page reach the rest of the machine. Only do that where the
+            sandbox genuinely cannot start.
+
+    Raises:
+        WebSkrapError: If the browser exits during startup or never reports a
+            DevTools port.
+    """
+    user_data_dir = secure_directory(directory / "user-data")
     port_file = user_data_dir / DEVTOOLS_PORT_FILE
     port_file.unlink(missing_ok=True)
     log_path = directory / "browser.log"
@@ -166,10 +246,6 @@ def launch_browser(directory: Path, *, executable: str, headless: bool) -> tuple
         executable,
         "--remote-debugging-port=0",
         f"--user-data-dir={user_data_dir}",
-        # Playwright launches Chromium with the sandbox disabled by default
-        # (chromium_sandbox=False); mirror that so `open` works wherever
-        # `webskrap fetch` does.
-        "--no-sandbox",
         "--no-first-run",
         "--no-default-browser-check",
         # A bfcache restore re-fires no load events, stranding the
@@ -178,12 +254,14 @@ def launch_browser(directory: Path, *, executable: str, headless: bool) -> tuple
         # attaching over CDP, so trade bfcache for deterministic load events.
         "--disable-features=BackForwardCache",
     ]
+    if not chromium_sandbox:
+        command.append("--no-sandbox")
     if headless:
         command.append("--headless=new")
     command.append("about:blank")
 
     with log_path.open("wb") as log:
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell, path from Playwright
             command,
             stdout=log,
             stderr=log,
@@ -198,13 +276,32 @@ def launch_browser(directory: Path, *, executable: str, headless: bool) -> tuple
         raise
 
 
+def _sandbox_hint(log_path: Path) -> str:
+    """Return advice about the sandbox when the browser log blames it.
+
+    Never retries without the sandbox: dropping it silently would turn a
+    configuration problem into a permanent, invisible loss of isolation.
+    """
+    try:
+        log = log_path.read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        return ""
+    if not any(marker in log for marker in SANDBOX_FAILURE_MARKERS):
+        return ""
+    return (
+        ". Chromium's sandbox could not start. Enable unprivileged user "
+        "namespaces, or accept the weaker isolation with "
+        f"'webskrap browser open --no-sandbox' (or {SANDBOX_ENV}=0)"
+    )
+
+
 def _wait_for_devtools_port(
     port_file: Path, process: subprocess.Popen[bytes], log_path: Path
 ) -> int:
     deadline = time.monotonic() + LAUNCH_TIMEOUT_S
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            msg = f"browser exited during startup; see {log_path}"
+            msg = f"browser exited during startup; see {log_path}{_sandbox_hint(log_path)}"
             raise WebSkrapError(msg)
         try:
             first_line = port_file.read_text(encoding="utf-8").splitlines()[0].strip()
@@ -217,23 +314,53 @@ def _wait_for_devtools_port(
     raise WebSkrapError(msg)
 
 
-async def open_session(name: str, *, headless: bool = True) -> dict[str, Any]:
+async def open_session(
+    name: str,
+    *,
+    headless: bool = True,
+    chromium_sandbox: bool | None = None,
+) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
-    Returns ``{"session", "pid", "port", "reused"}``.
+    The session directory is created owner-only; it accumulates cookies and
+    logged-in state that outlive the calling process.
+
+    Args:
+        name: Session name; letters, digits, ``.``, ``_`` or ``-``.
+        headless: Launch without a visible window.
+        chromium_sandbox: Keep Chromium's OS sandbox. None consults
+            ``WEBSKRAP_CHROMIUM_SANDBOX`` and otherwise sandboxes. See
+            :func:`sandbox_enabled` and :func:`launch_browser`.
+
+    Returns:
+        ``{"session", "pid", "port", "reused", "chromium_sandbox"}``.
+
+    Raises:
+        WebSkrapError: If the name is invalid or the browser fails to start.
     """
-    directory = session_dir(name)
+    # Unconditional, so a session directory created by an older version (or
+    # under a loose umask) is tightened on the next open, not only on relaunch.
+    directory = create_session_dir(name)
     existing = read_state(directory)
     state = existing if session_running(directory, existing) else None
     reused = state is not None
 
     if state is None:
         executable = await chromium_executable()
-        pid, port = launch_browser(directory, executable=executable, headless=headless)
+        sandboxed = sandbox_enabled(chromium_sandbox)
+        pid, port = launch_browser(
+            directory,
+            executable=executable,
+            headless=headless,
+            chromium_sandbox=sandboxed,
+        )
         state = {
             "pid": pid,
             "port": port,
             "headless": headless,
+            # Recorded so `browser list` can show which running sessions gave
+            # up renderer isolation; a reused session keeps its launch value.
+            "chromium_sandbox": sandboxed,
             "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
         try:
@@ -244,7 +371,13 @@ async def open_session(name: str, *, headless: bool = True) -> dict[str, Any]:
             signal_group(pid, signal.SIGKILL)
             raise
 
-    return {"session": name, "pid": state["pid"], "port": state["port"], "reused": reused}
+    return {
+        "session": name,
+        "pid": state["pid"],
+        "port": state["port"],
+        "reused": reused,
+        "chromium_sandbox": bool(state.get("chromium_sandbox", False)),
+    }
 
 
 def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
@@ -270,6 +403,7 @@ def _terminate(directory: Path, pid: int) -> None:
 
 
 def list_session_names() -> list[str]:
+    """Return the names of every on-disk session, sorted."""
     root = sessions_root()
     if not root.is_dir():
         return []
@@ -277,6 +411,13 @@ def list_session_names() -> list[str]:
 
 
 def list_sessions() -> list[dict[str, Any]]:
+    """Return one entry per session.
+
+    Each is ``{"session", "running", "pid", "port", "chromium_sandbox"}``. The
+    last three are None for a session that is not running; ``chromium_sandbox``
+    reports how the running browser was launched, so an operator can see which
+    sessions gave up renderer isolation.
+    """
     sessions = []
     for name in list_session_names():
         directory = sessions_root() / name
@@ -288,6 +429,9 @@ def list_sessions() -> list[dict[str, Any]]:
                 "running": running,
                 "pid": state["pid"] if running and state else None,
                 "port": state["port"] if running and state else None,
+                "chromium_sandbox": (
+                    bool(state.get("chromium_sandbox", False)) if running and state else None
+                ),
             }
         )
     return sessions
@@ -377,14 +521,17 @@ async def element_action(page: Page, action: str, target: str, values: list[str]
 
 
 async def page_state(page: Page) -> dict[str, Any]:
+    """Return the page's current ``{"url", "title"}``."""
     return {"url": page.url, "title": await page.title()}
 
 
 async def goto(page: Page, url: str, wait_until: WaitUntil) -> dict[str, Any]:
+    """Navigate ``page`` to ``url`` and return its status and state."""
     response = await page.goto(url, wait_until=wait_until)
     return {"status": response.status if response else None, **await page_state(page)}
 
 
 async def snapshot(page: Page, *, depth: int | None = None) -> dict[str, Any]:
+    """Return the page state plus an aria snapshot carrying ``eN`` refs."""
     tree = await page.locator("body").aria_snapshot(mode="ai", depth=depth)
     return {**await page_state(page), "snapshot": tree}

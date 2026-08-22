@@ -1,3 +1,11 @@
+"""Bundled browser profiles and lookup by name.
+
+Each profile is a coherent set of viewport, screen, locale, timezone and
+language values: mixing a phone viewport with a desktop user agent is exactly
+the mismatch fingerprinters look for. Lookups return deep copies, so callers
+can edit a profile without changing the bundled one.
+"""
+
 from __future__ import annotations
 
 from webskrap.models import BrowserProfile, Viewport
@@ -40,10 +48,20 @@ _PROFILES: dict[str, BrowserProfile] = {
 
 
 def list_profiles() -> tuple[BrowserProfile, ...]:
+    """Return every bundled profile."""
     return tuple(_PROFILES.values())
 
 
 def get_profile(name: str | BrowserProfile | None = None) -> BrowserProfile:
+    """Return a deep copy of a bundled profile by name.
+
+    Args:
+        name: Profile name, an existing profile (returned unchanged), or None
+            for ``desktop-chrome``.
+
+    Raises:
+        ValueError: If no bundled profile has that name.
+    """
     if isinstance(name, BrowserProfile):
         return name
     key = name or "desktop-chrome"

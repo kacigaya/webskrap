@@ -4,6 +4,7 @@ import json
 import subprocess
 from typing import Any
 
+import pytest
 from typer.testing import CliRunner
 
 from webskrap import cli
@@ -295,3 +296,65 @@ def test_install_human_output(monkeypatch: Any) -> None:
     assert "patchright" in result.output
     assert "install" in result.output
     assert "chromium" in result.output
+
+
+def test_profiles_human_output_lists_every_profile() -> None:
+    result = runner.invoke(cli.app, ["profiles"])
+
+    assert result.exit_code == 0, result.output
+    for name in ("desktop-chrome", "desktop-edge", "mobile-chrome"):
+        assert name in result.output
+
+
+def test_doctor_human_success(monkeypatch: Any) -> None:
+    async def fake_doctor() -> dict[str, object]:
+        return {"ok": True, "message": "Patchright headless chrome is ready."}
+
+    monkeypatch.setattr(cli, "_doctor", fake_doctor)
+
+    result = runner.invoke(cli.app, ["doctor"])
+
+    assert result.exit_code == 0, result.output
+    assert "ready" in result.output
+
+
+def test_doctor_human_failure_shows_the_hint(monkeypatch: Any) -> None:
+    async def fake_doctor() -> dict[str, object]:
+        return {"ok": False, "message": "did not launch", "hint": "Run: webskrap install"}
+
+    monkeypatch.setattr(cli, "_doctor", fake_doctor)
+
+    result = runner.invoke(cli.app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "did not launch" in result.output
+    assert "webskrap install" in result.output
+
+
+def test_install_human_reports_failures(monkeypatch: Any) -> None:
+    def fake_run(command: tuple[str, ...], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="download failed")
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = runner.invoke(cli.app, ["install"])
+
+    assert result.exit_code == 1
+    assert "FAILED:" in result.output
+    assert "download failed" in result.output
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "expected"),
+    [
+        pytest.param("--format", "yaml", "human, json", id="output-format"),
+        pytest.param("--wait-until", "eventually", "commit", id="wait-until"),
+        pytest.param("--webrtc-ip-handling-policy", "off", "disable_non_proxied_udp", id="webrtc"),
+        pytest.param("--resource-policy", "none", "resource-policy", id="resource-policy"),
+    ],
+)
+def test_fetch_rejects_invalid_option_values(option: str, value: str, expected: str) -> None:
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", option, value])
+
+    assert result.exit_code == 2
+    assert expected in result.output

@@ -1,3 +1,12 @@
+"""Async scraping client: Playwright/Patchright sessions, fetches, and clicks.
+
+:class:`WebSkrapClient` owns the browser driver and hands out
+:class:`WebSkrapSession` objects; a session owns one browser context and the
+pages opened from it. Both are async context managers, and both raise
+:class:`WebSkrapError` for WebSkrap-level failures while letting Playwright's
+own errors (timeouts, navigation failures) propagate unchanged.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +48,12 @@ def _async_playwright(driver: str):
 
 
 class WebSkrapError(RuntimeError):
-    pass
+    """Raised for every WebSkrap-level failure.
+
+    Covers bad configuration, closed clients and sessions, missing browsers,
+    and rejected paths. Playwright's own exceptions are left alone so callers
+    can still catch a navigation timeout as a timeout.
+    """
 
 
 async def browser_doctor(
@@ -80,6 +94,21 @@ async def browser_doctor(
 
 
 class WebSkrapSession:
+    """One browser context plus the helpers that drive pages in it.
+
+    Created by :meth:`WebSkrapClient.session`, not directly. The session owns
+    its context (and, for non-persistent runs, the browser behind it), so
+    :meth:`close` is what releases those; ``async with`` does it for you. Every
+    method raises :class:`WebSkrapError` once the session is closed.
+
+    Attributes:
+        name: Session name, unique within the owning client.
+        context: The underlying Playwright ``BrowserContext``.
+        config: The :class:`~webskrap.models.SessionConfig` it was built from.
+        profile: The :class:`~webskrap.models.BrowserProfile` applied to it.
+        browser: The owning ``Browser``, or None for a persistent context.
+    """
+
     def __init__(
         self,
         *,
@@ -118,6 +147,29 @@ class WebSkrapSession:
         timeout_ms: float | None = None,
         text_only: bool = False,
     ) -> FetchResult:
+        """Open ``url`` in a new page, read it, and close the page.
+
+        The page is always closed, so nothing survives the call except the
+        returned data and any cookies the context picked up. When
+        ``SessionConfig.decline_cookies`` is set, a consent notice is dismissed
+        after navigation and before the text is read.
+
+        Args:
+            url: The URL to load.
+            wait_until: Playwright load state to wait for.
+            screenshot: True for a generated filename, or a path to write a
+                full-page PNG to. The path is used as given, so pass a
+                destination you control.
+            timeout_ms: Navigation timeout; defaults to the config's.
+            text_only: Return visible body text instead of page HTML.
+
+        Returns:
+            A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
+            status, so a 404 returns normally with ``ok=False``.
+
+        Raises:
+            WebSkrapError: If the session is closed.
+        """
         self._ensure_open()
         started = time.perf_counter()
         page = await self.context.new_page()
@@ -177,6 +229,28 @@ class WebSkrapSession:
         human: bool = True,
         **click_options: Any,
     ) -> None:
+        """Click ``selector`` along a curved, variable-speed cursor path.
+
+        Playwright's own click teleports the cursor and moves in evenly spaced
+        steps, which behavioral detectors read as automation. This drives the
+        real mouse along an eased Bezier curve with jitter and pauses instead.
+        It is slower than ``page.click`` by design; use ``human=False`` to fall
+        straight through to Playwright when the timing does not matter.
+
+        Args:
+            page: Page to click on; must belong to this session's context.
+            selector: Playwright selector for the target element.
+            human: Use the humanized path. False delegates to ``page.click``.
+            **click_options: Playwright click options. ``position``, ``timeout``,
+                ``strict``, ``trial``, ``modifiers``, ``button``, ``click_count``
+                and ``delay`` are honored; other options apply only when
+                ``human=False``.
+
+        Raises:
+            WebSkrapError: If the session is closed, ``strict`` was requested
+                and the selector is ambiguous, or the element has no visible
+                bounding box.
+        """
         self._ensure_open()
         if not human:
             await page.click(selector, **click_options)
@@ -225,6 +299,10 @@ class WebSkrapSession:
                 await page.keyboard.up(modifier)
 
     async def close(self) -> None:
+        """Close the context, its browser, and any temporary profile directory.
+
+        Idempotent; safe to call after a failed fetch.
+        """
         if self._closed:
             return
         try:
@@ -246,6 +324,23 @@ class WebSkrapSession:
 
 
 class WebSkrapClient:
+    """Owns a browser driver and the sessions started from it.
+
+    Use it as an async context manager; :meth:`close` shuts down every session
+    it created and then the driver, so a leaked browser process cannot outlive
+    the block. One client speaks to one driver: mixing ``playwright`` and
+    ``patchright`` sessions requires two clients.
+
+    Args:
+        default_config: Config used when a call passes none.
+        profiles: Extra named profiles, resolvable by name alongside the
+            bundled ones.
+
+    Attributes:
+        default_config: The fallback :class:`~webskrap.models.SessionConfig`.
+        profiles: Caller-supplied profiles by name.
+    """
+
     def __init__(
         self,
         *,
@@ -280,6 +375,19 @@ class WebSkrapClient:
         *,
         _generation: int | None = None,
     ) -> None:
+        """Start the browser driver if it is not running yet.
+
+        Called for you by :meth:`session` and :meth:`fetch`. Concurrent callers
+        share one driver, and starting twice is a no-op.
+
+        Args:
+            driver: ``playwright`` or ``patchright``; defaults to the config's.
+            _generation: Internal close-race guard.
+
+        Raises:
+            WebSkrapError: If the client is closing, or a different driver is
+                already running.
+        """
         selected_driver = driver or self.default_config.driver
         async with self._start_lock:
             if self._closing or (_generation is not None and _generation != self._generation):
@@ -304,6 +412,12 @@ class WebSkrapClient:
             self._driver = selected_driver
 
     async def close(self) -> None:
+        """Close every session, then stop the driver.
+
+        Waits for sessions that are still starting so none escape shutdown. If
+        several sessions fail to close, the first failure is raised after the
+        rest have been cleaned up.
+        """
         async with self._close_lock:
             self._closing = True
             self._generation += 1
@@ -346,6 +460,27 @@ class WebSkrapClient:
         timeout_ms: float | None = None,
         text_only: bool = False,
     ) -> FetchResult:
+        """Fetch one URL in a throwaway session.
+
+        The session is created and closed around the fetch, so cookies do not
+        carry over between calls. Use :meth:`session` when they should.
+
+        Args:
+            url: The URL to load.
+            profile: Profile name, :class:`~webskrap.models.BrowserProfile`, or
+                None for the default.
+            config: Session config; defaults to ``default_config``.
+            wait_until: Playwright load state to wait for.
+            screenshot: True or a path to write a full-page PNG.
+            timeout_ms: Navigation timeout override.
+            text_only: Return visible body text instead of page HTML.
+
+        Returns:
+            A :class:`~webskrap.models.FetchResult`.
+
+        Raises:
+            WebSkrapError: If the client is closing or the browser cannot start.
+        """
         name = f"_single_{uuid4().hex}"
         session = await self.session(name, config=config, profile=profile)
         try:
@@ -367,6 +502,26 @@ class WebSkrapClient:
         config: SessionConfig | None = None,
         profile: str | BrowserProfile | None = None,
     ) -> WebSkrapSession:
+        """Return the named session, creating it on first use.
+
+        Repeat calls with the same name return the same live session, so its
+        cookies and storage persist across fetches. ``config`` and ``profile``
+        only apply to the call that creates it. Concurrent callers racing on
+        one name get the same session, not two browsers.
+
+        Args:
+            name: Session name, unique within this client.
+            config: Session config; defaults to ``default_config``.
+            profile: Profile name, :class:`~webskrap.models.BrowserProfile`, or
+                None for the default.
+
+        Returns:
+            The live :class:`WebSkrapSession`.
+
+        Raises:
+            WebSkrapError: If the client is closing, closes mid-start, or the
+                browser cannot launch.
+        """
         if self._closing:
             msg = "client is closing"
             raise WebSkrapError(msg)

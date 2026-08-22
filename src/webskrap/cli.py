@@ -1,8 +1,17 @@
+"""Typer entry point for the ``webskrap`` command.
+
+Subcommands cover installing browsers, listing profiles, checking the
+install, and fetching pages; persistent-session commands live in
+:mod:`webskrap.browser_cli` under ``webskrap browser``. This layer parses
+arguments, formats output, and turns failures into one-line errors with a
+non-zero exit code.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
+import subprocess  # noqa: S404 - runs a fixed argv for browser installs, never a shell
 import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal, NoReturn, TypedDict
@@ -34,6 +43,8 @@ OutputFormat = Literal["human", "json"]
 
 
 class InstallResult(TypedDict):
+    """Outcome of one browser-install step."""
+
     ok: bool
     command: list[str]
     message: str
@@ -52,6 +63,7 @@ def install_command(
         typer.Option("--format", help="Output format: human or json."),
     ] = "human",
 ) -> None:
+    """Download the Chromium builds Playwright and Patchright need."""
     output_format = _parse_output_format(format)
     results = [_run_install_command(command) for command in INSTALL_COMMANDS]
     ok = all(result["ok"] for result in results)
@@ -71,6 +83,7 @@ def profiles_command(
         typer.Option("--format", help="Output format: human or json."),
     ] = "human",
 ) -> None:
+    """List the bundled browser profiles."""
     output_format = _parse_output_format(format)
     profiles = list_profiles()
     if output_format == "json":
@@ -103,6 +116,7 @@ def doctor_command(
         typer.Option("--format", help="Output format: human or json."),
     ] = "human",
 ) -> None:
+    """Check that Patchright and Chromium are installed and can launch."""
     output_format = _parse_output_format(format)
     result = asyncio.run(_doctor())
     if output_format == "json":
@@ -230,6 +244,7 @@ def fetch_command(
         ),
     ] = None,
 ) -> None:
+    """Fetch a URL with the Patchright stealth driver and report the result."""
     asyncio.run(
         _fetch(
             url=url,
@@ -415,7 +430,9 @@ def _print_json(payload: object) -> None:
 
 def _run_install_command(command: tuple[str, ...]) -> InstallResult:
     try:
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        completed = subprocess.run(  # noqa: S603 - fixed argv from INSTALL_COMMANDS, no shell
+            command, capture_output=True, text=True, check=False
+        )
     except OSError as exc:
         return {
             "ok": False,

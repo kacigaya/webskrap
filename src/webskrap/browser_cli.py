@@ -117,11 +117,31 @@ def open_command(
     headed: Annotated[
         bool, typer.Option("--headed", help="Run the browser with a visible window.")
     ] = False,
+    no_sandbox: Annotated[
+        bool,
+        typer.Option(
+            "--no-sandbox",
+            help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
+        ),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
-    """Start (or reuse) a persistent browser session."""
+    """Start (or reuse) a persistent browser session.
+
+    The browser keeps Chromium's OS sandbox unless --no-sandbox is passed (or
+    WEBSKRAP_CHROMIUM_SANDBOX=0 is set for hosts that cannot sandbox at all).
+    Without it, a renderer compromised by a hostile page is no longer contained.
+    """
     output_format = _parse_output_format(format)
-    payload = _run(browser_session.open_session(session, headless=not headed))
+    payload = _run(
+        browser_session.open_session(
+            session,
+            headless=not headed,
+            # None, not True: an unset flag leaves the environment default in
+            # place, while --no-sandbox is an explicit opt-out that wins.
+            chromium_sandbox=False if no_sandbox else None,
+        )
+    )
     if url:
         payload.update(
             _run_page_command(
@@ -136,6 +156,8 @@ def open_command(
         return
     verb = "Reusing" if payload["reused"] else "Opened"
     console.print(f"{verb} session [bold]{session}[/bold] (pid {payload['pid']})")
+    if not payload["chromium_sandbox"]:
+        stderr_console.print("[yellow]warning:[/yellow] Chromium sandbox disabled")
     if url:
         _emit_state(payload, output_format)
 
@@ -182,12 +204,15 @@ def list_command(format: FormatOption = "human") -> None:
     table.add_column("Running")
     table.add_column("PID")
     table.add_column("Port")
+    table.add_column("Sandbox")
     for entry in sessions:
+        sandbox = entry["chromium_sandbox"]
         table.add_row(
             str(entry["session"]),
             "yes" if entry["running"] else "no",
             str(entry["pid"] or ""),
             str(entry["port"] or ""),
+            "" if sandbox is None else ("yes" if sandbox else "no"),
         )
     console.print(table)
 

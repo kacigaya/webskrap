@@ -281,11 +281,61 @@ def test_webrtc_ip_handling_policy_is_chromium_only() -> None:
     assert "args" not in config.launch_options()
 
 
-def test_proxy_requires_supported_scheme() -> None:
-    with pytest.raises(ValidationError):
-        ProxyConfig(server="localhost:8080")
+@pytest.mark.parametrize(
+    "server",
+    [
+        pytest.param("http://localhost:8080", id="http"),
+        pytest.param("https://proxy.test:443", id="https"),
+        pytest.param("socks4://proxy.test:1080", id="socks4"),
+        pytest.param("socks5://proxy.test:1080", id="socks5"),
+    ],
+)
+def test_proxy_accepts_supported_schemes(server: str) -> None:
+    assert ProxyConfig(server=server).server == server
 
 
-def test_viewport_dimensions_must_be_positive() -> None:
+@pytest.mark.parametrize(
+    "server",
+    [
+        pytest.param("localhost:8080", id="no-scheme"),
+        pytest.param("ftp://proxy.test", id="unsupported-scheme"),
+        pytest.param("HTTP://proxy.test", id="wrong-case"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_proxy_requires_supported_scheme(server: str) -> None:
     with pytest.raises(ValidationError):
-        Viewport(width=0, height=720)
+        ProxyConfig(server=server)
+
+
+def test_proxy_omits_unset_credentials() -> None:
+    assert ProxyConfig(server="http://proxy.test").to_playwright() == {
+        "server": "http://proxy.test"
+    }
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        pytest.param(0, 720, id="zero-width"),
+        pytest.param(1280, 0, id="zero-height"),
+        pytest.param(-1, 720, id="negative-width"),
+        pytest.param(1280, -1, id="negative-height"),
+    ],
+)
+def test_viewport_dimensions_must_be_positive(width: int, height: int) -> None:
+    with pytest.raises(ValidationError):
+        Viewport(width=width, height=height)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param("name", id="name"),
+        pytest.param("locale", id="locale"),
+        pytest.param("timezone_id", id="timezone"),
+    ],
+)
+def test_profile_rejects_blank_identity_fields(field: str) -> None:
+    with pytest.raises(ValidationError):
+        BrowserProfile(**{"name": "test", field: "   "})

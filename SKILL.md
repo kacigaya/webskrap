@@ -170,7 +170,11 @@ Commands: `open`, `close`, `list`, `goto`, `back`, `forward`, `reload`,
 `uncheck`, `press`, `screenshot`, `eval`. All accept `-s/--session` (default
 `default`) and `--format json`; failures exit 1 with a one-line error. Session
 profiles live under `~/.webskrap/browser/<name>/` (`WEBSKRAP_BROWSER_DIR`
-overrides the root). Refs go stale when the DOM changes; snapshot again.
+overrides the root), created `0700` because they hold cookies and logins.
+Sessions keep Chromium's OS sandbox; where it cannot start, opt out per
+session with `webskrap browser open --no-sandbox` or per host with
+`WEBSKRAP_CHROMIUM_SANDBOX=0`, accepting that a compromised renderer is then
+uncontained. Refs go stale when the DOM changes; snapshot again.
 Limitations: one page per session, bundled Chromium only, and no commands for
 tabs, network mocking, tracing, or video. History navigation always reloads.
 
@@ -194,6 +198,12 @@ MCP tools:
   `browser_list`: persistent interactive browser sessions, sharing state and
   behavior with `webskrap browser` (headless only over MCP; `browser_interact`
   takes `action` + `target` ref/selector + optional `values`).
+
+`browser_screenshot` writes only under `./webskrap-output`
+(`WEBSKRAP_OUTPUT_DIR` moves the root): `path` is relative, and absolute
+paths, `..` traversal, and symlinks leaving the root are rejected. The sandbox
+opt-out is an environment variable, never a tool argument, so a page cannot
+argue the model into disabling it.
 
 ## Validation
 

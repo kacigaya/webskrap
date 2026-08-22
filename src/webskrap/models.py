@@ -1,3 +1,11 @@
+"""Pydantic models describing what to launch, how to browse, and what came back.
+
+:class:`BrowserProfile` is the identity presented to a site (viewport, locale,
+headers); :class:`SessionConfig` is the machinery behind it (driver, browser,
+proxy, stealth switches, timeouts). Both translate themselves into Playwright
+launch and context options, which is where their per-field comments matter.
+"""
+
 from __future__ import annotations
 
 from enum import StrEnum
@@ -6,30 +14,50 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+#: Chromium's WebRTC ICE candidate policy; see
+#: :attr:`SessionConfig.webrtc_ip_handling_policy`.
 WebRtcIPHandlingPolicy = Literal[
     "default",
     "default_public_and_private_interfaces",
     "default_public_interface_only",
     "disable_non_proxied_udp",
 ]
+#: Playwright load state a navigation waits for before returning.
 WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 
 
 class ResourcePolicy(StrEnum):
+    """Which resource types a session is allowed to load.
+
+    ``LITE`` blocks images, fonts and media; ``DOCUMENTS`` also blocks
+    stylesheets. Both cut bandwidth and latency, and both are visible to a site
+    that checks whether its assets loaded.
+    """
+
     ALL = "all"
     LITE = "lite"
     DOCUMENTS = "documents"
 
 
 class Viewport(BaseModel):
+    """A pixel size, used for both the page viewport and the virtual screen."""
+
     width: int = Field(gt=0)
     height: int = Field(gt=0)
 
     def to_playwright(self) -> dict[str, int]:
+        """Return the ``{"width", "height"}`` mapping Playwright expects."""
         return {"width": self.width, "height": self.height}
 
 
 class ProxyConfig(BaseModel):
+    """Proxy settings for a session.
+
+    ``username``/``password`` are held in memory and handed to Playwright at
+    context creation. They are never written to disk by WebSkrap, but they do
+    appear in this model's ``repr`` and ``model_dump``, so avoid logging it.
+    """
+
     server: str
     bypass: str | None = None
     username: str | None = None
@@ -38,6 +66,11 @@ class ProxyConfig(BaseModel):
     @field_validator("server")
     @classmethod
     def validate_server(_cls, value: str) -> str:
+        """Require a scheme Chromium accepts, so failures surface at config time.
+
+        Raises:
+            ValueError: If the server has no http/https/socks4/socks5 scheme.
+        """
         allowed_prefixes = ("http://", "https://", "socks4://", "socks5://")
         if not value.startswith(allowed_prefixes):
             msg = "proxy server must start with http://, https://, socks4://, or socks5://"
@@ -45,6 +78,7 @@ class ProxyConfig(BaseModel):
         return value
 
     def to_playwright(self) -> dict[str, str]:
+        """Return Playwright proxy options, omitting unset fields."""
         payload = {"server": self.server}
         if self.bypass:
             payload["bypass"] = self.bypass
@@ -56,6 +90,15 @@ class ProxyConfig(BaseModel):
 
 
 class BrowserProfile(BaseModel):
+    """The identity a session presents: viewport, locale, timezone, headers.
+
+    Bundled profiles come from :mod:`webskrap.profiles`. Under the
+    ``patchright`` driver most of this is ignored on purpose — the point of
+    that driver is the browser's real fingerprint — unless
+    :attr:`SessionConfig.patchright_context_profile` opts back in to the parts
+    Chrome can own natively.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -75,6 +118,11 @@ class BrowserProfile(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(_cls, value: str) -> str:
+        """Reject a blank profile name.
+
+        Raises:
+            ValueError: If the name is empty or only whitespace.
+        """
         if not value.strip():
             msg = "profile name cannot be empty"
             raise ValueError(msg)
@@ -83,6 +131,11 @@ class BrowserProfile(BaseModel):
     @field_validator("locale", "timezone_id")
     @classmethod
     def validate_non_empty(_cls, value: str) -> str:
+        """Reject a blank locale or timezone.
+
+        Raises:
+            ValueError: If the value is empty or only whitespace.
+        """
         if not value.strip():
             msg = "value cannot be empty"
             raise ValueError(msg)
@@ -90,6 +143,11 @@ class BrowserProfile(BaseModel):
 
     @model_validator(mode="after")
     def ensure_language_consistency(self) -> BrowserProfile:
+        """Keep ``navigator_languages`` consistent with ``locale``.
+
+        A locale missing from the language list is a fingerprint mismatch a
+        detector can read, so the locale is inserted first when absent.
+        """
         if not self.navigator_languages:
             self.navigator_languages = [self.locale]
         if self.locale not in self.navigator_languages:
@@ -97,6 +155,7 @@ class BrowserProfile(BaseModel):
         return self
 
     def accept_language(self) -> str:
+        """Return an ``Accept-Language`` header value with descending q-values."""
         languages = self.navigator_languages or [self.locale]
         weighted = [languages[0]]
         weighted.extend(
@@ -106,6 +165,7 @@ class BrowserProfile(BaseModel):
         return ",".join(weighted)
 
     def headers(self) -> dict[str, str]:
+        """Return the default request headers, with ``extra_http_headers`` last."""
         headers = {
             "Accept": (
                 "text/html,application/xhtml+xml,application/xml;q=0.9,"
@@ -118,6 +178,7 @@ class BrowserProfile(BaseModel):
         return headers
 
     def to_context_options(self) -> dict[str, Any]:
+        """Return this profile as Playwright ``new_context`` options."""
         options: dict[str, Any] = {
             "viewport": self.viewport.to_playwright(),
             "screen": self.screen.to_playwright(),
@@ -136,6 +197,14 @@ class BrowserProfile(BaseModel):
 
 
 class SessionConfig(BaseModel):
+    """How a session's browser is launched and how its context behaves.
+
+    Defaults are deliberately plain: standard Playwright, headless Chromium, no
+    proxy, everything loaded, and every stealth feature off. The stealth
+    switches are documented at their fields, since each has a cost as well as a
+    benefit.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
     driver: Literal["playwright", "patchright"] = "playwright"
@@ -201,6 +270,12 @@ class SessionConfig(BaseModel):
     decline_cookies_timeout_ms: float = Field(default=2_000, ge=0)
 
     def launch_options(self) -> dict[str, Any]:
+        """Return Playwright launch options, including assembled browser flags.
+
+        Caller-supplied ``launch_args`` win: a flag already present there is
+        not added again by the automation, screen, WebRTC or fingerprint
+        helpers.
+        """
         options: dict[str, Any] = {
             "headless": self.headless,
             "timeout": self.timeout_ms,
@@ -282,6 +357,13 @@ class SessionConfig(BaseModel):
         ]
 
     def context_options(self, profile: BrowserProfile) -> dict[str, Any]:
+        """Return Playwright context options for ``profile`` under this config.
+
+        The ``patchright`` driver keeps the browser's native fingerprint and
+        applies almost nothing from the profile; every other driver applies it
+        in full. ``storage_state`` is dropped when ``user_data_dir`` is set,
+        because a persistent profile already carries that state.
+        """
         if self.driver == "patchright":
             # patchright defeats CDP-aware detectors by presenting the browser's
             # real fingerprint. The default keeps the host/browser environment
@@ -318,6 +400,13 @@ class SessionConfig(BaseModel):
 
 
 class FetchResult(BaseModel):
+    """What one fetch produced.
+
+    ``text`` is page HTML unless the fetch asked for ``text_only``. ``ok`` is
+    an HTTP-status judgement (2xx/3xx), not a promise that the page is what you
+    wanted. ``cookies`` are the whole context's, not just this page's.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     url: str
@@ -336,6 +425,13 @@ class FetchResult(BaseModel):
 
 
 def shape_fetch_result(result: FetchResult, max_chars: int) -> dict[str, Any]:
+    """Flatten a result into the JSON payload the CLI and MCP tools return.
+
+    Text is truncated to ``max_chars`` (negative values are treated as 0) with
+    ``text_length`` and ``text_truncated`` reporting what was cut, so a caller
+    can tell a short page from a clipped one. Cookies and headers-heavy fields
+    are left out.
+    """
     limit = max(0, max_chars)
     text = result.text or ""
     return {

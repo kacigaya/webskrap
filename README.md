@@ -43,3 +43,15 @@ asyncio.run(main())
 - [Stealth](https://kacigaya.github.io/webskrap/docs/user-guide/stealth/)
 - [Benchmarks](https://kacigaya.github.io/webskrap/docs/benchmarks/)
 - [Development](https://kacigaya.github.io/webskrap/docs/development/)
+
+## Security
+
+Persistent browser sessions keep Chromium's OS sandbox, store their profiles
+`0700`, and confine MCP screenshot output to `./webskrap-output`. See
+[SECURITY.md](SECURITY.md) for the security model and how to report a
+vulnerability, and [CHANGELOG.md](CHANGELOG.md) for what changed.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and pull request
+expectations.

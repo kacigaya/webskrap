@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
-from uuid import uuid4
 
 from playwright.async_api import Page
 
@@ -22,6 +21,7 @@ from webskrap.parsing import (
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
+from webskrap.paths import resolve_output_path
 from webskrap.profiles import get_profile
 
 T = TypeVar("T")
@@ -181,8 +181,14 @@ async def browser_open(
 
     The browser is a detached Chromium that keeps running between tool calls
     (and between MCP server restarts); every browser_* tool reconnects to it
-    over CDP. The session's profile persists on disk, so cookies and logins
-    survive close/open. Shares sessions with the `webskrap browser` CLI.
+    over CDP. The session's profile persists on disk (owner-readable only), so
+    cookies and logins survive close/open. Shares sessions with the
+    `webskrap browser` CLI.
+
+    The browser keeps Chromium's OS sandbox. Environments that cannot sandbox
+    must set WEBSKRAP_CHROMIUM_SANDBOX=0 before starting the server; the switch
+    is deliberately not a tool argument, so a page cannot talk the model into
+    weakening renderer isolation.
 
     Args:
         url: Optional URL to open after launch.
@@ -309,16 +315,21 @@ async def browser_screenshot(
 ) -> dict[str, Any]:
     """Screenshot the session's current page to a PNG file.
 
+    Screenshots are written under ./webskrap-output (override with the
+    WEBSKRAP_OUTPUT_DIR environment variable). Absolute paths and paths that
+    escape that directory are rejected.
+
     Args:
-        path: Output PNG path; auto-generated in the working directory when
-            omitted.
+        path: Output PNG path relative to the output directory; nested
+            subdirectories are allowed and created. Auto-generated when omitted.
         session: Browser session name.
         full_page: Capture the full scrollable page.
     """
-    target = Path(path) if path else Path(f"webskrap-{uuid4().hex}.png")
+    # Resolved before connecting to the browser so a rejected path fails fast,
+    # and outside `run` so no page action happens for a path that is refused.
+    target = resolve_output_path(path)
 
     async def run(page: Page) -> dict[str, Any]:
-        target.parent.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(target), full_page=full_page)
         return {**await browser_session.page_state(page), "path": str(target)}
 

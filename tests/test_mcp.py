@@ -9,6 +9,7 @@ import pytest
 from webskrap import mcp_server
 from webskrap.client import WebSkrapError
 from webskrap.models import FetchResult
+from webskrap.paths import OUTPUT_DIR_ENV
 
 
 class _FakeClient:
@@ -126,9 +127,55 @@ def test_browser_list_empty(monkeypatch: Any, tmp_path: Path) -> None:
     assert asyncio.run(mcp_server.browser_list()) == {"sessions": []}
 
 
+def test_browser_screenshot_generates_a_name_in_the_output_root(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    # No session is open, so the tool fails after the path has been accepted:
+    # the directory is created, which is what this asserts.
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_screenshot())
+
+    assert (tmp_path / "out").is_dir()
+
+
+def test_browser_screenshot_creates_nested_directories(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_screenshot(path="runs/today/shot.png"))
+
+    assert (tmp_path / "out" / "runs" / "today").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [
+        pytest.param("../escape.png", "escapes it", id="parent"),
+        pytest.param("runs/../../escape.png", "escapes it", id="normalized-traversal"),
+        pytest.param("/etc/escape.png", "is absolute", id="absolute"),
+        pytest.param("/tmp/escape.png", "is absolute", id="absolute-tmp"),
+    ],
+)
+def test_browser_screenshot_rejects_paths_outside_the_output_root(
+    monkeypatch: Any, tmp_path: Path, path: str, message: str
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    with pytest.raises(WebSkrapError, match=message):
+        asyncio.run(mcp_server.browser_screenshot(path=path))
+
+    assert not (tmp_path / "escape.png").exists()
+
+
 @pytest.mark.browser
-def test_browser_mcp_lifecycle(monkeypatch: Any, tmp_path: Path) -> None:
-    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+def test_browser_mcp_lifecycle(monkeypatch: Any, persistent_session_env: Path) -> None:
+    tmp_path = persistent_session_env
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
     page = (
         "data:text/html,<title>mcp-test</title>"
         "<button onclick=\"this.textContent='clicked'\">Press me</button>"
@@ -156,10 +203,11 @@ def test_browser_mcp_lifecycle(monkeypatch: Any, tmp_path: Path) -> None:
         )
         assert evaluated == {"result": "clicked"}
 
-        shot_path = tmp_path / "shot.png"
-        shot = asyncio.run(mcp_server.browser_screenshot(path=str(shot_path)))
-        assert shot["path"] == str(shot_path)
-        assert shot_path.stat().st_size > 0
+        # Screenshots are confined to the output root, so ask for a relative
+        # name and assert it landed inside it.
+        shot = asyncio.run(mcp_server.browser_screenshot(path="runs/shot.png"))
+        assert shot["path"] == str(tmp_path / "out" / "runs" / "shot.png")
+        assert Path(shot["path"]).stat().st_size > 0
 
         listed = asyncio.run(mcp_server.browser_list())
         assert listed["sessions"][0]["running"] is True

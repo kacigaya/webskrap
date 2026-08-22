@@ -140,8 +140,45 @@ def test_list_with_no_sessions(tmp_path: Path) -> None:
     assert json.loads(result.output) == {"sessions": []}
 
 
+def test_list_human_output_renders_a_table(tmp_path: Path) -> None:
+    result = runner.invoke(cli.app, ["browser", "list"], env=_env(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert "WebSkrap Browser Sessions" in result.output
+
+
+def test_close_human_output_names_each_session(tmp_path: Path) -> None:
+    session_dir = tmp_path / "default"
+    session_dir.mkdir()
+    (session_dir / "user-data").mkdir()
+
+    result = runner.invoke(cli.app, ["browser", "close", "--all"], env=_env(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert "closed" in result.output
+    assert "default" in result.output
+
+
+@pytest.mark.parametrize(
+    ("command", "message"),
+    [
+        pytest.param(["browser", "click", "e1", "extra"], "no value argument", id="click-extra"),
+        pytest.param(["browser", "fill", "e1"], "exactly one value", id="fill-missing"),
+        pytest.param(["browser", "select", "e1"], "at least one value", id="select-missing"),
+    ],
+)
+def test_element_commands_validate_arity_before_connecting(
+    tmp_path: Path, command: list[str], message: str
+) -> None:
+    result = runner.invoke(cli.app, command, env=_env(tmp_path))
+
+    assert result.exit_code == 1
+    assert message in result.output
+
+
 @pytest.mark.browser
-def test_browser_session_lifecycle(tmp_path: Path) -> None:
+def test_browser_session_lifecycle(persistent_session_env: Path) -> None:
+    tmp_path = persistent_session_env
     env = _env(tmp_path)
     opened = runner.invoke(cli.app, ["browser", "open", "--format", "json"], env=env)
     assert opened.exit_code == 0, opened.output
@@ -221,6 +258,7 @@ def test_browser_session_lifecycle(tmp_path: Path) -> None:
                 "running": True,
                 "pid": sessions[0]["pid"],
                 "port": sessions[0]["port"],
+                "chromium_sandbox": sessions[0]["chromium_sandbox"],
             }
         ]
     finally:

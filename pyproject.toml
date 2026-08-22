@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "webskrap"
-version = "0.9.1"
+version = "0.10.0"
 description = "A Playwright-based Python scraping framework with coherent browser profiles and session controls."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,7 @@ dependencies = [
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
+  "pytest-cov>=6.0",
   "ruff>=0.8",
 ]
 
@@ -69,7 +70,30 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "S", "D"]
+# D203/D213 contradict the google convention's own D211/D212. D107 (__init__)
+# and D105 (magic methods) are covered by the owning class's docstring, which
+# is where the constructor arguments and context-manager behavior are described.
+ignore = ["D203", "D213", "D107", "D105"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# S311: the humanized cursor path randomizes pixel offsets and pauses. It is
+# timing jitter, never a secret, so a CSPRNG would only cost entropy.
+"src/webskrap/client.py" = ["S311"]
+# S101 (assert) is what tests are written in; S105/S106 flag the dummy proxy
+# credentials in fixtures; S108 flags the /tmp paths that path-rejection tests
+# feed in on purpose; D1 docstring rules do not apply to test bodies.
+"tests/**" = ["S101", "S105", "S106", "S108", "D1"]
+"benchmarks.py" = ["S101", "D1"]
+"scripts/**" = ["S101", "D1"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pyright]
+include = ["src/webskrap"]
+typeCheckingMode = "standard"
+pythonVersion = "3.11"

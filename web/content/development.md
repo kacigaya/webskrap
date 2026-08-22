@@ -22,9 +22,27 @@ webskrap install
 Run tests and lint:
 
 ```bash
-pytest -q
+pytest -q -m "not browser and not live"
 ruff check .
+ruff format --check .
 ```
+
+Before opening a pull request, add the browser tests and the coverage gate CI
+enforces:
+
+```bash
+pytest -q -m "not live" --cov=webskrap --cov-report=term-missing --cov-fail-under=85
+```
+
+CI runs the suite on Python 3.11, 3.12 and 3.13, type-checks `src/webskrap`
+with Pyright in `standard` mode, audits dependencies with `pip-audit`, and
+validates package metadata with `twine check` before any release upload.
+[CONTRIBUTING.md](https://github.com/kacigaya/webskrap/blob/main/CONTRIBUTING.md)
+has the full list.
+
+Hosts that cannot start Chromium's sandbox (unprivileged containers, images
+without user namespaces) still run the session tests: the suite probes sandbox
+support once and falls back to `WEBSKRAP_CHROMIUM_SANDBOX=0` for those tests.
 
 Build the web docs:
 
