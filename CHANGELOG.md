@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-22
+
+First stable release. The public API is what `webskrap.__all__` exports plus
+the documented CLI and MCP tool surfaces; from here breaking changes to those
+require a major version. Nothing in the library changed from 0.10.1 beyond the
+entries below.
+
 ### Security
 
 - Permission tightening no longer follows symlinks. `secure_directory` used
@@ -236,7 +243,8 @@ history, so they summarize each release rather than list every change.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/kacigaya/webskrap/compare/v0.10.1...v1.0.0
 [0.10.1]: https://github.com/kacigaya/webskrap/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kacigaya/webskrap/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/kacigaya/webskrap/compare/v0.9.0...v0.9.1
