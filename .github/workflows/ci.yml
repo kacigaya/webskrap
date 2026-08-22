@@ -15,9 +15,9 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # Pinned exactly: setup-uv publishes no floating v9 major tag.
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
       - name: Lint
@@ -46,8 +46,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
@@ -56,7 +56,7 @@ jobs:
         env:
           COVERAGE_FILE: .coverage.unit.${{ matrix.python-version }}
         run: uv run --extra dev pytest -q -m "not browser and not live" --cov
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-unit-${{ matrix.python-version }}
           path: .coverage.unit.*
@@ -68,8 +68,8 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           python-version: "3.13"
@@ -81,7 +81,7 @@ jobs:
         env:
           COVERAGE_FILE: .coverage.browser
         run: uv run --extra dev pytest -q -m "browser and not live" --cov
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage-browser
           path: .coverage.browser
@@ -96,12 +96,12 @@ jobs:
     needs: [test, browser]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v9.0.0
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           python-version: "3.13"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           merge-multiple: true
