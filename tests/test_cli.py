@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Any
 
@@ -344,6 +345,17 @@ def test_install_human_reports_failures(monkeypatch: Any) -> None:
     assert "download failed" in result.output
 
 
+def _plain(output: str) -> str:
+    """Flatten CLI output for substring assertions.
+
+    Typer renders usage errors in a Rich panel: styled, box-drawn, and wrapped
+    to the terminal width, which differs between a local run and CI. Strip the
+    styling and every space so an assertion tests the message, not the width
+    it happened to be rendered at.
+    """
+    return "".join(re.sub(r"\x1b\[[0-9;]*m", "", output).replace("│", "").split())
+
+
 @pytest.mark.parametrize(
     ("option", "value", "expected"),
     [
@@ -357,4 +369,4 @@ def test_fetch_rejects_invalid_option_values(option: str, value: str, expected: 
     result = runner.invoke(cli.app, ["fetch", "https://example.test", option, value])
 
     assert result.exit_code == 2
-    assert expected in result.output
+    assert "".join(expected.split()) in _plain(result.output)

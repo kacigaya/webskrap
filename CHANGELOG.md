@@ -9,6 +9,15 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-08-22
+
+### Fixed
+
+- CLI usage-error tests asserted against Rich's wrapped panel output, so they
+  passed locally and failed on CI's narrower terminal. Library behavior is
+  unchanged; 0.10.0 never reached PyPI because the release workflow is gated
+  on those tests.
+
 ## [0.10.0] - 2026-08-22
 
 ### Security
@@ -185,7 +194,8 @@ history, so they summarize each release rather than list every change.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/kacigaya/webskrap/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kacigaya/webskrap/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/kacigaya/webskrap/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/kacigaya/webskrap/compare/v0.8.0...v0.9.0
