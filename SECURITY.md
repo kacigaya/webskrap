@@ -12,9 +12,14 @@ patch release on top of the latest minor; older minors are not backported.
 
 ## Reporting a vulnerability
 
-Report privately through GitHub: open
-<https://github.com/kacigaya/webskrap/security/advisories/new> to file a draft
-security advisory. If that form is unavailable, email
+Use GitHub's private vulnerability reporting, which is enabled on this
+repository: open
+<https://github.com/kacigaya/webskrap/security/advisories/new> (or press
+**Report a vulnerability** on the repository's Security tab) to file a private
+draft advisory. The report stays private to you and the maintainer until a fix
+ships, and the advisory becomes the public record afterwards.
+
+If you cannot use that form, email
 `163902005+kacigaya@users.noreply.github.com` with `SECURITY` in the subject.
 
 Please do not open a public issue, pull request, or discussion for an
@@ -67,6 +72,11 @@ directories `0700` on POSIX, but that only keeps out other local accounts. The
 data is not encrypted at rest, it survives process exit, and
 `webskrap browser close --delete-data` is what removes it.
 
+Permission tightening never follows a symlink: if a session directory is a
+symlink, WebSkrap leaves it and its target alone rather than changing modes
+through the link. A profile directory you symlinked elsewhere yourself
+therefore keeps whatever permissions you gave it.
+
 On Windows, POSIX mode bits do not apply; the profile inherits the ACLs of
 your user directory.
 
@@ -79,6 +89,14 @@ traversal, and symlinks pointing outside that root are rejected.
 
 Point `WEBSKRAP_OUTPUT_DIR` at a directory you are willing to have written to,
 and do not set it to a source tree, a config directory, or `$HOME`.
+
+Confinement is checked when the path is resolved, and the browser writes the
+file a moment later. On a host where another local account can write inside the
+output root, that gap is a race: a directory component could be replaced with a
+symlink in between. WebSkrap creates its own default root `0700` so no other
+account can plant anything there, which is as far as a local Python library can
+reasonably close it. A root you point at a world-writable directory is outside
+that guarantee.
 
 ### Proxy credentials
 

@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  # Static checks and packaging do not vary by interpreter, so they run once.
+  # Static analysis and packaging do not vary by interpreter, so they run once.
   checks:
     runs-on: ubuntu-latest
     steps:
@@ -26,6 +26,10 @@ jobs:
         run: uv run --extra dev ruff format --check .
       - name: Type check
         run: uvx --from pyright==1.1.411 pyright --pythonpath .venv/bin/python src/webskrap
+      - name: Security scan
+        # Ruff's S rules already run above. Bandit is a second, independent
+        # implementation and reads the `# nosec` markers Ruff ignores.
+        run: uv run --extra dev bandit -c pyproject.toml -q -r src/
       - name: Audit dependencies
         run: uv run --extra dev --with pip-audit==2.9.0 pip-audit
       - name: Build
@@ -33,8 +37,8 @@ jobs:
       - name: Check package metadata
         run: uv run --with twine twine check dist/*
 
-  # The package advertises 3.11-3.13, so the suite runs on each of them.
-  # Browser downloads are skipped here; the browser job below covers them once.
+  # Requirement 1: the package works on every advertised Python version.
+  # Browsers are not installed here; the browser job below covers those paths.
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -49,11 +53,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
       # Keep third-party live tests opt-in; local browser tests run below.
       - name: Test
-        run: uv run --extra dev pytest -q -m "not browser and not live"
+        env:
+          COVERAGE_FILE: .coverage.unit.${{ matrix.python-version }}
+        run: uv run --extra dev pytest -q -m "not browser and not live" --cov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-${{ matrix.python-version }}
+          path: .coverage.unit.*
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
 
   # Browser tests need a Chromium download, so they run on one interpreter.
-  # The coverage gate lives here because it is the only job that exercises the
-  # whole library, browser paths included.
   browser:
     runs-on: ubuntu-latest
     steps:
@@ -66,7 +77,39 @@ jobs:
         run: |
           uv run playwright install --with-deps chromium
           uv run patchright install chromium
-      - name: Test with coverage
-        run: >
-          uv run --extra dev pytest -q -m "not live"
-          --cov=webskrap --cov-report=term-missing --cov-fail-under=85
+      - name: Test
+        env:
+          COVERAGE_FILE: .coverage.browser
+        run: uv run --extra dev pytest -q -m "browser and not live" --cov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-browser
+          path: .coverage.browser
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+  # Requirement 2: the whole library stays above the coverage bar. This is the
+  # canonical gate. It needs every test job, so a failed or skipped test job
+  # fails this one too and the bar cannot be met by a partial run.
+  coverage:
+    needs: [test, browser]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - name: Combine coverage from every test job
+        # Fails if a data file is missing or unreadable, so a job that silently
+        # produced nothing cannot be combined away.
+        run: |
+          uv run --extra dev coverage combine
+          uv run --extra dev coverage report
+      - name: Enforce coverage threshold
+        run: uv run --extra dev coverage report --fail-under=85

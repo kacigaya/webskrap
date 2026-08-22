@@ -36,17 +36,38 @@ uv run --extra dev pytest -q -m "not live" \
   --cov=webskrap --cov-report=term-missing --cov-fail-under=85
 ```
 
-Dependency and packaging checks:
+CI measures coverage differently: each Python version runs the unit tests, the
+browser job runs the browser tests, and a `coverage` job combines every data
+file and enforces the 85% bar over the union. That job needs all the test jobs,
+so the gate cannot pass on a partial run. To reproduce it locally:
 
 ```bash
+COVERAGE_FILE=.coverage.unit uv run --extra dev pytest -q -m "not browser and not live" --cov
+COVERAGE_FILE=.coverage.browser uv run --extra dev pytest -q -m "browser and not live" --cov
+uv run --extra dev coverage combine
+uv run --extra dev coverage report --fail-under=85
+```
+
+Security and packaging checks:
+
+```bash
+uv run --extra dev bandit -c pyproject.toml -q -r src/
 uv run --extra dev --with pip-audit pip-audit
 uv build && uv run --with twine twine check dist/*
 ```
 
 `ruff format .` fixes formatting; `ruff check . --fix` fixes what it safely
-can. Ruff enforces security (`S`) and docstring (`D`) rules on `src/`. If a
-finding is a false positive, suppress that line with a `# noqa: <rule>` and a
-reason, or add a narrow `per-file-ignores` entry — not a global ignore.
+can. Ruff enforces security (`S`) and docstring (`D`) rules on `src/`, and
+Bandit runs the same class of checks independently. If a finding is a false
+positive, suppress that one line and say why — Ruff reads `# noqa: <rule>`,
+Bandit reads `# nosec <id>`, and both fit on one line:
+
+```python
+import subprocess  # nosec B404  # noqa: S404 - fixed argv, never a shell
+```
+
+Never skip a rule globally or for a whole file: a line-scoped suppression still
+lets the same rule catch an unsafe use somewhere else.
 
 ## Test markers
 

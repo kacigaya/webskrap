@@ -9,6 +9,48 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Security
+
+- Permission tightening no longer follows symlinks. `secure_directory` used
+  `Path.chmod`, which resolves the final component, so a symlink planted where
+  a session directory belongs could have handed the mode change to its target.
+  It now opens the directory with `O_NOFOLLOW` and uses `fchmod`, leaving a
+  symlinked directory and its target untouched.
+- The MCP output root is created `0700` when WebSkrap creates it, so no other
+  local account can plant symlinks inside the default `./webskrap-output`. A
+  root the user set up keeps its own permissions.
+- Cursor jitter draws from `secrets.SystemRandom` instead of `random`. The
+  values are pixel offsets and sleep durations, never secrets, but the change
+  removes the last non-cryptographic RNG from the package, so no security
+  scanner has to be told to ignore one.
+
+### Added
+
+- Bandit runs as an independent security gate (`bandit -c pyproject.toml -r
+  src/`), in CI alongside Ruff's `S` rules. It is a second implementation of
+  the same checks and reads the `# nosec` markers Ruff ignores. Every finding
+  is suppressed at its own line with a reason; nothing is skipped globally, so
+  the same rule still catches an unsafe use elsewhere.
+- A dedicated `coverage` CI job that combines the data files from every Python
+  version and the browser job, then enforces the 85% bar over the union. It
+  depends on all test jobs, so the gate cannot pass on a partial run. Branch
+  coverage is on.
+
+### Changed
+
+- Ruff's `D105` and `D107` are enforced: `D203` and `D213` are now the only
+  ignored docstring rules. The affected magic methods and constructors describe
+  lazy driver start, context ownership, and what leaving an `async with` block
+  releases.
+- CI separates its two requirements: Python 3.11/3.12/3.13 compatibility, and
+  full-library coverage. Browsers install in one job rather than in every
+  matrix entry.
+
+### Fixed
+
+- `resolve_output_path` rejects destinations that name no file (`.`, `""`)
+  with a clear message rather than failing later inside the browser.
+
 ## [0.10.1] - 2026-08-22
 
 ### Fixed
