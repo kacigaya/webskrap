@@ -34,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "bandit[toml]>=1.8",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "pytest-cov>=6.0",
@@ -65,24 +66,42 @@ markers = [
   "live: hits public third-party bot-detection demos (opt-in via WEBSKRAP_LIVE=1)",
 ]
 
+# Coverage is measured in several CI jobs (one per Python version, plus the
+# browser job) and combined into a single gate. `parallel` keeps each run in
+# its own data file, and `relative_files` lets those files combine across jobs
+# and interpreters that unpack the checkout at different absolute paths.
+[tool.coverage.run]
+source = ["webskrap"]
+parallel = true
+relative_files = true
+branch = true
+
+[tool.coverage.paths]
+# Map an installed copy back onto the source tree so combined data lands on one
+# set of files instead of counting the same line twice.
+source = ["src/webskrap", "*/site-packages/webskrap", "*\\site-packages\\webskrap"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "S", "D"]
-# D203/D213 contradict the google convention's own D211/D212. D107 (__init__)
-# and D105 (magic methods) are covered by the owning class's docstring, which
-# is where the constructor arguments and context-manager behavior are described.
-ignore = ["D203", "D213", "D107", "D105"]
+# D203/D213 are the only ignores: they contradict the google convention's own
+# D211/D212. Every other docstring rule is on, including D105 (magic methods)
+# and D107 (__init__), because the affected symbols carry behavior a caller
+# cannot infer from the class docstring: lazy driver start, context ownership,
+# and what leaving an `async with` block releases.
+ignore = ["D203", "D213"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# S311: the humanized cursor path randomizes pixel offsets and pauses. It is
-# timing jitter, never a secret, so a CSPRNG would only cost entropy.
-"src/webskrap/client.py" = ["S311"]
 # S101 (assert) is what tests are written in; S105/S106 flag the dummy proxy
 # credentials in fixtures; S108 flags the /tmp paths that path-rejection tests
 # feed in on purpose; D1 docstring rules do not apply to test bodies.
@@ -92,6 +111,13 @@ convention = "google"
 
 [tool.ruff.format]
 quote-style = "double"
+
+# Bandit runs alongside Ruff's S rules: same origin, different engine, and it
+# reads the `# nosec <id>` markers Ruff ignores. Nothing is skipped globally --
+# every finding is suppressed at its own line with a reason, so a new unsafe
+# call of the same kind elsewhere still fails the run. Needs `bandit[toml]`.
+[tool.bandit]
+exclude_dirs = ["tests", "scripts", "web", ".venv"]
 
 [tool.pyright]
 include = ["src/webskrap"]

@@ -339,3 +339,36 @@ def test_viewport_dimensions_must_be_positive(width: int, height: int) -> None:
 def test_profile_rejects_blank_identity_fields(field: str) -> None:
     with pytest.raises(ValidationError):
         BrowserProfile(**{"name": "test", field: "   "})
+
+
+def test_proxy_includes_bypass_and_credentials() -> None:
+    proxy = ProxyConfig(
+        server="http://proxy.test",
+        bypass="localhost,127.0.0.1",
+        username="user",
+        password="secret",
+    )
+
+    assert proxy.to_playwright() == {
+        "server": "http://proxy.test",
+        "bypass": "localhost,127.0.0.1",
+        "username": "user",
+        "password": "secret",
+    }
+
+
+def test_profile_without_languages_falls_back_to_its_locale() -> None:
+    profile = BrowserProfile(name="test", locale="fr-FR", navigator_languages=[])
+
+    assert profile.navigator_languages == ["fr-FR"]
+    assert profile.accept_language() == "fr-FR"
+
+
+def test_profile_user_agent_reaches_context_options() -> None:
+    profile = BrowserProfile(name="test", user_agent="Custom/1.0")
+
+    assert profile.to_context_options()["user_agent"] == "Custom/1.0"
+
+
+def test_slow_mo_reaches_launch_options() -> None:
+    assert SessionConfig(slow_mo_ms=50).launch_options()["slow_mo"] == 50

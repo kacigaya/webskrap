@@ -261,7 +261,7 @@ async def _decline_in_frame(frame: Any, deadline: float) -> str | None:
             # S112/BLE001: one unclickable candidate (covered, detached, or the
             # page already navigating) must not abandon the remaining ones, and
             # the library logs nothing by design.
-            except Exception:  # noqa: BLE001, S112
+            except Exception:  # nosec B112  # noqa: BLE001, S112
                 continue
             return strategy
     return None

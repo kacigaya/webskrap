@@ -73,10 +73,25 @@ def test_resolve_uses_output_root_by_default(
 def test_resolve_rejects_traversal(tmp_path: Path, path: str) -> None:
     root = tmp_path / "out"
 
-    with pytest.raises(WebSkrapError, match="escapes it|does not name a file"):
+    with pytest.raises(WebSkrapError, match="escapes it"):
         resolve_output_path(path, root=root)
 
     assert not (tmp_path / "escape.png").exists()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param(".", id="dot"),
+        pytest.param("", id="empty"),
+        pytest.param("./", id="dot-slash"),
+    ],
+)
+def test_resolve_rejects_paths_naming_no_file(tmp_path: Path, path: str) -> None:
+    # These resolve to a directory, not a destination file: writing to them
+    # would fail inside Playwright rather than at the boundary check.
+    with pytest.raises(WebSkrapError, match="does not name a file"):
+        resolve_output_path(path, root=tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -155,3 +170,40 @@ def test_secure_directory_still_creates_missing_dirs_owner_only(tmp_path: Path) 
     created = secure_directory(tmp_path / "fresh", tighten_existing=False)
 
     assert stat.S_IMODE(created.stat().st_mode) == 0o700
+
+
+@posix_only
+def test_secure_directory_does_not_chmod_through_a_symlink(tmp_path: Path) -> None:
+    # A symlink planted where a session directory belongs must not hand the
+    # mode change to whatever it points at.
+    target = tmp_path / "target"
+    target.mkdir(mode=0o755)
+    link = tmp_path / "link"
+    link.symlink_to(target, target_is_directory=True)
+
+    secure_directory(link)
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+
+
+@posix_only
+def test_output_root_is_created_owner_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root = tmp_path / "out"
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(root))
+
+    resolve_output_path("shot.png")
+
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+
+
+@posix_only
+def test_existing_output_root_keeps_its_permissions(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "out"
+    root.mkdir(mode=0o755)
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(root))
+
+    resolve_output_path("shot.png")
+
+    assert stat.S_IMODE(root.stat().st_mode) == 0o755

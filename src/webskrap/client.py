@@ -16,7 +16,7 @@ import time
 from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
-from random import uniform
+from secrets import SystemRandom
 from typing import Any
 from uuid import uuid4
 
@@ -26,6 +26,13 @@ from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.models import BrowserProfile, FetchResult, ResourcePolicy, SessionConfig, WaitUntil
 from webskrap.profiles import get_profile
+
+# Cursor jitter below is pixel offsets and sleep durations, never a token,
+# identifier, or security decision, so `random` would be adequate. It draws
+# from system entropy anyway: a few dozen values per click cost nothing next to
+# the millisecond sleeps between mouse moves, and it keeps the module free of
+# predictable-RNG calls that a security scanner would have to be told to ignore.
+uniform = SystemRandom().uniform
 
 
 def _async_playwright(driver: str):
@@ -119,6 +126,11 @@ class WebSkrapSession:
         browser: Browser | None = None,
         temp_user_data_dir: str | None = None,
     ) -> None:
+        """Adopt an already-open context; :meth:`WebSkrapClient.session` calls this.
+
+        The session takes ownership: closing it closes the context, the browser
+        when one was passed, and any temporary profile directory.
+        """
         self.name = name
         self.context = context
         self.config = config
@@ -128,6 +140,7 @@ class WebSkrapSession:
         self._closed = False
 
     async def __aenter__(self) -> WebSkrapSession:
+        """Enter the session unchanged; its context is already open."""
         return self
 
     async def __aexit__(
@@ -136,6 +149,7 @@ class WebSkrapSession:
         _exc: object,
         _traceback: object,
     ) -> None:
+        """Close the session, so a failing block still releases the browser."""
         await self.close()
 
     async def fetch(
@@ -347,6 +361,12 @@ class WebSkrapClient:
         default_config: SessionConfig | None = None,
         profiles: Mapping[str, BrowserProfile] | None = None,
     ) -> None:
+        """Configure the client without starting anything.
+
+        The browser driver launches lazily on the first :meth:`fetch` or
+        :meth:`session` call, so constructing a client is cheap and cannot fail
+        just because no browser is installed yet.
+        """
         self.default_config = default_config or SessionConfig()
         self.profiles = dict(profiles or {})
         self._playwright: Any | None = None
@@ -359,6 +379,7 @@ class WebSkrapClient:
         self._sessions: dict[str, WebSkrapSession] = {}
 
     async def __aenter__(self) -> WebSkrapClient:
+        """Enter the client; the driver still starts on first use, not here."""
         return self
 
     async def __aexit__(
@@ -367,6 +388,7 @@ class WebSkrapClient:
         _exc: object,
         _traceback: object,
     ) -> None:
+        """Close every session this client opened, then stop the driver."""
         await self.close()
 
     async def start(

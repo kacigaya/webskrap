@@ -125,6 +125,11 @@ def test_launch_timeout_reports_the_deadline(
         pytest.param("1", True, id="one"),
         pytest.param("true", True, id="true"),
         pytest.param("", True, id="empty-is-not-an-opt-out"),
+        # Anything unrecognized keeps the sandbox: a typo must not silently
+        # disable renderer isolation.
+        pytest.param("maybe", True, id="unrecognized"),
+        pytest.param("disabled", True, id="near-miss-word"),
+        pytest.param("0 ", False, id="zero-trailing-space"),
     ],
 )
 def test_sandbox_env_opt_out(monkeypatch: pytest.MonkeyPatch, value: str, expected: bool) -> None:

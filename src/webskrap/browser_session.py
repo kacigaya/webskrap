@@ -16,7 +16,7 @@ import os
 import re
 import shutil
 import signal
-import subprocess  # noqa: S404 - launches Chromium with a fixed argv, never a shell
+import subprocess  # nosec B404  # noqa: S404 - fixed argv for Chromium, never a shell
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -261,7 +261,11 @@ def launch_browser(
     command.append("about:blank")
 
     with log_path.open("wb") as log:
-        process = subprocess.Popen(  # noqa: S603 - fixed argv, no shell, path from Playwright
+        # Fixed argv, no shell. The executable comes from the installed
+        # Playwright/Patchright browser, and every argument is either a
+        # constant flag or this session's own validated directory -- nothing
+        # here is reachable from page content.
+        process = subprocess.Popen(  # nosec B603  # noqa: S603
             command,
             stdout=log,
             stderr=log,

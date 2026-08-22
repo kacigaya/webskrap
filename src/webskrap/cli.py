@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess  # noqa: S404 - runs a fixed argv for browser installs, never a shell
+import subprocess  # nosec B404  # noqa: S404 - fixed argv for browser installs, no shell
 import sys
 from pathlib import Path
 from typing import Annotated, Any, Literal, NoReturn, TypedDict
@@ -430,7 +430,9 @@ def _print_json(payload: object) -> None:
 
 def _run_install_command(command: tuple[str, ...]) -> InstallResult:
     try:
-        completed = subprocess.run(  # noqa: S603 - fixed argv from INSTALL_COMMANDS, no shell
+        # argv is one of the INSTALL_COMMANDS constants, built from
+        # sys.executable. No shell, and no caller-supplied argument.
+        completed = subprocess.run(  # nosec B603  # noqa: S603
             command, capture_output=True, text=True, check=False
         )
     except OSError as exc:

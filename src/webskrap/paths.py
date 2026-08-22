@@ -87,6 +87,10 @@ def resolve_output_path(
         raise WebSkrapError(msg)
 
     try:
+        # Create the root owner-only when WebSkrap is the one creating it, so a
+        # local attacker cannot plant symlinks inside the default output
+        # directory. A root the user set up keeps the permissions they chose.
+        secure_directory(resolved_base, tighten_existing=False)
         resolved.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         msg = f"could not create output directory {resolved.parent}: {exc}"
@@ -99,12 +103,12 @@ def secure_directory(path: Path, *, tighten_existing: bool = True) -> Path:
 
     ``mkdir(mode=...)`` is masked by the process umask and only applies to the
     final component, so the mode is re-applied explicitly. On non-POSIX
-    platforms the chmod is skipped: Windows ignores these bits and inherits
+    platforms that step is skipped: Windows ignores these bits and inherits
     per-user ACLs from the profile directory instead.
 
     Args:
         path: Directory to create.
-        tighten_existing: Also chmod a directory that already exists. Pass
+        tighten_existing: Also tighten a directory that already exists. Pass
             False for a directory the user chose and may share deliberately
             (a ``WEBSKRAP_BROWSER_DIR`` on a multi-user host); WebSkrap should
             not silently narrow permissions on a directory it did not create.
@@ -112,9 +116,28 @@ def secure_directory(path: Path, *, tighten_existing: bool = True) -> Path:
     existed = path.is_dir()
     path.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIR_MODE)
     if os.name == "posix" and (tighten_existing or not existed):
-        # A directory created before this policy (or under a loose umask) still
-        # needs tightening; failing to chmod someone else's directory is not
-        # worth aborting the session for.
-        with suppress(OSError):
-            path.chmod(PRIVATE_DIR_MODE)
+        _chmod_no_follow(path)
     return path
+
+
+def _chmod_no_follow(path: Path) -> None:
+    """Set ``path`` to ``0700`` without following a final symlink.
+
+    ``Path.chmod`` resolves symlinks, so a symlink planted where a session
+    directory belongs would hand the mode change to its target. Opening the
+    directory with ``O_NOFOLLOW`` refuses that outright, and ``fchmod`` then
+    acts on the directory actually opened.
+
+    A directory the user deliberately symlinked elsewhere is therefore left
+    alone rather than modified through the link, as is one owned by somebody
+    else: neither is worth aborting a session over.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return
+    try:
+        with suppress(OSError):
+            os.fchmod(fd, PRIVATE_DIR_MODE)
+    finally:
+        os.close(fd)
