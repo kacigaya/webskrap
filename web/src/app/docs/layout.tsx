@@ -19,14 +19,14 @@ export default function DocsLayout({
           <Link href="/" className="flex items-center gap-2.5">
             <Image
               src={asset("/webskrap-logo.png")}
-              alt="WebSkrap"
+              alt=""
               width={642}
               height={686}
               className="h-7 w-auto"
             />
             <span className="font-semibold tracking-tight">WebSkrap</span>
           </Link>
-          <nav className="flex items-center gap-2">
+          <nav aria-label="Documentation utilities" className="flex items-center gap-2">
             <MobileDocsMenu />
             <ThemeToggle />
             <Button variant="outline" size="sm" render={<a href={GITHUB_URL} />}>

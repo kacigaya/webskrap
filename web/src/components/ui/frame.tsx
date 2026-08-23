@@ -33,10 +33,10 @@ export function FrameHeader({
 export function FrameTitle({
   className,
   ...props
-}: React.ComponentProps<"div">): React.ReactElement {
+}: React.ComponentProps<"h3">): React.ReactElement {
   return (
-    <div
-      className={cn("font-semibold text-sm", className)}
+    <h3
+      className={cn("text-balance font-semibold text-sm", className)}
       data-slot="frame-panel-title"
       {...props}
     />
@@ -46,10 +46,10 @@ export function FrameTitle({
 export function FrameDescription({
   className,
   ...props
-}: React.ComponentProps<"div">): React.ReactElement {
+}: React.ComponentProps<"p">): React.ReactElement {
   return (
-    <div
-      className={cn("text-muted-foreground text-sm", className)}
+    <p
+      className={cn("text-pretty text-muted-foreground text-sm", className)}
       data-slot="frame-panel-description"
       {...props}
     />

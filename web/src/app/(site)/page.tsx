@@ -110,14 +110,14 @@ export default function Home() {
           <div className="flex items-center gap-2.5">
             <Image
               src={asset("/webskrap-logo.png")}
-              alt="WebSkrap"
+              alt=""
               width={642}
               height={686}
               className="h-7 w-auto"
             />
             <span className="font-semibold tracking-tight">WebSkrap</span>
           </div>
-          <nav className="flex items-center gap-2">
+          <nav aria-label="Primary" className="flex items-center gap-2">
             <ThemeToggle />
             <Button variant="ghost" size="sm" render={<Link href={DOCS_URL} />}>
               Docs
@@ -133,7 +133,7 @@ export default function Home() {
       <section className="mx-auto flex w-full max-w-5xl flex-col items-center px-6 py-24 text-center">
         <Image
           src={asset("/webskrap-logo.png")}
-          alt="WebSkrap logo"
+          alt=""
           width={642}
           height={686}
           className="mb-8 h-24 w-auto"
@@ -142,15 +142,15 @@ export default function Home() {
         <Badge variant="secondary" className="mb-6">
           Async-first · Playwright · Patchright · MCP
         </Badge>
-        <h1 className="font-heading text-5xl font-bold tracking-tight sm:text-6xl">
+        <h1 className="text-balance font-heading text-5xl font-bold tracking-tight sm:text-6xl">
           Python Web Scraping with Playwright and Patchright
         </h1>
-        <p className="mt-6 max-w-2xl text-lg text-muted-foreground">
+        <p className="mt-6 max-w-2xl text-pretty text-lg text-muted-foreground">
           WebSkrap is an async-first Python web scraping and browser automation toolkit for
           scraping JavaScript-heavy pages, managing persistent browser sessions, and exposing
           clean page text to LLM agents through MCP.
         </p>
-        <p className="mt-4 max-w-2xl text-base text-muted-foreground">
+        <p className="mt-4 max-w-2xl text-pretty text-base text-muted-foreground">
           Fetch a page in one call, or keep a browser open across calls and drive it with
           snapshots, clicks, and form fills from the CLI or an MCP client.
         </p>
@@ -171,15 +171,15 @@ export default function Home() {
 
       {/* Features */}
       <section className="mx-auto w-full max-w-5xl px-6 pb-24">
-        <h2 className="mb-10 text-center font-heading text-3xl font-bold tracking-tight">
+        <h2 className="mb-10 text-balance text-center font-heading text-3xl font-bold tracking-tight">
           Browser automation ready for agents and scripts
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {FEATURES.map((feature) => (
             <Card key={feature.title}>
               <CardHeader>
-                <CardTitle>{feature.title}</CardTitle>
-                <CardDescription>{feature.description}</CardDescription>
+                <CardTitle render={<h3 />}>{feature.title}</CardTitle>
+                <CardDescription render={<p />}>{feature.description}</CardDescription>
               </CardHeader>
             </Card>
           ))}
@@ -188,7 +188,7 @@ export default function Home() {
 
       {/* Quickstart */}
       <section className="mx-auto w-full max-w-3xl px-6 pb-24">
-        <h2 className="mb-6 text-center font-heading text-3xl font-bold tracking-tight">
+        <h2 className="mb-6 text-balance text-center font-heading text-3xl font-bold tracking-tight">
           Quickstart
         </h2>
         <CodeBlock code={QUICKSTART} lang="python" />
@@ -198,7 +198,7 @@ export default function Home() {
       <footer className="mt-auto border-t">
         <div className="mx-auto flex w-full max-w-5xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-muted-foreground sm:flex-row">
           <span>© {new Date().getFullYear()} WebSkrap</span>
-          <nav className="flex items-center gap-5">
+          <nav aria-label="Footer" className="flex items-center gap-5">
             <Link href={DOCS_URL} className="hover:text-foreground">
               Documentation
             </Link>

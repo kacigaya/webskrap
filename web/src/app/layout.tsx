@@ -3,7 +3,14 @@ import { Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/components/theme-provider";
-import { DEFAULT_DESCRIPTION, DEFAULT_TITLE, SEO_KEYWORDS, SITE_NAME, SITE_URL } from "@/lib/seo";
+import {
+  DEFAULT_DESCRIPTION,
+  DEFAULT_TITLE,
+  SEO_KEYWORDS,
+  SITE_NAME,
+  SITE_URL,
+  SOCIAL_IMAGE_URL,
+} from "@/lib/seo";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -31,7 +38,7 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     images: [
       {
-        url: "/webskrap-logo.png",
+        url: SOCIAL_IMAGE_URL,
         width: 642,
         height: 686,
         alt: "WebSkrap logo",
@@ -39,10 +46,10 @@ export const metadata: Metadata = {
     ],
   },
   twitter: {
-    card: "summary_large_image",
+    card: "summary",
     title: DEFAULT_TITLE,
     description: DEFAULT_DESCRIPTION,
-    images: ["/webskrap-logo.png"],
+    images: [SOCIAL_IMAGE_URL],
   },
 };
 

@@ -11,7 +11,7 @@ export function DocsSidebar() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex flex-col gap-6 text-sm">
+    <nav aria-label="Documentation" className="flex flex-col gap-6 text-sm">
       {NAV.map((section, i) => (
         <div key={section.title ?? i} className="flex flex-col gap-1">
           {section.title && (
@@ -47,13 +47,21 @@ export function MobileDocsMenu() {
   const details = useRef<HTMLDetailsElement>(null);
 
   return (
-    <details ref={details} className="relative md:hidden">
+    <details
+      ref={details}
+      className="relative md:hidden"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !details.current?.open) return;
+        details.current.removeAttribute("open");
+        details.current.querySelector("summary")?.focus();
+      }}
+    >
       <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border hover:bg-accent [&::-webkit-details-marker]:hidden">
-        <Menu className="size-4" />
+        <Menu aria-hidden="true" className="size-4" />
         <span className="sr-only">Open documentation menu</span>
       </summary>
       <div
-        className="fixed inset-x-4 top-24 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-xl border bg-background p-4 shadow-lg"
+        className="fixed inset-x-4 top-24 max-h-[calc(100dvh-7rem)] overflow-y-auto rounded-xl border bg-background p-4 shadow-lg"
         onClick={() => details.current?.removeAttribute("open")}
       >
         <DocsSidebar />

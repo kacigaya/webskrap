@@ -10,12 +10,14 @@ type TableVariant = "default" | "card";
 type TableProps = React.ComponentProps<"table"> & {
   variant?: TableVariant;
   render?: useRender.ComponentProps<"div">["render"];
+  scrollLabel?: string;
 };
 
 export function Table({
   className,
   variant = "default",
   render,
+  scrollLabel,
   ...props
 }: TableProps): React.ReactElement {
   const defaultProps = {
@@ -29,9 +31,16 @@ export function Table({
         {...props}
       />
     ),
-    className: "relative w-full overflow-x-auto",
+    className: cn(
+      "relative w-full overflow-x-auto",
+      scrollLabel &&
+        "rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+    ),
+    "aria-label": scrollLabel,
     "data-slot": "table-container",
     "data-variant": variant,
+    role: scrollLabel ? "region" : undefined,
+    tabIndex: scrollLabel ? 0 : undefined,
   };
 
   return useRender({

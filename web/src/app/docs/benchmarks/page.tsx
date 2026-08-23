@@ -9,9 +9,42 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  canonicalUrl,
+  SITE_NAME,
+  SOCIAL_IMAGE_URL,
+} from "@/lib/seo";
+
+const DESCRIPTION =
+  "WebSkrap stealth comparisons and repeatable browser automation performance benchmarks for resource routing, session reuse, and concurrent fetching.";
 
 export const metadata: Metadata = {
-  title: "Benchmarks | WebSkrap",
+  title: "Benchmarks",
+  description: DESCRIPTION,
+  alternates: {
+    canonical: canonicalUrl("/docs/benchmarks/"),
+  },
+  openGraph: {
+    type: "article",
+    url: canonicalUrl("/docs/benchmarks/"),
+    title: `Benchmarks | ${SITE_NAME}`,
+    description: DESCRIPTION,
+    siteName: SITE_NAME,
+    images: [
+      {
+        url: SOCIAL_IMAGE_URL,
+        width: 642,
+        height: 686,
+        alt: "WebSkrap logo",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary",
+    title: `Benchmarks | ${SITE_NAME}`,
+    description: DESCRIPTION,
+    images: [SOCIAL_IMAGE_URL],
+  },
 };
 
 // Map a status string to a badge variant by keyword. ponytail: keyword match, add cases if new statuses appear.
@@ -171,8 +204,8 @@ export default function BenchmarksPage() {
   return (
     <div className="flex flex-col gap-12">
       <header className="flex flex-col gap-4">
-        <h1 className="font-heading text-4xl font-bold tracking-tight">Benchmarks</h1>
-        <p className="max-w-2xl text-muted-foreground">
+        <h1 className="text-balance font-heading text-4xl font-bold tracking-tight">Benchmarks</h1>
+        <p className="max-w-2xl text-pretty text-muted-foreground">
           Stealth comparison against other anti-detect stacks, plus performance benchmarks
           for what WebSkrap actually does: resource routing, session reuse, and concurrent
           fetching.
@@ -182,7 +215,7 @@ export default function BenchmarksPage() {
       {/* Stealth comparison */}
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="font-heading text-2xl font-bold tracking-tight">Comparison</h2>
+          <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Comparison</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
             CloakBrowser values are copied from its{" "}
             <a
@@ -207,6 +240,7 @@ export default function BenchmarksPage() {
           </FrameHeader>
           <Table
             variant="card"
+            scrollLabel="Feature comparison table"
             className="w-full text-xs [&_td]:whitespace-normal [&_td]:px-2.5 [&_td]:py-3 [&_td]:align-top [&_th]:whitespace-normal [&_th]:break-words [&_th]:px-2.5 [&_th]:py-3 [&_th]:align-bottom"
           >
             <TableHeader>
@@ -253,6 +287,7 @@ export default function BenchmarksPage() {
           </FrameHeader>
           <Table
             variant="card"
+            scrollLabel="Detection services table"
             className="w-full text-xs [&_td]:whitespace-normal [&_td]:px-2.5 [&_td]:py-3 [&_td]:align-top [&_th]:whitespace-normal [&_th]:px-2.5 [&_th]:py-3 [&_th]:align-bottom"
           >
             <TableHeader>
@@ -301,7 +336,7 @@ export default function BenchmarksPage() {
       {/* Performance */}
       <section className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="font-heading text-2xl font-bold tracking-tight">Performance</h2>
+          <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Performance</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
             Run against a local HTTP server serving a synthetic page with many delayed
             sub-resources. No external sites are contacted, so results are deterministic.
@@ -316,7 +351,7 @@ export default function BenchmarksPage() {
             <FrameTitle>Resource routing</FrameTitle>
             <FrameDescription>Full page load with delayed assets</FrameDescription>
           </FrameHeader>
-          <Table variant="card">
+          <Table variant="card" scrollLabel="Resource routing benchmark table">
             <TableHeader>
               <TableRow>
                 <TableHead>Policy</TableHead>
@@ -351,7 +386,7 @@ export default function BenchmarksPage() {
             <FrameTitle>Session reuse</FrameTitle>
             <FrameDescription>Warm persistent session vs cold launch per fetch</FrameDescription>
           </FrameHeader>
-          <Table variant="card">
+          <Table variant="card" scrollLabel="Session reuse benchmark table">
             <TableHeader>
               <TableRow>
                 <TableHead>Mode</TableHead>

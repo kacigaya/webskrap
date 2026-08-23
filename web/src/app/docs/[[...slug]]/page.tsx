@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getDoc, getDocSlugs } from "@/lib/docs";
-import { canonicalUrl, DEFAULT_DESCRIPTION, SITE_NAME } from "@/lib/seo";
+import {
+  canonicalUrl,
+  DEFAULT_DESCRIPTION,
+  SITE_NAME,
+  SOCIAL_IMAGE_URL,
+} from "@/lib/seo";
 import { CodeCopy } from "@/components/code-copy";
 
 export const dynamicParams = false;
@@ -33,11 +38,20 @@ export async function generateMetadata(props: DocPageProps): Promise<Metadata> {
       title: `${title} | ${SITE_NAME}`,
       description,
       siteName: SITE_NAME,
+      images: [
+        {
+          url: SOCIAL_IMAGE_URL,
+          width: 642,
+          height: 686,
+          alt: "WebSkrap logo",
+        },
+      ],
     },
     twitter: {
       card: "summary",
       title: `${title} | ${SITE_NAME}`,
       description,
+      images: [SOCIAL_IMAGE_URL],
     },
   };
 }
@@ -68,7 +82,7 @@ export default async function DocPage(props: DocPageProps) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleSchema) }}
       />
       <article
-        className="prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-pre:rounded-2xl prose-pre:border prose-pre:bg-card prose-pre:p-6 prose-a:text-primary"
+        className="prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-headings:text-balance prose-p:text-pretty prose-pre:rounded-2xl prose-pre:border prose-pre:bg-card prose-pre:p-6 prose-a:text-primary"
         dangerouslySetInnerHTML={{ __html: doc.html }}
       />
       <CodeCopy />

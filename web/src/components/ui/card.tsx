@@ -51,7 +51,7 @@ export function CardTitle({
   ...props
 }: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
-    className: cn("font-semibold text-lg leading-none", className),
+    className: cn("text-balance font-semibold text-lg leading-none", className),
     "data-slot": "card-title",
   };
 
@@ -68,7 +68,7 @@ export function CardDescription({
   ...props
 }: useRender.ComponentProps<"div">): React.ReactElement {
   const defaultProps = {
-    className: cn("text-muted-foreground text-sm", className),
+    className: cn("text-pretty text-muted-foreground text-sm", className),
     "data-slot": "card-description",
   };
 
