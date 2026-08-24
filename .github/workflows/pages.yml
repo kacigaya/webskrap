@@ -37,6 +37,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: web/out
+          # v4 stopped bundling dotfiles. web/public/.nojekyll is exported to
+          # web/out/.nojekyll and would otherwise be dropped from the artifact.
+          include-hidden-files: true
   deploy:
     needs: build
     runs-on: ubuntu-latest
