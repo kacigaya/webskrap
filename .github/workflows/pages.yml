@@ -23,7 +23,7 @@ jobs:
     env:
       NEXT_PUBLIC_BASE_PATH: /webskrap
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -33,10 +33,13 @@ jobs:
         run: bun run lint
       - name: Build static export
         run: bun run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web/out
+          # v4 stopped bundling dotfiles. web/public/.nojekyll is exported to
+          # web/out/.nojekyll and would otherwise be dropped from the artifact.
+          include-hidden-files: true
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -45,4 +48,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
