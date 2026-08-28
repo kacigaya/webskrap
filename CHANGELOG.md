@@ -18,6 +18,12 @@ history, so they summarize each release rather than list every change.
   preventing a preplanted entry under a shared `WEBSKRAP_BROWSER_DIR` from
   redirecting profile and state-file operations outside the sessions root.
 
+### Fixed
+
+- Concurrent open and close operations for the same persistent browser session
+  are serialized across processes. This prevents duplicate Chromium launches,
+  stale state files, and a close racing with an in-progress open.
+
 ### Added
 
 - Dependabot configuration for the Python, GitHub Actions, and docs-site

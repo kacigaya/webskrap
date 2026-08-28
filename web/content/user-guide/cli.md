@@ -200,6 +200,10 @@ are not encrypted, so use `webskrap browser close --delete-data` to remove a
 session's profile, or `close --all` to stop every session. A root you set up
 yourself via `WEBSKRAP_BROWSER_DIR` keeps whatever permissions you gave it.
 
+Open and close operations for the same session are serialized across
+processes. Concurrent commands cannot launch two browsers against one profile
+or leave a stale state file behind.
+
 ### Chromium sandbox
 
 `open` keeps Chromium's OS sandbox, which is what contains a renderer
