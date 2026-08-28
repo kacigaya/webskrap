@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import stat
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -251,3 +253,99 @@ def test_session_dir_rejects_symlink_without_touching_target(
         browser_session.close_session("default", delete_data=True)
 
     assert marker.read_text(encoding="utf-8") == "keep"
+
+
+def test_session_operation_lock_serializes_same_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "browser"))
+    first = browser_session._SessionOperationLock.acquire("default")
+    waiting = threading.Event()
+    acquired = threading.Event()
+
+    def acquire_second() -> None:
+        waiting.set()
+        second = browser_session._SessionOperationLock.acquire("default")
+        acquired.set()
+        second.release()
+
+    thread = threading.Thread(target=acquire_second)
+    thread.start()
+    assert waiting.wait(timeout=1)
+    assert not acquired.wait(timeout=0.05)
+
+    first.release()
+    assert acquired.wait(timeout=1)
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+
+
+def test_concurrent_open_reuses_single_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "browser"))
+    launches: list[Path] = []
+
+    async def exercise() -> tuple[dict[str, Any], dict[str, Any]]:
+        executable_requested = asyncio.Event()
+        continue_launch = asyncio.Event()
+
+        async def fake_executable() -> str:
+            executable_requested.set()
+            await continue_launch.wait()
+            return "/bin/chromium"
+
+        def fake_launch(directory: Path, **_kwargs: Any) -> tuple[int, int]:
+            launches.append(directory)
+            return (1234, 5678)
+
+        monkeypatch.setattr(browser_session, "chromium_executable", fake_executable)
+        monkeypatch.setattr(browser_session, "launch_browser", fake_launch)
+        monkeypatch.setattr(
+            browser_session,
+            "session_running",
+            lambda _directory, state: state is not None,
+        )
+
+        first = asyncio.create_task(browser_session.open_session("default"))
+        await executable_requested.wait()
+        second = asyncio.create_task(browser_session.open_session("default"))
+        await asyncio.sleep(0)
+        continue_launch.set()
+        return await first, await second
+
+    first, second = asyncio.run(exercise())
+
+    assert launches == [tmp_path / "browser" / "default"]
+    assert first["reused"] is False
+    assert second["reused"] is True
+
+
+def test_cancelled_lock_wait_releases_after_acquiring(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "browser"))
+    first = browser_session._SessionOperationLock.acquire("default")
+    original_acquire = browser_session._SessionOperationLock.acquire
+    waiting = threading.Event()
+
+    def observed_acquire(name: str) -> browser_session._SessionOperationLock:
+        waiting.set()
+        return original_acquire(name)
+
+    monkeypatch.setattr(browser_session._SessionOperationLock, "acquire", observed_acquire)
+
+    async def exercise() -> None:
+        task = asyncio.create_task(browser_session._acquire_session_operation_lock("default"))
+        assert await asyncio.to_thread(waiting.wait, 1)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        first.release()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        reacquired = await asyncio.to_thread(original_acquire, "default")
+        reacquired.release()
+
+    asyncio.run(exercise())
