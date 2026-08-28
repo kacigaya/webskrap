@@ -9,7 +9,7 @@ import pytest
 from webskrap import mcp_server
 from webskrap.client import WebSkrapError
 from webskrap.models import FetchResult
-from webskrap.paths import OUTPUT_DIR_ENV
+from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 
 
 class _FakeClient:
@@ -84,6 +84,53 @@ def test_stealth_fetch_defaults_to_clean_text(monkeypatch: Any) -> None:
 
     assert _FakeClient.calls[0]["text_only"] is True
     assert result["text"] == "Readable body"
+
+
+def test_stealth_fetch_confines_persistent_profile(monkeypatch: Any, tmp_path: Path) -> None:
+    _fake_client(monkeypatch)
+    root = tmp_path / "profiles"
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(root))
+
+    asyncio.run(mcp_server.stealth_fetch("https://example.test", user_data_dir="accounts/shop"))
+
+    config = _FakeClient.calls[0]["config"]
+    assert config.user_data_dir == root / "accounts" / "shop"
+    assert config.user_data_dir.is_dir()
+
+
+@pytest.mark.parametrize("path", [".", "..", "../escape", "/tmp/escape"])
+def test_stealth_fetch_rejects_profile_paths_outside_root(
+    monkeypatch: Any, tmp_path: Path, path: str
+) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(tmp_path / "profiles"))
+
+    with pytest.raises(WebSkrapError, match="profile path must"):
+        asyncio.run(mcp_server.stealth_fetch("https://example.test", user_data_dir=path))
+
+    assert _FakeClient.calls == []
+
+
+def test_stealth_fetch_rejects_profile_symlink_outside_root(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    _fake_client(monkeypatch)
+    root = tmp_path / "profiles"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "escape").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(root))
+
+    with pytest.raises(WebSkrapError, match="profile path must stay inside"):
+        asyncio.run(
+            mcp_server.stealth_fetch(
+                "https://example.test",
+                user_data_dir="escape/account",
+            )
+        )
+
+    assert _FakeClient.calls == []
 
 
 def test_browser_tools_are_registered() -> None:
