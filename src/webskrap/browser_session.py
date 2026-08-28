@@ -95,12 +95,16 @@ def session_dir(name: str) -> Path:
     """Return a session's directory, rejecting names that escape the root.
 
     Raises:
-        WebSkrapError: If ``name`` is not letters, digits, ``.``, ``_`` or ``-``.
+        WebSkrapError: If ``name`` is ``.`` or ``..``, or contains characters
+            other than letters, digits, ``.``, ``_`` or ``-``.
     """
     # Session names become directory names, so reject path separators and
     # anything else that could escape the sessions root.
-    if not SESSION_NAME_PATTERN.fullmatch(name):
-        msg = f"invalid session name '{name}': use letters, digits, '.', '_' or '-'"
+    if name in {".", ".."} or not SESSION_NAME_PATTERN.fullmatch(name):
+        msg = (
+            f"invalid session name '{name}': use letters, digits, '.', '_' or '-', "
+            "but not '.' or '..'"
+        )
         raise WebSkrapError(msg)
     return sessions_root() / name
 

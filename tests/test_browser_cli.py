@@ -57,15 +57,34 @@ def test_target_selector_maps_refs_and_passes_selectors_through() -> None:
     assert browser_session.target_selector("e12x") == "e12x"
 
 
-def test_invalid_session_name_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("session", [".", "..", "../evil"])
+def test_invalid_session_name_is_rejected(tmp_path: Path, session: str) -> None:
     result = runner.invoke(
         cli.app,
-        ["browser", "goto", "https://example.test", "-s", "../evil"],
+        ["browser", "goto", "https://example.test", "-s", session],
         env=_env(tmp_path),
     )
 
     assert result.exit_code == 1
     assert "invalid session name" in result.output
+
+
+@pytest.mark.parametrize("session", [".", ".."])
+def test_close_delete_data_rejects_traversal(tmp_path: Path, session: str) -> None:
+    browser_root = tmp_path / "browser"
+    browser_root.mkdir()
+    marker = tmp_path / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        ["browser", "close", "--delete-data", "-s", session],
+        env={"WEBSKRAP_BROWSER_DIR": str(browser_root)},
+    )
+
+    assert result.exit_code == 1
+    assert "invalid session name" in result.output
+    assert marker.read_text(encoding="utf-8") == "keep"
 
 
 def test_action_without_open_session_fails(tmp_path: Path) -> None:
