@@ -17,6 +17,10 @@ history, so they summarize each release rather than list every change.
 - Persistent browser commands reject a session directory that is a symlink,
   preventing a preplanted entry under a shared `WEBSKRAP_BROWSER_DIR` from
   redirecting profile and state-file operations outside the sessions root.
+- MCP `stealth_fetch` profile paths are confined under
+  `~/.webskrap/profiles` (override with `WEBSKRAP_MCP_PROFILE_DIR`). Absolute
+  paths, traversal, and escaping symlinks are rejected before Chromium starts;
+  unrestricted profile paths remain available through the Python API.
 
 ### Fixed
 

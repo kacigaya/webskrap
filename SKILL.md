@@ -199,6 +199,11 @@ MCP tools:
   behavior with `webskrap browser` (headless only over MCP; `browser_interact`
   takes `action` + `target` ref/selector + optional `values`).
 
+`stealth_fetch.user_data_dir` is relative to `~/.webskrap/profiles`; set
+`WEBSKRAP_MCP_PROFILE_DIR` in the server environment to move that root. MCP
+tool input cannot select an absolute path or escape the root. Python callers
+remain free to choose any `SessionConfig.user_data_dir`.
+
 `browser_screenshot` writes only under `./webskrap-output`
 (`WEBSKRAP_OUTPUT_DIR` moves the root): `path` is relative, and absolute
 paths, `..` traversal, and symlinks leaving the root are rejected. The sandbox
