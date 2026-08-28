@@ -80,8 +80,9 @@ text_result = await client.fetch("https://example.com", text_only=True)
 print(text_result.text)
 ```
 
-Pass `screenshot=True` to let WebSkrap choose a timestamped file name in the
-current working directory.
+Pass `screenshot=True` to let WebSkrap choose a UUID-based file name in the
+form `webskrap-<32 hexadecimal characters>.png` in the current working
+directory.
 
 ### Per-call config
 
