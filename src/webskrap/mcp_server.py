@@ -7,6 +7,7 @@ Code, ...) at that command to drive scraping through the tools below.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -367,9 +368,12 @@ async def browser_close(
         all_sessions: Close every session.
     """
     names = browser_session.list_session_names() if all_sessions else [session]
-    return {
-        "closed": [browser_session.close_session(name, delete_data=delete_data) for name in names]
-    }
+    closed = []
+    for name in names:
+        closed.append(
+            await asyncio.to_thread(browser_session.close_session, name, delete_data=delete_data)
+        )
+    return {"closed": closed}
 
 
 @mcp.tool()
