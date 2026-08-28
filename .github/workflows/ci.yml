@@ -32,10 +32,12 @@ jobs:
         run: uv run --extra dev bandit -c pyproject.toml -q -r src/
       - name: Audit dependencies
         run: uv run --extra dev --with pip-audit==2.9.0 pip-audit
+      - name: Prepare package output
+        run: echo "PACKAGE_DIR=$(mktemp -d .package-dist.XXXXXX)" >> "$GITHUB_ENV"
       - name: Build
-        run: uv build
+        run: uv build --out-dir "$PACKAGE_DIR"
       - name: Check package metadata
-        run: uv run --with twine twine check dist/*
+        run: uv run --with twine twine check "$PACKAGE_DIR"/*
 
   # Requirement 1: the package works on every advertised Python version.
   # Browsers are not installed here; the browser job below covers those paths.
