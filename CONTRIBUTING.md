@@ -53,8 +53,14 @@ Security and packaging checks:
 ```bash
 uv run --extra dev bandit -c pyproject.toml -q -r src/
 uv run --extra dev --with pip-audit pip-audit
-uv build && uv run --with twine twine check dist/*
+package_dir="$(mktemp -d)"
+trap 'rm -r -- "$package_dir"' EXIT
+uv build --out-dir "$package_dir"
+uv run --with twine twine check "$package_dir"/*
 ```
+
+The temporary output directory keeps metadata checks limited to artifacts from
+the current tree. Existing files under `dist/` are neither checked nor removed.
 
 `ruff format .` fixes formatting; `ruff check . --fix` fixes what it safely
 can. Ruff enforces security (`S`) and docstring (`D`) rules on `src/`, and
