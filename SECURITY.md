@@ -72,10 +72,10 @@ directories `0700` on POSIX, but that only keeps out other local accounts. The
 data is not encrypted at rest, it survives process exit, and
 `webskrap browser close --delete-data` is what removes it.
 
-Permission tightening never follows a symlink: if a session directory is a
-symlink, WebSkrap leaves it and its target alone rather than changing modes
-through the link. A profile directory you symlinked elsewhere yourself
-therefore keeps whatever permissions you gave it.
+Session directories cannot be symlinks. WebSkrap rejects a session whose name
+already points to one, without changing or deleting the link's target. This is
+especially important when `WEBSKRAP_BROWSER_DIR` points to a shared root where
+another local account could preplant a directory entry.
 
 On Windows, POSIX mode bits do not apply; the profile inherits the ACLs of
 your user directory.

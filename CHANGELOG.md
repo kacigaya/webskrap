@@ -14,6 +14,9 @@ history, so they summarize each release rather than list every change.
 - Persistent browser session names `.` and `..` are rejected. They previously
   resolved to the session root or its parent, so closing one with profile-data
   deletion enabled could remove files outside an individual session directory.
+- Persistent browser commands reject a session directory that is a symlink,
+  preventing a preplanted entry under a shared `WEBSKRAP_BROWSER_DIR` from
+  redirecting profile and state-file operations outside the sessions root.
 
 ### Added
 
