@@ -2,9 +2,9 @@
 
 Two concerns live here:
 
-* **Output confinement.** The MCP server takes file destinations from a model,
-  which in turn reads untrusted pages, so a screenshot destination is not a
-  trusted input. :func:`resolve_output_path` keeps those writes under one root.
+* **MCP path confinement.** The MCP server takes paths from a model, which in
+  turn reads untrusted pages. :func:`resolve_output_path` and
+  :func:`resolve_mcp_profile_path` keep writes under operator-chosen roots.
 * **Private state.** Persistent browser profiles hold cookies and logged-in
   sessions. :func:`secure_directory` creates them ``0700`` so other local
   accounts cannot read them.
@@ -21,6 +21,7 @@ from webskrap.client import WebSkrapError
 
 OUTPUT_DIR_ENV = "WEBSKRAP_OUTPUT_DIR"
 DEFAULT_OUTPUT_DIRNAME = "webskrap-output"
+MCP_PROFILE_DIR_ENV = "WEBSKRAP_MCP_PROFILE_DIR"
 PRIVATE_DIR_MODE = 0o700
 
 
@@ -34,6 +35,51 @@ def output_root() -> Path:
     if override := os.environ.get(OUTPUT_DIR_ENV):
         return Path(override).expanduser()
     return Path.cwd() / DEFAULT_OUTPUT_DIRNAME
+
+
+def mcp_profile_root() -> Path:
+    """Return the root for model-supplied persistent browser profiles."""
+    if override := os.environ.get(MCP_PROFILE_DIR_ENV):
+        return Path(override).expanduser()
+    return Path.home() / ".webskrap" / "profiles"
+
+
+def resolve_mcp_profile_path(path: str | os.PathLike[str]) -> Path:
+    """Resolve a model-supplied profile directory inside the MCP profile root.
+
+    The Python API accepts unrestricted :class:`~pathlib.Path` values. This
+    narrower helper exists for the MCP trust boundary, where page content can
+    influence a model's tool arguments.
+
+    Raises:
+        WebSkrapError: If ``path`` is absolute, names the root itself, or
+            resolves outside the configured profile root.
+    """
+    base = mcp_profile_root().expanduser()
+    candidate = Path(path)
+    if candidate.is_absolute() or candidate.drive or candidate.root:
+        msg = (
+            f"profile path must be relative to {base}: '{candidate}' is absolute. "
+            f"Pass a relative name, or set {MCP_PROFILE_DIR_ENV} to move the profile root."
+        )
+        raise WebSkrapError(msg)
+
+    resolved_base = base.resolve()
+    resolved = (resolved_base / candidate).resolve()
+    if resolved == resolved_base or resolved_base not in resolved.parents:
+        msg = (
+            f"profile path must stay inside {base}: '{candidate}' escapes it. "
+            f"Set {MCP_PROFILE_DIR_ENV} to store profiles elsewhere."
+        )
+        raise WebSkrapError(msg)
+
+    try:
+        secure_directory(resolved_base, tighten_existing=False)
+        secure_directory(resolved)
+    except OSError as exc:
+        msg = f"could not create profile directory {resolved}: {exc}"
+        raise WebSkrapError(msg) from exc
+    return resolved
 
 
 def resolve_output_path(
