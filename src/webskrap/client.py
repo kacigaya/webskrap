@@ -24,6 +24,7 @@ from playwright.async_api import Browser, BrowserContext, FloatRect, Page
 
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
+from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import BrowserProfile, FetchResult, ResourcePolicy, SessionConfig, WaitUntil
 from webskrap.profiles import get_profile
 
@@ -47,20 +48,11 @@ def _async_playwright(driver: str):
             from patchright.async_api import async_playwright
         except ImportError as exc:  # pragma: no cover - optional dependency
             msg = "driver='patchright' requires patchright. Run: pip install webskrap"
-            raise WebSkrapError(msg) from exc
+            raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
         return async_playwright()
     from playwright.async_api import async_playwright
 
     return async_playwright()
-
-
-class WebSkrapError(RuntimeError):
-    """Raised for every WebSkrap-level failure.
-
-    Covers bad configuration, closed clients and sessions, missing browsers,
-    and rejected paths. Playwright's own exceptions are left alone so callers
-    can still catch a navigation timeout as a timeout.
-    """
 
 
 async def browser_doctor(
@@ -277,12 +269,12 @@ class WebSkrapSession:
 
         if click_options.get("strict") is True and await locator.count() != 1:
             msg = f"strict mode expected one element for selector: {selector}"
-            raise WebSkrapError(msg)
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
 
         box = await locator.bounding_box(timeout=timeout)
         if box is None:
             msg = f"could not find a visible bounding box for selector: {selector}"
-            raise WebSkrapError(msg)
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
 
         x, y = _human_click_point(box, click_options.get("position"))
         if click_options.get("trial"):
