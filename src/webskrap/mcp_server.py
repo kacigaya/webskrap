@@ -8,7 +8,8 @@ Code, ...) at that command to drive scraping through the tools below.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from typing import Any, TypeVar
 
 from playwright.async_api import Page
@@ -16,7 +17,7 @@ from playwright.async_api import Page
 from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError
 from webskrap.diagnostics import diagnose
-from webskrap.errors import ErrorCode
+from webskrap.errors import ErrorCode, classify, tool_message
 from webskrap.models import SessionConfig, shape_fetch_result
 from webskrap.parsing import (
     parse_element_state,
@@ -151,26 +152,27 @@ async def fetch(
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
     """
-    config = SessionConfig(
-        driver="patchright",
-        channel=channel,
-        headless=True,
-        navigation_timeout_ms=timeout_ms,
-        resource_policy=parse_resource_policy(resource_policy),
-        decline_cookies=decline_cookies,
-    )
-    async with WebSkrapClient() as client:
-        result = await client.fetch(
-            url,
-            profile=get_profile(profile),
-            config=config,
-            wait_until=parse_wait_until(wait_until),
-            timeout_ms=timeout_ms,
-            text_only=text_only,
-            include_links=include_links,
-            max_links=max_links,
+    with _tool_errors():
+        config = SessionConfig(
+            driver="patchright",
+            channel=channel,
+            headless=True,
+            navigation_timeout_ms=timeout_ms,
+            resource_policy=parse_resource_policy(resource_policy),
+            decline_cookies=decline_cookies,
         )
-    return shape_fetch_result(result, max_chars, offset)
+        async with WebSkrapClient() as client:
+            result = await client.fetch(
+                url,
+                profile=get_profile(profile),
+                config=config,
+                wait_until=parse_wait_until(wait_until),
+                timeout_ms=timeout_ms,
+                text_only=text_only,
+                include_links=include_links,
+                max_links=max_links,
+            )
+        return shape_fetch_result(result, max_chars, offset)
 
 
 @mcp.tool(title="Stealth-fetch a page", annotations=_hints(read_only=True, open_world=True))
@@ -221,29 +223,30 @@ async def stealth_fetch(
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
     """
-    config = SessionConfig(
-        driver="patchright",
-        channel=channel,
-        headless=headless,
-        user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
-        navigation_timeout_ms=timeout_ms,
-        patchright_context_profile=patchright_context_profile,
-        reduce_fingerprint_surface=reduce_fingerprint_surface,
-        mask_headless_user_agent=mask_headless_user_agent,
-        webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
-        decline_cookies=decline_cookies,
-    )
-    async with WebSkrapClient() as client:
-        result = await client.fetch(
-            url,
-            profile=get_profile(profile),
-            config=config,
-            timeout_ms=timeout_ms,
-            text_only=text_only,
-            include_links=include_links,
-            max_links=max_links,
+    with _tool_errors():
+        config = SessionConfig(
+            driver="patchright",
+            channel=channel,
+            headless=headless,
+            user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
+            navigation_timeout_ms=timeout_ms,
+            patchright_context_profile=patchright_context_profile,
+            reduce_fingerprint_surface=reduce_fingerprint_surface,
+            mask_headless_user_agent=mask_headless_user_agent,
+            webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+            decline_cookies=decline_cookies,
         )
-    return shape_fetch_result(result, max_chars, offset)
+        async with WebSkrapClient() as client:
+            result = await client.fetch(
+                url,
+                profile=get_profile(profile),
+                config=config,
+                timeout_ms=timeout_ms,
+                text_only=text_only,
+                include_links=include_links,
+                max_links=max_links,
+            )
+        return shape_fetch_result(result, max_chars, offset)
 
 
 @mcp.tool(title="Check WebSkrap readiness", annotations=_hints(read_only=True, idempotent=True))
@@ -256,7 +259,32 @@ async def doctor() -> dict[str, Any]:
     browser session with its running state. Call this first when a fetch or a
     browser_* tool fails for a reason its own error does not explain.
     """
-    return await diagnose()
+    with _tool_errors():
+        return await diagnose()
+
+
+class _AnnotatedError(WebSkrapError):
+    """A failure whose message already carries its code and recovery hint.
+
+    Marks an error as handled so a tool that guards several steps does not
+    append the same hint twice.
+    """
+
+
+@contextmanager
+def _tool_errors() -> Iterator[None]:
+    """Re-raise whatever fails inside as a one-line, code-tagged message.
+
+    Playwright errors arrive with a call log dozens of lines long, and none of
+    those lines says what to do next. What reaches the caller is the first line
+    plus the classification and its hint.
+    """
+    try:
+        yield
+    except _AnnotatedError:
+        raise
+    except Exception as exc:
+        raise _AnnotatedError(tool_message(exc), code=classify(exc)) from exc
 
 
 async def _browser_action(
@@ -264,13 +292,9 @@ async def _browser_action(
     action: Callable[[Page], Awaitable[T]],
     timeout_ms: float,
 ) -> T:
-    """Run a page action, flattening Playwright errors to one-line messages."""
-    try:
+    """Run a page action, reporting failures as code-tagged one-liners."""
+    with _tool_errors():
         return await browser_session.run_page_action(session, action, timeout_ms=timeout_ms)
-    except WebSkrapError:
-        raise
-    except Exception as exc:
-        raise WebSkrapError(str(exc).strip().splitlines()[0] or type(exc).__name__) from exc
 
 
 @mcp.tool(
@@ -298,7 +322,8 @@ async def browser_open(
         url: Optional URL to open after launch.
         session: Session name; letters, digits, '.', '_' or '-'.
     """
-    payload = await browser_session.open_session(session, headless=True)
+    with _tool_errors():
+        payload = await browser_session.open_session(session, headless=True)
     if url:
         payload.update(
             await _browser_action(
@@ -385,7 +410,8 @@ async def browser_interact(
         timeout_ms: Action timeout in milliseconds.
     """
     resolved_values = values or []
-    browser_session.element_arguments(action, resolved_values)
+    with _tool_errors():
+        browser_session.element_arguments(action, resolved_values)
 
     async def run(page: Page) -> dict[str, Any]:
         await browser_session.element_action(page, action, target, resolved_values)
@@ -444,10 +470,11 @@ async def browser_wait_for(
         session: Browser session name.
         timeout_ms: How long to wait before failing with a timeout.
     """
-    parsed_selector_state = parse_element_state(selector_state)
-    parsed_load_state = parse_load_state(load_state) if load_state is not None else None
-    # Rejected before connecting, so an impossible request costs no browser work.
-    browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
+    with _tool_errors():
+        parsed_selector_state = parse_element_state(selector_state)
+        parsed_load_state = parse_load_state(load_state) if load_state is not None else None
+        # Rejected before connecting, so an impossible request costs no browser work.
+        browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
 
     return await _browser_action(
         session,
@@ -484,7 +511,8 @@ async def browser_screenshot(
     """
     # Resolved before connecting to the browser so a rejected path fails fast,
     # and outside `run` so no page action happens for a path that is refused.
-    target = resolve_output_path(path)
+    with _tool_errors():
+        target = resolve_output_path(path)
 
     async def run(page: Page) -> dict[str, Any]:
         await page.screenshot(path=str(target), full_page=full_page)
@@ -537,19 +565,20 @@ async def browser_close(
         delete_data: Also delete the session's on-disk profile data.
         all_sessions: Close every session.
     """
-    names = browser_session.list_session_names() if all_sessions else [session]
-    closed = []
-    for name in names:
-        closed.append(
+    with _tool_errors():
+        names = browser_session.list_session_names() if all_sessions else [session]
+        closed = [
             await asyncio.to_thread(browser_session.close_session, name, delete_data=delete_data)
-        )
-    return {"closed": closed}
+            for name in names
+        ]
+        return {"closed": closed}
 
 
 @mcp.tool(title="List browser sessions", annotations=_hints(read_only=True))
 async def browser_list() -> dict[str, Any]:
     """List persistent browser sessions and whether each is running."""
-    return {"sessions": browser_session.list_sessions()}
+    with _tool_errors():
+        return {"sessions": browser_session.list_sessions()}
 
 
 def main() -> None:

@@ -194,6 +194,18 @@ def error_payload(exc: BaseException) -> dict[str, str | bool]:
     }
 
 
+def tool_message(exc: BaseException) -> str:
+    """Return ``exc``'s message with its code and recovery hint folded in.
+
+    MCP reports a failed tool call as text, so whatever the message does not
+    say is not available to the caller at all. Attaching the code and the hint
+    is what turns "Timeout 10000ms exceeded" into something a caller can act on
+    without a second round trip.
+    """
+    code = classify(exc)
+    return f"{first_line(exc)} [code: {code}] {RECOVERY_HINTS[code]}"
+
+
 def exit_code(exc: BaseException) -> int:
     """Return the process exit status ``exc`` should terminate a CLI run with."""
     return EXIT_CODES[classify(exc)]
