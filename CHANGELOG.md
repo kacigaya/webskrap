@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-29
+
 ### Security
 
 - Persistent browser session names `.` and `..` are rejected. They previously
@@ -272,7 +274,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/kacigaya/webskrap/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kacigaya/webskrap/compare/v0.10.1...v1.0.0
 [0.10.1]: https://github.com/kacigaya/webskrap/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/kacigaya/webskrap/compare/v0.9.1...v0.10.0
