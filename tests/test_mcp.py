@@ -8,6 +8,7 @@ import pytest
 
 from webskrap import diagnostics, mcp_server
 from webskrap.client import WebSkrapError
+from webskrap.errors import RECOVERY_HINTS, ErrorCode
 from webskrap.models import FetchResult, Link
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 
@@ -355,8 +356,10 @@ def test_browser_wait_for_requires_exactly_one_condition() -> None:
 
 
 def test_browser_wait_for_rejects_a_load_state_that_cannot_be_awaited() -> None:
-    with pytest.raises(ValueError, match="load_state must be one of"):
+    with pytest.raises(WebSkrapError, match="load_state must be one of") as caught:
         asyncio.run(mcp_server.browser_wait_for(load_state="commit"))
+
+    assert caught.value.code is ErrorCode.USAGE
 
 
 @pytest.mark.browser
@@ -466,3 +469,55 @@ def test_tools_that_reach_the_open_web_say_so() -> None:
         assert annotations[name].openWorldHint is True, name
     for name in ("doctor", "browser_list", "browser_snapshot"):
         assert annotations[name].openWorldHint is False, name
+
+
+def test_tool_failures_carry_their_code_and_hint(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_snapshot())
+
+    message = str(caught.value)
+    assert "is not open" in message
+    assert "[code: no_session]" in message
+    assert RECOVERY_HINTS[ErrorCode.NO_SESSION] in message
+    assert caught.value.code is ErrorCode.NO_SESSION
+
+
+def test_a_guarded_failure_is_not_annotated_twice(monkeypatch: Any, tmp_path: Path) -> None:
+    # browser_open guards the launch and then runs a page action through
+    # _browser_action, which guards again; the hint must appear once.
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_close(session="../escape"))
+
+    assert str(caught.value).count("[code:") == 1
+
+
+def test_fetch_failures_are_classified(monkeypatch: Any) -> None:
+    class _BrokenClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            raise RuntimeError("net::ERR_NAME_NOT_RESOLVED at https://nope.test")
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _BrokenClient)
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.fetch("https://nope.test"))
+
+    assert caught.value.code is ErrorCode.NAVIGATION
+    assert "[code: navigation]" in str(caught.value)
+
+
+def test_a_playwright_call_log_is_reduced_to_its_first_line(monkeypatch: Any) -> None:
+    class _ChattyClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            raise RuntimeError("Timeout 30000ms exceeded\nCall log:\n  - navigating\n  - waiting")
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _ChattyClient)
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.fetch("https://slow.test"))
+
+    assert "Call log" not in str(caught.value)
+    assert caught.value.code is ErrorCode.TIMEOUT
