@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from webskrap import cli
+from webskrap.errors import EXIT_CODES, RECOVERY_HINTS, ErrorCode
 from webskrap.models import FetchResult, Link
 
 runner = CliRunner()
@@ -146,13 +147,13 @@ def test_fetch_reports_launch_failure_without_a_traceback(monkeypatch: Any) -> N
 
     result = runner.invoke(cli.app, ["fetch", "https://example.test"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_CODES[ErrorCode.BROWSER_LAUNCH]
     assert "Browser did not launch" in result.output
     assert "webskrap install" in result.output
     assert "Traceback" not in result.output
 
 
-def test_fetch_does_not_swallow_unrelated_errors(monkeypatch: Any) -> None:
+def test_fetch_does_not_misreport_unrelated_errors_as_launch_failures(monkeypatch: Any) -> None:
     class _BrokenClient(_FakeClient):
         async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
             raise RuntimeError("net::ERR_NAME_NOT_RESOLVED")
@@ -161,8 +162,9 @@ def test_fetch_does_not_swallow_unrelated_errors(monkeypatch: Any) -> None:
 
     result = runner.invoke(cli.app, ["fetch", "https://example.test"])
 
-    assert result.exit_code != 0
-    assert isinstance(result.exception, RuntimeError)
+    assert result.exit_code == EXIT_CODES[ErrorCode.NAVIGATION]
+    assert "ERR_NAME_NOT_RESOLVED" in result.output
+    assert "Browser did not launch" not in result.output
 
 
 def test_fetch_stdout_prints_raw_content(monkeypatch: Any) -> None:
@@ -488,3 +490,34 @@ def test_doctor_human_still_works_without_the_extra_sections(monkeypatch: Any) -
 
     assert result.exit_code == 1
     assert "did not launch" in result.output
+
+
+def test_fetch_json_failure_is_a_parseable_envelope(monkeypatch: Any) -> None:
+    class _BrokenClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            raise RuntimeError("Timeout 30000ms exceeded\nCall log:\n  - navigating")
+
+    monkeypatch.setattr(cli, "WebSkrapClient", _BrokenClient)
+
+    result = runner.invoke(cli.app, ["fetch", "https://slow.test", "--format", "json"])
+
+    assert result.exit_code == EXIT_CODES[ErrorCode.TIMEOUT]
+    payload = json.loads(result.output)
+    assert payload["ok"] is False
+    assert payload["code"] == "timeout"
+    assert payload["error"] == "Timeout 30000ms exceeded"
+    assert payload["hint"] == RECOVERY_HINTS[ErrorCode.TIMEOUT]
+
+
+def test_fetch_human_failure_prints_the_hint_to_stderr(monkeypatch: Any) -> None:
+    class _BrokenClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            raise RuntimeError("Timeout 30000ms exceeded")
+
+    monkeypatch.setattr(cli, "WebSkrapClient", _BrokenClient)
+
+    result = runner.invoke(cli.app, ["fetch", "https://slow.test"])
+
+    assert result.exit_code == EXIT_CODES[ErrorCode.TIMEOUT]
+    assert "Timeout 30000ms exceeded" in result.output
+    assert "browser_wait_for" in result.output

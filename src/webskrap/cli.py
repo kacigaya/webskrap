@@ -10,19 +10,26 @@ non-zero exit code.
 from __future__ import annotations
 
 import asyncio
-import json
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for browser installs, no shell
 import sys
 from pathlib import Path
-from typing import Annotated, Any, Literal, NoReturn, TypedDict
+from typing import Annotated, Any, NoReturn, TypedDict
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from webskrap.browser_cli import browser_app
+from webskrap.cli_output import (
+    OutputFormat,
+    fail,
+    parse_output_format,
+    print_json,
+    stderr_console,
+)
 from webskrap.client import WebSkrapClient
 from webskrap.diagnostics import diagnose
+from webskrap.errors import ErrorCode, WebSkrapError, first_line
 from webskrap.models import (
     FetchResult,
     ResourcePolicy,
@@ -40,7 +47,6 @@ from webskrap.profiles import get_profile, list_profiles
 app = typer.Typer(help="WebSkrap browser scraping toolkit.")
 app.add_typer(browser_app, name="browser")
 console = Console()
-OutputFormat = Literal["human", "json"]
 
 
 class InstallResult(TypedDict):
@@ -65,12 +71,12 @@ def install_command(
     ] = "human",
 ) -> None:
     """Download the Chromium builds Playwright and Patchright need."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     results = [_run_install_command(command) for command in INSTALL_COMMANDS]
     ok = all(result["ok"] for result in results)
     payload = {"ok": ok, "steps": results}
     if output_format == "json":
-        _print_json(payload)
+        print_json(payload)
     else:
         _print_install_result(results)
     if not ok:
@@ -85,10 +91,10 @@ def profiles_command(
     ] = "human",
 ) -> None:
     """List the bundled browser profiles."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     profiles = list_profiles()
     if output_format == "json":
-        _print_json({"profiles": [profile.model_dump(mode="json") for profile in profiles]})
+        print_json({"profiles": [profile.model_dump(mode="json") for profile in profiles]})
         return
 
     table = Table(title="WebSkrap Profiles")
@@ -118,10 +124,10 @@ def doctor_command(
     ] = "human",
 ) -> None:
     """Check that Patchright and Chromium are installed and can launch."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     result = asyncio.run(_doctor())
     if output_format == "json":
-        _print_json(result)
+        print_json(result)
     else:
         _print_doctor_result(result)
     if not result["ok"]:
@@ -319,7 +325,7 @@ async def _fetch(
     launch_args: list[str],
     webrtc_ip_handling_policy: str | None,
 ) -> None:
-    parsed_output_format = _parse_output_format(output_format)
+    parsed_output_format = parse_output_format(output_format)
     selected_profile = get_profile(profile)
     config = SessionConfig(
         driver="patchright",
@@ -337,24 +343,33 @@ async def _fetch(
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )
 
-    result = await _fetch_with_channel_fallback(
-        config,
-        url=url,
-        profile=selected_profile,
-        wait_until=_parse_wait_until(wait_until),
-        screenshot=screenshot or False,
-        timeout_ms=timeout_ms,
-        text_only=text_only,
-        include_links=links,
-        max_links=max_links,
-    )
+    try:
+        result = await _fetch_with_channel_fallback(
+            config,
+            parsed_output_format,
+            url=url,
+            profile=selected_profile,
+            wait_until=_parse_wait_until(wait_until),
+            screenshot=screenshot or False,
+            timeout_ms=timeout_ms,
+            text_only=text_only,
+            include_links=links,
+            max_links=max_links,
+        )
+    except (typer.Exit, typer.Abort, typer.BadParameter):
+        raise
+    except Exception as exc:
+        # A timeout, a refused host or an unwritable path leaves through the
+        # same envelope as a launch failure, so `--format json` never has to
+        # answer with Rich markup on stderr.
+        fail(exc, parsed_output_format)
 
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(result.text, encoding="utf-8")
 
     if parsed_output_format == "json":
-        _print_json(shape_fetch_result(result, max_chars, offset))
+        print_json(shape_fetch_result(result, max_chars, offset))
         return
 
     if stdout:
@@ -391,13 +406,10 @@ def _is_launch_failure(exc: Exception) -> bool:
     return any(marker in str(exc).lower() for marker in LAUNCH_FAILURE_MARKERS)
 
 
-def _fail_launch(exc: Exception) -> NoReturn:
+def _fail_launch(exc: Exception, output_format: OutputFormat) -> NoReturn:
     """Report an unlaunchable browser the way `doctor` does, not as a traceback."""
-    detail = str(exc).strip().splitlines()
-    stderr = Console(stderr=True, highlight=False)
-    stderr.print(f"[red]Browser did not launch:[/red] {detail[0] if detail else exc}")
-    stderr.print("Run: [bold]webskrap install[/bold]")
-    raise typer.Exit(code=1)
+    message = f"Browser did not launch: {first_line(exc)}"
+    fail(WebSkrapError(message, code=ErrorCode.BROWSER_LAUNCH), output_format)
 
 
 async def _run_fetch(config: SessionConfig, **kwargs: Any) -> FetchResult:
@@ -405,7 +417,9 @@ async def _run_fetch(config: SessionConfig, **kwargs: Any) -> FetchResult:
         return await client.fetch(config=config, **kwargs)
 
 
-async def _fetch_with_channel_fallback(config: SessionConfig, **kwargs: Any) -> FetchResult:
+async def _fetch_with_channel_fallback(
+    config: SessionConfig, output_format: OutputFormat, **kwargs: Any
+) -> FetchResult:
     """Fetch, retrying on bundled chromium when the chosen channel cannot launch.
 
     The default channel is `chrome`, which does not exist on every platform
@@ -418,8 +432,8 @@ async def _fetch_with_channel_fallback(config: SessionConfig, **kwargs: Any) -> 
         if not _is_launch_failure(exc):
             raise
         if config.channel is None:
-            _fail_launch(exc)
-        Console(stderr=True, highlight=False).print(
+            _fail_launch(exc, output_format)
+        stderr_console.print(
             f"[yellow]channel '{config.channel}' did not launch; retrying with chromium[/yellow]"
         )
         try:
@@ -427,7 +441,7 @@ async def _fetch_with_channel_fallback(config: SessionConfig, **kwargs: Any) -> 
         except Exception as retry_exc:
             if not _is_launch_failure(retry_exc):
                 raise
-            _fail_launch(retry_exc)
+            _fail_launch(retry_exc, output_format)
 
 
 def _parse_wait_until(value: str) -> WaitUntil:
@@ -444,16 +458,6 @@ def _parse_webrtc_ip_handling_policy(
         return parse_webrtc_ip_handling_policy(value)
     except ValueError as exc:
         raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
-
-
-def _parse_output_format(value: str) -> OutputFormat:
-    if value not in ("human", "json"):
-        raise typer.BadParameter("must be one of: human, json")
-    return value
-
-
-def _print_json(payload: object) -> None:
-    typer.echo(json.dumps(payload, ensure_ascii=False))
 
 
 def _run_install_command(command: tuple[str, ...]) -> InstallResult:

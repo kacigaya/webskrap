@@ -13,7 +13,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
-from typing import Annotated, Any, Literal, NoReturn, TypeVar
+from typing import Annotated, Any, TypeVar
 from uuid import uuid4
 
 import typer
@@ -27,7 +27,14 @@ from webskrap.browser_session import (
     DEFAULT_NAVIGATION_TIMEOUT_MS,
     ELEMENT_ACTIONS,
 )
-from webskrap.client import WebSkrapError
+from webskrap.cli_output import (
+    OutputFormat,
+    fail,
+    parse_output_format,
+    print_json,
+    stderr_console,
+)
+from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import ElementState, LoadState, WaitUntil
 from webskrap.parsing import parse_element_state, parse_load_state, parse_wait_until
 
@@ -36,10 +43,8 @@ browser_app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
-stderr_console = Console(stderr=True, highlight=False)
 
 T = TypeVar("T")
-OutputFormat = Literal["human", "json"]
 
 SessionOption = Annotated[str, typer.Option("--session", "-s", help="Browser session name.")]
 FormatOption = Annotated[str, typer.Option("--format", help="Output format: human or json.")]
@@ -55,17 +60,6 @@ _ELEMENT_COMMAND_HELP = {
     "type": "Type text into an element key by key.",
     "select": "Select option value(s) in a <select>.",
 }
-
-
-def _fail(message: str) -> NoReturn:
-    stderr_console.print(f"[red]{message}[/red]")
-    raise typer.Exit(code=1)
-
-
-def _parse_output_format(value: str) -> OutputFormat:
-    if value not in ("human", "json"):
-        raise typer.BadParameter("must be one of: human, json")
-    return value
 
 
 def _parse_wait_until(value: str) -> WaitUntil:
@@ -89,34 +83,33 @@ def _parse_element_state(value: str) -> ElementState:
         raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
 
 
-def _print_json(payload: object) -> None:
-    typer.echo(json.dumps(payload, ensure_ascii=False))
-
-
-def _run(coroutine: Coroutine[Any, Any, T]) -> T:
+def _run(coroutine: Coroutine[Any, Any, T], output_format: OutputFormat) -> T:
     """Run a browser-session coroutine, converting failures to CLI errors."""
     try:
         return asyncio.run(coroutine)
     except (typer.Exit, typer.Abort, typer.BadParameter):
         raise
     except Exception as exc:
-        # One-line error and exit code 1 for every failure, Playwright or
-        # otherwise (e.g. an unwritable screenshot path).
-        _fail(str(exc).strip().splitlines()[0] or type(exc).__name__)
+        # Every failure, Playwright or otherwise (an unwritable screenshot
+        # path, a dead session), leaves through the shared envelope.
+        fail(exc, output_format)
 
 
 def _run_page_command(
     session: str,
     action: Callable[[Page], Awaitable[T]],
+    output_format: OutputFormat,
     *,
     timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
 ) -> T:
-    return _run(browser_session.run_page_action(session, action, timeout_ms=timeout_ms))
+    return _run(
+        browser_session.run_page_action(session, action, timeout_ms=timeout_ms), output_format
+    )
 
 
 def _emit_state(state: dict[str, Any], output_format: OutputFormat) -> None:
     if output_format == "json":
-        _print_json(state)
+        print_json(state)
         return
     if (status := state.get("status")) is not None:
         console.print(f"[bold]Status:[/bold] {status}")
@@ -146,7 +139,7 @@ def open_command(
     WEBSKRAP_CHROMIUM_SANDBOX=0 is set for hosts that cannot sandbox at all).
     Without it, a renderer compromised by a hostile page is no longer contained.
     """
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     payload = _run(
         browser_session.open_session(
             session,
@@ -154,19 +147,21 @@ def open_command(
             # None, not True: an unset flag leaves the environment default in
             # place, while --no-sandbox is an explicit opt-out that wins.
             chromium_sandbox=False if no_sandbox else None,
-        )
+        ),
+        output_format,
     )
     if url:
         payload.update(
             _run_page_command(
                 session,
                 lambda page: browser_session.goto(page, url, "load"),
+                output_format,
                 timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
         )
 
     if output_format == "json":
-        _print_json(payload)
+        print_json(payload)
         return
     verb = "Reusing" if payload["reused"] else "Opened"
     console.print(f"{verb} session [bold]{session}[/bold] (pid {payload['pid']})")
@@ -186,20 +181,21 @@ def close_command(
     format: FormatOption = "human",
 ) -> None:
     """Close a browser session (its profile data persists unless --delete-data)."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     try:
         if all_sessions:
             names = browser_session.list_session_names()
         else:
             directory = browser_session.session_dir(session)
             if browser_session.read_state(directory) is None and not delete_data:
-                _fail(f"session '{session}' is not open")
+                msg = f"session '{session}' is not open"
+                raise WebSkrapError(msg, code=ErrorCode.NO_SESSION)
             names = [session]
         closed = [browser_session.close_session(name, delete_data=delete_data) for name in names]
     except WebSkrapError as exc:
-        _fail(str(exc))
+        fail(exc, output_format)
     if output_format == "json":
-        _print_json({"closed": closed})
+        print_json({"closed": closed})
         return
     for entry in closed:
         console.print(f"closed [bold]{entry['session']}[/bold]")
@@ -208,10 +204,10 @@ def close_command(
 @browser_app.command("list")
 def list_command(format: FormatOption = "human") -> None:
     """List browser sessions."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     sessions = browser_session.list_sessions()
     if output_format == "json":
-        _print_json({"sessions": sessions})
+        print_json({"sessions": sessions})
         return
     table = Table(title="WebSkrap Browser Sessions")
     table.add_column("Session")
@@ -243,11 +239,12 @@ def goto_command(
     format: FormatOption = "human",
 ) -> None:
     """Navigate the current page."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     parsed_wait_until = _parse_wait_until(wait_until)
     state = _run_page_command(
         session,
         lambda page: browser_session.goto(page, url, parsed_wait_until),
+        output_format,
         timeout_ms=timeout_ms,
     )
     _emit_state(state, output_format)
@@ -260,13 +257,16 @@ def _navigation_command(name: str, help_text: str, method: str) -> None:
         timeout_ms: ActionTimeoutOption = DEFAULT_NAVIGATION_TIMEOUT_MS,
         format: FormatOption = "human",
     ) -> None:
-        output_format = _parse_output_format(format)
+        output_format = parse_output_format(format)
 
         async def action(page: Page) -> dict[str, Any]:
             await getattr(page, method)()
             return await browser_session.page_state(page)
 
-        _emit_state(_run_page_command(session, action, timeout_ms=timeout_ms), output_format)
+        _emit_state(
+            _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
+            output_format,
+        )
 
 
 _navigation_command("back", "Go back in the current page's history.", "go_back")
@@ -294,14 +294,16 @@ def snapshot_command(
     format: FormatOption = "human",
 ) -> None:
     """Print an aria snapshot of the page with `eN` element refs."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     result = browser_session.shape_snapshot(
-        _run_page_command(session, lambda page: browser_session.snapshot(page, depth=depth)),
+        _run_page_command(
+            session, lambda page: browser_session.snapshot(page, depth=depth), output_format
+        ),
         max_chars,
         offset,
     )
     if output_format == "json":
-        _print_json(result)
+        print_json(result)
         return
     _emit_state({"url": result["url"], "title": result["title"]}, output_format)
     typer.echo(result["snapshot"])
@@ -323,19 +325,22 @@ def _register_element_command(name: str, help_text: str) -> None:
         timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
         format: FormatOption = "human",
     ) -> None:
-        output_format = _parse_output_format(format)
+        output_format = parse_output_format(format)
         values = value or []
         try:
             # Fail on a bad value count before connecting to the browser.
             browser_session.element_arguments(name, values)
         except WebSkrapError as exc:
-            _fail(str(exc))
+            fail(exc, output_format)
 
         async def action(page: Page) -> dict[str, Any]:
             await browser_session.element_action(page, name, target, values)
             return await browser_session.page_state(page)
 
-        _emit_state(_run_page_command(session, action, timeout_ms=timeout_ms), output_format)
+        _emit_state(
+            _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
+            output_format,
+        )
 
 
 for _name in ELEMENT_ACTIONS:
@@ -350,13 +355,15 @@ def press_command(
     format: FormatOption = "human",
 ) -> None:
     """Press a key on the page."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
 
     async def action(page: Page) -> dict[str, Any]:
         await page.keyboard.press(key)
         return await browser_session.page_state(page)
 
-    _emit_state(_run_page_command(session, action, timeout_ms=timeout_ms), output_format)
+    _emit_state(
+        _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
+    )
 
 
 @browser_app.command("wait")
@@ -384,14 +391,14 @@ def wait_command(
     format: FormatOption = "human",
 ) -> None:
     """Wait for one condition on the page (text, selector, or load state)."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     parsed_state = _parse_element_state(state)
     parsed_load_state = _parse_load_state(load_state) if load_state is not None else None
     try:
         # Fail before connecting when the conditions do not add up to exactly one.
         browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
     except WebSkrapError as exc:
-        _fail(str(exc))
+        fail(exc, output_format)
 
     state_payload = _run_page_command(
         session,
@@ -404,6 +411,7 @@ def wait_command(
             load_state=parsed_load_state,
             timeout_ms=timeout_ms,
         ),
+        output_format,
         timeout_ms=timeout_ms,
     )
     if output_format == "human":
@@ -421,7 +429,7 @@ def screenshot_command(
     format: FormatOption = "human",
 ) -> None:
     """Screenshot the current page."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
     target = path or Path(f"webskrap-{uuid4().hex}.png")
 
     async def action(page: Page) -> dict[str, Any]:
@@ -429,9 +437,9 @@ def screenshot_command(
         await page.screenshot(path=str(target), full_page=full_page)
         return {**await browser_session.page_state(page), "path": str(target)}
 
-    result = _run_page_command(session, action)
+    result = _run_page_command(session, action, output_format)
     if output_format == "json":
-        _print_json(result)
+        print_json(result)
         return
     console.print(f"[bold]Screenshot:[/bold] {result['path']}")
 
@@ -447,16 +455,16 @@ def eval_command(
     format: FormatOption = "human",
 ) -> None:
     """Evaluate JavaScript on the current page and print the JSON result."""
-    output_format = _parse_output_format(format)
+    output_format = parse_output_format(format)
 
     async def action(page: Page) -> Any:
         return await page.evaluate(expression)
 
     payload = browser_session.shape_eval_result(
-        _run_page_command(session, action, timeout_ms=timeout_ms), max_chars
+        _run_page_command(session, action, output_format, timeout_ms=timeout_ms), max_chars
     )
     if output_format == "json":
-        _print_json(payload)
+        print_json(payload)
         return
     if payload["result_truncated"]:
         typer.echo(payload["result_json"])
