@@ -141,6 +141,7 @@ def test_browser_tools_are_registered() -> None:
         "browser_goto",
         "browser_snapshot",
         "browser_interact",
+        "browser_wait_for",
         "browser_press",
         "browser_screenshot",
         "browser_eval",
@@ -339,3 +340,38 @@ def test_shaped_links_report_what_the_cap_dropped(monkeypatch: Any) -> None:
     assert result["links"] == [{"href": "https://a.test", "text": "A"}]
     assert result["links_total"] == 4
     assert result["links_truncated"] is True
+
+
+def test_browser_wait_for_requires_exactly_one_condition() -> None:
+    with pytest.raises(WebSkrapError, match="exactly one of"):
+        asyncio.run(mcp_server.browser_wait_for())
+    with pytest.raises(WebSkrapError, match="exactly one of"):
+        asyncio.run(mcp_server.browser_wait_for(text="a", selector="b"))
+
+
+def test_browser_wait_for_rejects_a_load_state_that_cannot_be_awaited() -> None:
+    with pytest.raises(ValueError, match="load_state must be one of"):
+        asyncio.run(mcp_server.browser_wait_for(load_state="commit"))
+
+
+@pytest.mark.browser
+def test_browser_wait_for_deferred_text(persistent_session_env: Path) -> None:
+    page = (
+        "data:text/html,<title>deferred</title><p id=status>Loading</p>"
+        "<script>setTimeout(() => {"
+        "document.getElementById('status').textContent = 'Ready';"
+        "}, 400)</script>"
+    )
+    asyncio.run(mcp_server.browser_open(page))
+    try:
+        waited = asyncio.run(mcp_server.browser_wait_for(text="Ready"))
+        assert waited["matched"] == "text"
+        assert waited["title"] == "deferred"
+
+        gone = asyncio.run(mcp_server.browser_wait_for(text_gone="Loading"))
+        assert gone["matched"] == "text_gone"
+
+        idle = asyncio.run(mcp_server.browser_wait_for(load_state="networkidle"))
+        assert idle["matched"] == "load_state"
+    finally:
+        asyncio.run(mcp_server.browser_close())

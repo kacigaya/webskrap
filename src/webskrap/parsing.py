@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from typing import cast, get_args
 
-from webskrap.models import ResourcePolicy, WaitUntil, WebRtcIPHandlingPolicy
+from webskrap.models import (
+    ElementState,
+    LoadState,
+    ResourcePolicy,
+    WaitUntil,
+    WebRtcIPHandlingPolicy,
+)
 
 
 def parse_literal(value: str, literal: object, name: str) -> str:
@@ -39,6 +45,24 @@ def parse_wait_until(value: str) -> WaitUntil:
         ValueError: If ``value`` is not a valid load state.
     """
     return cast(WaitUntil, parse_literal(value, WaitUntil, "wait_until"))
+
+
+def parse_load_state(value: str) -> LoadState:
+    """Parse a load state a loaded page can still be waited on.
+
+    Raises:
+        ValueError: If ``value`` is not a valid load state.
+    """
+    return cast(LoadState, parse_literal(value, LoadState, "load_state"))
+
+
+def parse_element_state(value: str) -> ElementState:
+    """Parse an element state to wait for.
+
+    Raises:
+        ValueError: If ``value`` is not a valid element state.
+    """
+    return cast(ElementState, parse_literal(value, ElementState, "state"))
 
 
 def parse_resource_policy(value: str) -> ResourcePolicy:

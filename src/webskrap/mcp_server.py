@@ -17,6 +17,8 @@ from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError, browser_doctor
 from webskrap.models import SessionConfig, shape_fetch_result
 from webskrap.parsing import (
+    parse_element_state,
+    parse_load_state,
     parse_resource_policy,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
@@ -327,6 +329,53 @@ async def browser_press(
         return await browser_session.page_state(page)
 
     return await _browser_action(session, run, timeout_ms)
+
+
+@mcp.tool()
+async def browser_wait_for(
+    text: str | None = None,
+    text_gone: str | None = None,
+    selector: str | None = None,
+    selector_state: str = "visible",
+    load_state: str | None = None,
+    session: str = "default",
+    timeout_ms: float = 10_000,
+) -> dict[str, Any]:
+    """Wait for one condition on the session's current page.
+
+    Use this after an interaction instead of taking snapshot after snapshot to
+    see whether the page caught up. Pass exactly one condition.
+
+    Args:
+        text: Wait until this text is visible on the page.
+        text_gone: Wait until this text is gone. Text that was never there
+            satisfies the wait immediately.
+        selector: Wait until this snapshot ref (e.g. "e15") or Playwright
+            selector reaches selector_state.
+        selector_state: attached, detached, visible, or hidden. Used with
+            selector.
+        load_state: domcontentloaded, load, or networkidle.
+        session: Browser session name.
+        timeout_ms: How long to wait before failing with a timeout.
+    """
+    parsed_selector_state = parse_element_state(selector_state)
+    parsed_load_state = parse_load_state(load_state) if load_state is not None else None
+    # Rejected before connecting, so an impossible request costs no browser work.
+    browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
+
+    return await _browser_action(
+        session,
+        lambda page: browser_session.wait_for(
+            page,
+            text=text,
+            text_gone=text_gone,
+            selector=selector,
+            selector_state=parsed_selector_state,
+            load_state=parsed_load_state,
+            timeout_ms=timeout_ms,
+        ),
+        timeout_ms,
+    )
 
 
 @mcp.tool()
