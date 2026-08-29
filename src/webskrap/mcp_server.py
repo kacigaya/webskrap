@@ -8,8 +8,10 @@ Code, ...) at that command to drive scraping through the tools below.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
+from importlib import resources
 from typing import Any, TypeVar
 
 from playwright.async_api import Page
@@ -27,7 +29,7 @@ from webskrap.parsing import (
     parse_webrtc_ip_handling_policy,
 )
 from webskrap.paths import resolve_mcp_profile_path, resolve_output_path
-from webskrap.profiles import get_profile
+from webskrap.profiles import get_profile, list_profiles
 
 T = TypeVar("T")
 
@@ -579,6 +581,58 @@ async def browser_list() -> dict[str, Any]:
     """List persistent browser sessions and whether each is running."""
     with _tool_errors():
         return {"sessions": browser_session.list_sessions()}
+
+
+def _guide() -> str:
+    """Read the packaged guide.
+
+    Kept as a data file rather than a string constant: it is a document, and
+    inlining it would push markdown tables through the source line-length rules
+    for no benefit.
+    """
+    return resources.files("webskrap").joinpath("guide.md").read_text(encoding="utf-8")
+
+
+@mcp.resource(
+    "webskrap://guide",
+    name="webskrap_guide",
+    title="WebSkrap usage guide",
+    description=(
+        "Which tool to use for which goal, what each returns, how to keep results small, "
+        "and what to do about each error code."
+    ),
+    mime_type="text/markdown",
+)
+def guide_resource() -> str:
+    """Return the long-form guide the short server instructions point at."""
+    return _guide()
+
+
+@mcp.resource(
+    "webskrap://profiles",
+    name="webskrap_profiles",
+    title="Bundled browser profiles",
+    description="The profile names fetch and stealth_fetch accept, with their settings.",
+    mime_type="application/json",
+)
+def profiles_resource() -> str:
+    """Return the bundled profiles, so listing them costs no tool call."""
+    return json.dumps(
+        {"profiles": [profile.model_dump(mode="json") for profile in list_profiles()]},
+        ensure_ascii=False,
+    )
+
+
+@mcp.resource(
+    "webskrap://sessions",
+    name="webskrap_sessions",
+    title="Persistent browser sessions",
+    description="Every on-disk browser session and whether its browser is running.",
+    mime_type="application/json",
+)
+def sessions_resource() -> str:
+    """Return the same inventory as browser_list, readable without a tool call."""
+    return json.dumps({"sessions": browser_session.list_sessions()}, ensure_ascii=False)
 
 
 def main() -> None:
