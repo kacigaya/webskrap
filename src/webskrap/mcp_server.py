@@ -16,6 +16,7 @@ from playwright.async_api import Page
 from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError
 from webskrap.diagnostics import diagnose
+from webskrap.errors import ErrorCode
 from webskrap.models import SessionConfig, shape_fetch_result
 from webskrap.parsing import (
     parse_element_state,
@@ -31,9 +32,36 @@ T = TypeVar("T")
 
 try:
     from mcp.server.fastmcp import FastMCP
+    from mcp.types import ToolAnnotations
 except ImportError as exc:  # pragma: no cover - optional dependency
     msg = "the MCP server requires mcp. Run: pip install webskrap"
-    raise WebSkrapError(msg) from exc
+    raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
+
+
+def _hints(
+    *,
+    read_only: bool,
+    destructive: bool = False,
+    idempotent: bool = False,
+    open_world: bool = False,
+) -> ToolAnnotations:
+    """Describe a tool's effects so a client can decide what to confirm.
+
+    Without these, closing a session with delete_data (which throws away
+    cookies and logins) looks exactly like listing sessions. Interaction tools
+    are marked destructive because a click or an Enter submits forms on a site
+    WebSkrap does not own, and that is not undoable from here.
+
+    These are hints, not enforcement: the confinement and sandbox rules that
+    actually constrain the tools live in paths.py and browser_session.py.
+    """
+    return ToolAnnotations(
+        readOnlyHint=read_only,
+        destructiveHint=destructive,
+        idempotentHint=idempotent,
+        openWorldHint=open_world,
+    )
+
 
 INSTRUCTIONS = """WebSkrap drives a real Chromium (Patchright stealth build) so pages \
 that block plain HTTP clients still load.
@@ -79,7 +107,7 @@ Writes are confined: screenshots to ./webskrap-output, persistent profiles under
 mcp = FastMCP("webskrap", instructions=INSTRUCTIONS)
 
 
-@mcp.tool()
+@mcp.tool(title="Fetch a page", annotations=_hints(read_only=True, open_world=True))
 async def fetch(
     url: str,
     profile: str = "desktop-chrome",
@@ -145,7 +173,7 @@ async def fetch(
     return shape_fetch_result(result, max_chars, offset)
 
 
-@mcp.tool()
+@mcp.tool(title="Stealth-fetch a page", annotations=_hints(read_only=True, open_world=True))
 async def stealth_fetch(
     url: str,
     profile: str = "desktop-chrome",
@@ -218,7 +246,7 @@ async def stealth_fetch(
     return shape_fetch_result(result, max_chars, offset)
 
 
-@mcp.tool()
+@mcp.tool(title="Check WebSkrap readiness", annotations=_hints(read_only=True, idempotent=True))
 async def doctor() -> dict[str, Any]:
     """Report whether WebSkrap can drive a browser here, and how it is configured.
 
@@ -245,7 +273,10 @@ async def _browser_action(
         raise WebSkrapError(str(exc).strip().splitlines()[0] or type(exc).__name__) from exc
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Open a browser session",
+    annotations=_hints(read_only=False, idempotent=True, open_world=True),
+)
 async def browser_open(
     url: str | None = None,
     session: str = "default",
@@ -279,7 +310,7 @@ async def browser_open(
     return payload
 
 
-@mcp.tool()
+@mcp.tool(title="Navigate the page", annotations=_hints(read_only=False, open_world=True))
 async def browser_goto(
     url: str,
     session: str = "default",
@@ -302,7 +333,7 @@ async def browser_goto(
     )
 
 
-@mcp.tool()
+@mcp.tool(title="Snapshot the page", annotations=_hints(read_only=True))
 async def browser_snapshot(
     session: str = "default",
     depth: int | None = None,
@@ -332,7 +363,10 @@ async def browser_snapshot(
     return browser_session.shape_snapshot(result, max_chars, offset)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Interact with an element",
+    annotations=_hints(read_only=False, destructive=True, open_world=True),
+)
 async def browser_interact(
     action: str,
     target: str,
@@ -360,7 +394,9 @@ async def browser_interact(
     return await _browser_action(session, run, timeout_ms)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Press a key", annotations=_hints(read_only=False, destructive=True, open_world=True)
+)
 async def browser_press(
     key: str,
     session: str = "default",
@@ -381,7 +417,7 @@ async def browser_press(
     return await _browser_action(session, run, timeout_ms)
 
 
-@mcp.tool()
+@mcp.tool(title="Wait for a page condition", annotations=_hints(read_only=True))
 async def browser_wait_for(
     text: str | None = None,
     text_gone: str | None = None,
@@ -428,7 +464,7 @@ async def browser_wait_for(
     )
 
 
-@mcp.tool()
+@mcp.tool(title="Screenshot the page", annotations=_hints(read_only=False, idempotent=True))
 async def browser_screenshot(
     path: str | None = None,
     session: str = "default",
@@ -457,7 +493,10 @@ async def browser_screenshot(
     return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Evaluate JavaScript",
+    annotations=_hints(read_only=False, destructive=True, open_world=True),
+)
 async def browser_eval(
     expression: str,
     session: str = "default",
@@ -482,7 +521,10 @@ async def browser_eval(
     return browser_session.shape_eval_result(result, max_chars)
 
 
-@mcp.tool()
+@mcp.tool(
+    title="Close a browser session",
+    annotations=_hints(read_only=False, destructive=True, idempotent=True),
+)
 async def browser_close(
     session: str = "default",
     delete_data: bool = False,
@@ -504,7 +546,7 @@ async def browser_close(
     return {"closed": closed}
 
 
-@mcp.tool()
+@mcp.tool(title="List browser sessions", annotations=_hints(read_only=True))
 async def browser_list() -> dict[str, Any]:
     """List persistent browser sessions and whether each is running."""
     return {"sessions": browser_session.list_sessions()}

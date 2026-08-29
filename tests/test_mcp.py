@@ -427,3 +427,42 @@ def test_server_instructions_stay_short_enough_to_ship_in_a_system_prompt() -> N
     # budgeted rather than allowed to grow into a manual. SKILL.md is where the
     # long form lives.
     assert len(mcp_server.mcp.instructions or "") < 3_000
+
+
+def test_every_tool_declares_a_title_and_annotations() -> None:
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+
+    assert tools
+    for tool in tools:
+        assert tool.title, tool.name
+        assert tool.annotations is not None, tool.name
+
+
+def test_read_only_tools_are_marked_read_only() -> None:
+    annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    for name in ("fetch", "stealth_fetch", "doctor", "browser_snapshot", "browser_list"):
+        assert annotations[name].readOnlyHint is True, name
+    for name in ("browser_interact", "browser_eval", "browser_close"):
+        assert annotations[name].readOnlyHint is False, name
+
+
+def test_tools_that_can_lose_data_or_submit_forms_are_marked_destructive() -> None:
+    annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    # browser_close --delete_data throws away cookies and logins; a click or an
+    # Enter can submit a form on a site WebSkrap does not own.
+    assert annotations["browser_close"].destructiveHint is True
+    assert annotations["browser_interact"].destructiveHint is True
+    assert annotations["browser_press"].destructiveHint is True
+    # Listing sessions must not look like closing one.
+    assert annotations["browser_list"].destructiveHint is False
+
+
+def test_tools_that_reach_the_open_web_say_so() -> None:
+    annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    for name in ("fetch", "stealth_fetch", "browser_goto", "browser_interact"):
+        assert annotations[name].openWorldHint is True, name
+    for name in ("doctor", "browser_list", "browser_snapshot"):
+        assert annotations[name].openWorldHint is False, name
