@@ -27,11 +27,17 @@ jobs:
           python-version: "3.13"
       - name: Install build tooling
         run: python -m pip install --upgrade build twine
+      - name: Prepare package output
+        # Keep this relative to the workspace: the publish action runs in a
+        # container and resolves packages-dir from the mounted workspace.
+        run: echo "PACKAGE_DIR=$(mktemp -d .package-dist.XXXXXX)" >> "$GITHUB_ENV"
       - name: Build package
-        run: python -m build
+        run: python -m build --outdir "$PACKAGE_DIR"
       # A bad METADATA block renders as a broken PyPI page that cannot be
       # replaced, so fail the job here rather than after the upload.
       - name: Check package metadata
-        run: python -m twine check dist/*
+        run: python -m twine check "$PACKAGE_DIR"/*
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ env.PACKAGE_DIR }}
