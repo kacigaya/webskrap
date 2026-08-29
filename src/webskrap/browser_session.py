@@ -11,6 +11,8 @@ Playwright errors); presentation layers translate them for their medium.
 
 from __future__ import annotations
 
+import asyncio
+import errno
 import json
 import os
 import re
@@ -22,7 +24,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, BinaryIO, TypeVar
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page, async_playwright
@@ -62,6 +64,79 @@ ELEMENT_ACTIONS: dict[str, tuple[str, str]] = {
     "type": ("press_sequentially", "one"),
     "select": ("select_option", "many"),
 }
+
+
+class _SessionOperationLock:
+    """Cross-process exclusive lock for one session's open/close operations."""
+
+    def __init__(self, handle: BinaryIO) -> None:
+        """Keep the locked file open until :meth:`release` is called."""
+        self._handle = handle
+
+    @classmethod
+    def acquire(cls, name: str) -> _SessionOperationLock:
+        """Block until this process exclusively owns ``name``'s operation lock."""
+        # Validate before creating the lock filename. The session directory is
+        # validated again inside the lock before either operation touches it.
+        session_dir(name)
+        root = sessions_root()
+        secure_directory(root, tighten_existing=False)
+        lock_directory = secure_directory(root / ".locks")
+        handle = (lock_directory / f"{name}.lock").open("a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                if handle.seek(0, os.SEEK_END) == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                while True:
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                        break
+                    except OSError as exc:
+                        if exc.errno not in {errno.EACCES, errno.EDEADLK}:
+                            raise
+                        # LK_LOCK gives up after ten one-second retries, but a
+                        # valid Chromium launch may hold this lock for 20s.
+                        time.sleep(0.05)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except BaseException:
+            handle.close()
+            raise
+        return cls(handle)
+
+    def release(self) -> None:
+        """Release the operation lock and close its file handle."""
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                self._handle.seek(0)
+                msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._handle.close()
+
+
+async def _acquire_session_operation_lock(name: str) -> _SessionOperationLock:
+    """Acquire a lock in a worker, releasing it if this task is cancelled."""
+    acquire_task = asyncio.create_task(asyncio.to_thread(_SessionOperationLock.acquire, name))
+    try:
+        return await asyncio.shield(acquire_task)
+    except BaseException:
+        # Cancelling to_thread does not stop its worker. Wait for that worker to
+        # acquire, then release, or it would orphan the lock until process exit.
+        operation_lock = await acquire_task
+        await asyncio.to_thread(operation_lock.release)
+        raise
 
 
 def sessions_root() -> Path:
@@ -351,57 +426,65 @@ async def open_session(
     Raises:
         WebSkrapError: If the name is invalid or the browser fails to start.
     """
-    # Unconditional, so a session directory created by an older version (or
-    # under a loose umask) is tightened on the next open, not only on relaunch.
-    directory = create_session_dir(name)
-    existing = read_state(directory)
-    state = existing if session_running(directory, existing) else None
-    reused = state is not None
+    operation_lock = await _acquire_session_operation_lock(name)
+    try:
+        # Unconditional, so a session directory created by an older version (or
+        # under a loose umask) is tightened on the next open, not only on relaunch.
+        directory = create_session_dir(name)
+        existing = read_state(directory)
+        state = existing if session_running(directory, existing) else None
+        reused = state is not None
 
-    if state is None:
-        executable = await chromium_executable()
-        sandboxed = sandbox_enabled(chromium_sandbox)
-        pid, port = launch_browser(
-            directory,
-            executable=executable,
-            headless=headless,
-            chromium_sandbox=sandboxed,
-        )
-        state = {
-            "pid": pid,
-            "port": port,
-            "headless": headless,
-            # Recorded so `browser list` can show which running sessions gave
-            # up renderer isolation; a reused session keeps its launch value.
-            "chromium_sandbox": sandboxed,
-            "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        if state is None:
+            executable = await chromium_executable()
+            sandboxed = sandbox_enabled(chromium_sandbox)
+            pid, port = launch_browser(
+                directory,
+                executable=executable,
+                headless=headless,
+                chromium_sandbox=sandboxed,
+            )
+            state = {
+                "pid": pid,
+                "port": port,
+                "headless": headless,
+                # Recorded so `browser list` can show which running sessions gave
+                # up renderer isolation; a reused session keeps its launch value.
+                "chromium_sandbox": sandboxed,
+                "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            }
+            try:
+                write_state(directory, state)
+            except BaseException:
+                # Without a state file the running browser would be unreachable
+                # and would hold the profile lock against the next open.
+                signal_group(pid, signal.SIGKILL)
+                raise
+
+        return {
+            "session": name,
+            "pid": state["pid"],
+            "port": state["port"],
+            "reused": reused,
+            "chromium_sandbox": bool(state.get("chromium_sandbox", False)),
         }
-        try:
-            write_state(directory, state)
-        except BaseException:
-            # Without a state file the running browser would be unreachable
-            # and would hold the profile lock against the next open.
-            signal_group(pid, signal.SIGKILL)
-            raise
-
-    return {
-        "session": name,
-        "pid": state["pid"],
-        "port": state["port"],
-        "reused": reused,
-        "chromium_sandbox": bool(state.get("chromium_sandbox", False)),
-    }
+    finally:
+        await asyncio.to_thread(operation_lock.release)
 
 
 def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
     """Stop a session's browser; profile data persists unless ``delete_data``."""
-    directory = session_dir(name)
-    state = read_state(directory)
-    if state is not None and session_running(directory, state):
-        _terminate(directory, state["pid"])
-    state_path(directory).unlink(missing_ok=True)
-    if delete_data:
-        shutil.rmtree(directory, ignore_errors=True)
+    operation_lock = _SessionOperationLock.acquire(name)
+    try:
+        directory = session_dir(name)
+        state = read_state(directory)
+        if state is not None and session_running(directory, state):
+            _terminate(directory, state["pid"])
+        state_path(directory).unlink(missing_ok=True)
+        if delete_data:
+            shutil.rmtree(directory, ignore_errors=True)
+    finally:
+        operation_lock.release()
     return {"session": name, "deleted_data": delete_data}
 
 
