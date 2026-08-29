@@ -17,7 +17,7 @@ from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
 
-from webskrap.client import WebSkrapError
+from webskrap.errors import ErrorCode, WebSkrapError
 
 OUTPUT_DIR_ENV = "WEBSKRAP_OUTPUT_DIR"
 DEFAULT_OUTPUT_DIRNAME = "webskrap-output"
@@ -62,7 +62,7 @@ def resolve_mcp_profile_path(path: str | os.PathLike[str]) -> Path:
             f"profile path must be relative to {base}: '{candidate}' is absolute. "
             f"Pass a relative name, or set {MCP_PROFILE_DIR_ENV} to move the profile root."
         )
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
 
     resolved_base = base.resolve()
     resolved = (resolved_base / candidate).resolve()
@@ -71,14 +71,14 @@ def resolve_mcp_profile_path(path: str | os.PathLike[str]) -> Path:
             f"profile path must stay inside {base}: '{candidate}' escapes it. "
             f"Set {MCP_PROFILE_DIR_ENV} to store profiles elsewhere."
         )
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
 
     try:
         secure_directory(resolved_base, tighten_existing=False)
         secure_directory(resolved)
     except OSError as exc:
         msg = f"could not create profile directory {resolved}: {exc}"
-        raise WebSkrapError(msg) from exc
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED) from exc
     return resolved
 
 
@@ -116,10 +116,10 @@ def resolve_output_path(
             f"output path must be relative to {base}: '{candidate}' is absolute. "
             f"Pass a relative name, or set {OUTPUT_DIR_ENV} to write elsewhere."
         )
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
     if not candidate.name:
         msg = f"output path '{candidate}' does not name a file"
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
 
     # Resolve both sides before comparing: '..' segments and symlinked
     # directories only show their real target after resolution.
@@ -130,7 +130,7 @@ def resolve_output_path(
             f"output path must stay inside {base}: '{candidate}' escapes it. "
             f"Set {OUTPUT_DIR_ENV} to write elsewhere."
         )
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
 
     try:
         # Create the root owner-only when WebSkrap is the one creating it, so a
@@ -140,7 +140,7 @@ def resolve_output_path(
         resolved.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         msg = f"could not create output directory {resolved.parent}: {exc}"
-        raise WebSkrapError(msg) from exc
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED) from exc
     return resolved
 
 

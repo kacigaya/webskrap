@@ -5,7 +5,7 @@ process; every action reconnects to it over CDP, acts on the current page, and
 disconnects. Snapshots use Playwright's AI aria snapshot, so elements carry
 ``eN`` refs that interaction helpers accept alongside Playwright selectors.
 
-All failures raise :class:`~webskrap.client.WebSkrapError` (or propagate
+All failures raise :class:`~webskrap.errors.WebSkrapError` (or propagate
 Playwright errors); presentation layers translate them for their medium.
 """
 
@@ -29,7 +29,7 @@ from typing import Any, BinaryIO, TypeVar
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page, async_playwright
 
-from webskrap.client import WebSkrapError
+from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import WaitUntil
 from webskrap.paths import secure_directory
 
@@ -181,11 +181,11 @@ def session_dir(name: str) -> Path:
             f"invalid session name '{name}': use letters, digits, '.', '_' or '-', "
             "but not '.' or '..'"
         )
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
     directory = sessions_root() / name
     if directory.is_symlink():
         msg = f"session directory must not be a symlink: {directory}"
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
     return directory
 
 
@@ -274,13 +274,13 @@ async def chromium_executable() -> str:
         from patchright.async_api import async_playwright as patchright_playwright
     except ImportError as exc:  # pragma: no cover - patchright ships with webskrap
         msg = "Chromium is not installed. Run: webskrap install"
-        raise WebSkrapError(msg) from exc
+        raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
     async with patchright_playwright() as playwright:
         path = playwright.chromium.executable_path
     if Path(path).exists():
         return path
     msg = "Chromium is not installed. Run: webskrap install"
-    raise WebSkrapError(msg)
+    raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
 
 def signal_group(pid: int, sig: signal.Signals) -> None:
@@ -390,6 +390,8 @@ def _wait_for_devtools_port(
     while time.monotonic() < deadline:
         if process.poll() is not None:
             msg = f"browser exited during startup; see {log_path}{_sandbox_hint(log_path)}"
+            # No explicit code: a sandbox failure appends its own hint to this
+            # message, and `classify` reads that to report SANDBOX instead.
             raise WebSkrapError(msg)
         try:
             first_line = port_file.read_text(encoding="utf-8").splitlines()[0].strip()
@@ -399,7 +401,7 @@ def _wait_for_devtools_port(
             return int(first_line)
         time.sleep(0.05)
     msg = f"browser did not report a DevTools port within {LAUNCH_TIMEOUT_S:.0f}s"
-    raise WebSkrapError(msg)
+    raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
 
 async def open_session(
@@ -544,7 +546,7 @@ async def run_page_action(
     state = read_state(directory)
     if state is None:
         msg = f"session '{name}' is not open. Run: webskrap browser open"
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.NO_SESSION)
     async with async_playwright() as playwright:
         try:
             browser = await playwright.chromium.connect_over_cdp(
@@ -555,7 +557,7 @@ async def run_page_action(
                 f"session '{name}' is not reachable. "
                 "Run: webskrap browser close, then webskrap browser open"
             )
-            raise WebSkrapError(msg) from exc
+            raise WebSkrapError(msg, code=ErrorCode.SESSION_UNREACHABLE) from exc
         try:
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = context.pages[-1] if context.pages else await context.new_page()
@@ -591,21 +593,21 @@ def element_arguments(action: str, values: list[str]) -> list[Any]:
     if action not in ELEMENT_ACTIONS:
         supported = ", ".join(ELEMENT_ACTIONS)
         msg = f"unknown action '{action}': use one of {supported}"
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
     arity = ELEMENT_ACTIONS[action][1]
     if arity == "none":
         if values:
             msg = f"'{action}' takes no value argument"
-            raise WebSkrapError(msg)
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
         return []
     if arity == "one":
         if len(values) != 1:
             msg = f"'{action}' takes exactly one value argument"
-            raise WebSkrapError(msg)
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
         return [values[0]]
     if not values:
         msg = f"'{action}' takes at least one value argument"
-        raise WebSkrapError(msg)
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
     return [values]
 
 
