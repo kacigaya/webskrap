@@ -14,7 +14,8 @@ from typing import Any, TypeVar
 from playwright.async_api import Page
 
 from webskrap import browser_session
-from webskrap.client import WebSkrapClient, WebSkrapError, browser_doctor
+from webskrap.client import WebSkrapClient, WebSkrapError
+from webskrap.diagnostics import diagnose
 from webskrap.models import SessionConfig, shape_fetch_result
 from webskrap.parsing import (
     parse_element_state,
@@ -177,9 +178,16 @@ async def stealth_fetch(
 
 
 @mcp.tool()
-async def doctor() -> dict[str, object]:
-    """Check that Patchright and Chromium are installed and can launch."""
-    return await browser_doctor()
+async def doctor() -> dict[str, Any]:
+    """Report whether WebSkrap can drive a browser here, and how it is configured.
+
+    Launches one headless Chromium and returns that result plus the installed
+    versions, the Chromium binary in use, the roots screenshots and profiles
+    are confined to, which WEBSKRAP_* overrides are set, and every persistent
+    browser session with its running state. Call this first when a fetch or a
+    browser_* tool fails for a reason its own error does not explain.
+    """
+    return await diagnose()
 
 
 async def _browser_action(

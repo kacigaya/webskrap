@@ -24,7 +24,7 @@ from playwright.async_api import Browser, BrowserContext, FloatRect, Page
 
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
-from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError
 from webskrap.models import (
     BrowserProfile,
     FetchResult,
@@ -88,14 +88,21 @@ async def browser_doctor(
     driver: str = "patchright",
     channels: tuple[str | None, ...] = ("chrome", None),
 ) -> dict[str, object]:
-    """Report the first Chromium channel that launches with ``driver``."""
+    """Report the first Chromium channel that launches with ``driver``.
+
+    Also reports the bundled Chromium binary the driver would use, since a
+    caller diagnosing a failed launch otherwise has to guess where the browser
+    was looked for.
+    """
     failure: Exception | None = None
+    executable_path: str | None = None
     for channel in channels:
         playwright = None
         browser = None
         launched = False
         try:
             playwright = await _async_playwright(driver).start()
+            executable_path = playwright.chromium.executable_path
             browser = await playwright.chromium.launch(channel=channel, headless=True)
             launched = True
         except Exception as exc:  # noqa: BLE001 - report launch/import failures
@@ -112,12 +119,17 @@ async def browser_doctor(
             return {
                 "ok": True,
                 "message": f"{driver.title()} headless {channel_name} is ready.",
+                "driver": driver,
                 "channel": channel_name,
+                "executable_path": executable_path,
             }
     return {
         "ok": False,
         "message": f"{driver.title()} Chromium did not launch: {failure}",
-        "hint": "Run: webskrap install",
+        "driver": driver,
+        "channel": None,
+        "executable_path": executable_path,
+        "hint": RECOVERY_HINTS[ErrorCode.BROWSER_LAUNCH],
     }
 
 
