@@ -48,8 +48,10 @@ Build the web docs:
 
 ```bash
 cd web
-bun install
-bun run build
+bun install --frozen-lockfile
+bun audit
+bun run lint
+NEXT_PUBLIC_BASE_PATH=/webskrap bun run build
 ```
 
 Use the opt-in live tests only when you need to verify third-party bot-detection
