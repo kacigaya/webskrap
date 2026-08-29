@@ -3,15 +3,14 @@ name: Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -31,10 +30,14 @@ jobs:
         run: bun audit
       - name: Lint
         run: bun run lint
+      - name: Type check
+        run: bun run typecheck
       - name: Build static export
         run: bun run build
       - uses: actions/configure-pages@v6
+        if: github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
         with:
           path: web/out
           # v4 stopped bundling dotfiles. web/public/.nojekyll is exported to
@@ -42,7 +45,11 @@ jobs:
           include-hidden-files: true
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
