@@ -24,6 +24,12 @@ WebRtcIPHandlingPolicy = Literal[
 ]
 #: Playwright load state a navigation waits for before returning.
 WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
+#: Load state an already-navigated page can be waited on. ``commit`` is absent
+#: on purpose: it describes the start of a navigation, so there is nothing left
+#: to wait for once the page exists.
+LoadState = Literal["domcontentloaded", "load", "networkidle"]
+#: Element state :func:`~webskrap.browser_session.wait_for` can wait on.
+ElementState = Literal["attached", "detached", "visible", "hidden"]
 
 
 class ResourcePolicy(StrEnum):

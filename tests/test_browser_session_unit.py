@@ -12,6 +12,7 @@ import pytest
 
 from webskrap import browser_session
 from webskrap.client import WebSkrapError
+from webskrap.errors import ErrorCode
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 
@@ -349,3 +350,44 @@ def test_cancelled_lock_wait_releases_after_acquiring(
         reacquired.release()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({}, id="none"),
+        pytest.param({"text": "a", "selector": "b"}, id="two"),
+        pytest.param({"text": "a", "text_gone": "b", "load_state": "load"}, id="three"),
+    ],
+)
+def test_wait_condition_requires_exactly_one(kwargs: dict[str, str]) -> None:
+    with pytest.raises(WebSkrapError, match="exactly one of") as caught:
+        browser_session.wait_condition(
+            kwargs.get("text"),
+            kwargs.get("text_gone"),
+            kwargs.get("selector"),
+            kwargs.get("load_state"),
+        )
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        pytest.param({"text": "Done"}, "text", id="text"),
+        pytest.param({"text_gone": "Loading"}, "text_gone", id="text-gone"),
+        pytest.param({"selector": "e12"}, "selector", id="selector"),
+        pytest.param({"load_state": "networkidle"}, "load_state", id="load-state"),
+    ],
+)
+def test_wait_condition_names_the_single_condition(kwargs: dict[str, str], expected: str) -> None:
+    assert (
+        browser_session.wait_condition(
+            kwargs.get("text"),
+            kwargs.get("text_gone"),
+            kwargs.get("selector"),
+            kwargs.get("load_state"),
+        )
+        == expected
+    )

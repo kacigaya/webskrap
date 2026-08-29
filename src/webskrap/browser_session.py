@@ -30,7 +30,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page, async_playwright
 
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import WaitUntil
+from webskrap.models import ElementState, LoadState, WaitUntil
 from webskrap.paths import secure_directory
 
 T = TypeVar("T")
@@ -633,3 +633,81 @@ async def snapshot(page: Page, *, depth: int | None = None) -> dict[str, Any]:
     """Return the page state plus an aria snapshot carrying ``eN`` refs."""
     tree = await page.locator("body").aria_snapshot(mode="ai", depth=depth)
     return {**await page_state(page), "snapshot": tree}
+
+
+def wait_condition(
+    text: str | None,
+    text_gone: str | None,
+    selector: str | None,
+    load_state: LoadState | None,
+) -> str:
+    """Return the name of the single condition :func:`wait_for` should wait on.
+
+    Raises:
+        WebSkrapError: If the caller asked for no condition or several. Waiting
+            on two things at once has no obvious meaning -- neither "both" nor
+            "either" is what a caller who passed two by accident wanted.
+    """
+    requested = [
+        name
+        for name, value in (
+            ("text", text),
+            ("text_gone", text_gone),
+            ("selector", selector),
+            ("load_state", load_state),
+        )
+        if value is not None
+    ]
+    if len(requested) != 1:
+        msg = (
+            "wait takes exactly one of text, text_gone, selector or load_state; "
+            f"got {len(requested)}"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    return requested[0]
+
+
+async def wait_for(
+    page: Page,
+    *,
+    text: str | None = None,
+    text_gone: str | None = None,
+    selector: str | None = None,
+    selector_state: ElementState = "visible",
+    load_state: LoadState | None = None,
+    timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
+) -> dict[str, Any]:
+    """Wait for one page condition, then return the page state that followed.
+
+    Without this, waiting after a click means polling with ``eval`` or hoping a
+    fixed timeout is long enough. Exactly one condition is accepted; see
+    :func:`wait_condition`.
+
+    Args:
+        page: Page to wait on.
+        text: Wait until this text is visible.
+        text_gone: Wait until this text is no longer visible. Text that was
+            never there satisfies this immediately.
+        selector: Wait until this snapshot ref or Playwright selector reaches
+            ``selector_state``.
+        selector_state: Element state to wait for, with ``selector``.
+        load_state: Wait until the page reaches this load state.
+        timeout_ms: How long to wait before giving up.
+
+    Returns:
+        ``{"url", "title", "matched"}``, where ``matched`` names the condition.
+    """
+    # wait_condition has already established that exactly one of these is set,
+    # so these run as a chain of one; separate ifs keep each branch's argument
+    # narrowed to a non-None type without an assert or a cast.
+    condition = wait_condition(text, text_gone, selector, load_state)
+    if text is not None:
+        await page.get_by_text(text).first.wait_for(state="visible", timeout=timeout_ms)
+    if text_gone is not None:
+        await page.get_by_text(text_gone).first.wait_for(state="hidden", timeout=timeout_ms)
+    if selector is not None:
+        locator = await resolve_locator(page, selector)
+        await locator.first.wait_for(state=selector_state, timeout=timeout_ms)
+    if load_state is not None:
+        await page.wait_for_load_state(load_state, timeout=timeout_ms)
+    return {**await page_state(page), "matched": condition}

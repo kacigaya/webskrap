@@ -32,6 +32,7 @@ def test_browser_commands_are_registered() -> None:
         "close",
         "list",
         "goto",
+        "wait",
         "back",
         "forward",
         "reload",
@@ -288,3 +289,87 @@ def test_browser_session_lifecycle(persistent_session_env: Path) -> None:
     after = runner.invoke(cli.app, ["browser", "snapshot"], env=env)
     assert after.exit_code == 1
     assert "not open" in after.output
+
+
+# A page whose content arrives after load, so a wait is the only correct way
+# to reach it: polling once is too early and a fixed sleep is a guess.
+DEFERRED_PAGE = (
+    "data:text/html,<title>deferred</title>"
+    "<p id=status>Loading</p>"
+    "<script>setTimeout(() => {"
+    "document.getElementById('status').textContent = 'Ready';"
+    "}, 400)</script>"
+)
+
+
+def test_wait_requires_exactly_one_condition(tmp_path: Path) -> None:
+    result = runner.invoke(cli.app, ["browser", "wait"], env=_env(tmp_path))
+
+    assert result.exit_code != 0
+    assert "exactly one of" in result.output
+
+
+def test_wait_rejects_a_load_state_that_cannot_be_awaited(tmp_path: Path) -> None:
+    result = runner.invoke(
+        cli.app, ["browser", "wait", "--load-state", "commit"], env=_env(tmp_path)
+    )
+
+    assert result.exit_code == 2
+    assert "domcontentloaded" in "".join(result.output.split())
+
+
+@pytest.mark.browser
+def test_wait_for_deferred_text(persistent_session_env: Path) -> None:
+    env = _env(persistent_session_env)
+    assert runner.invoke(cli.app, ["browser", "open", DEFERRED_PAGE], env=env).exit_code == 0
+    try:
+        waited = runner.invoke(
+            cli.app,
+            ["browser", "wait", "--text", "Ready", "--format", "json"],
+            env=env,
+        )
+        assert waited.exit_code == 0, waited.output
+        assert json.loads(waited.output)["matched"] == "text"
+
+        gone = runner.invoke(
+            cli.app,
+            ["browser", "wait", "--text-gone", "Loading", "--format", "json"],
+            env=env,
+        )
+        assert gone.exit_code == 0, gone.output
+        assert json.loads(gone.output)["matched"] == "text_gone"
+
+        by_selector = runner.invoke(
+            cli.app,
+            ["browser", "wait", "--selector", "#status", "--format", "json"],
+            env=env,
+        )
+        assert by_selector.exit_code == 0, by_selector.output
+        assert json.loads(by_selector.output)["matched"] == "selector"
+
+        loaded = runner.invoke(
+            cli.app,
+            ["browser", "wait", "--load-state", "networkidle", "--format", "json"],
+            env=env,
+        )
+        assert loaded.exit_code == 0, loaded.output
+        assert json.loads(loaded.output)["matched"] == "load_state"
+    finally:
+        runner.invoke(cli.app, ["browser", "close"], env=env)
+
+
+@pytest.mark.browser
+def test_wait_fails_when_the_condition_never_holds(persistent_session_env: Path) -> None:
+    env = _env(persistent_session_env)
+    assert runner.invoke(cli.app, ["browser", "open", DEFERRED_PAGE], env=env).exit_code == 0
+    try:
+        result = runner.invoke(
+            cli.app,
+            ["browser", "wait", "--text", "Never arrives", "--timeout-ms", "500"],
+            env=env,
+        )
+
+        assert result.exit_code != 0
+        assert "Timeout" in result.output
+    finally:
+        runner.invoke(cli.app, ["browser", "close"], env=env)

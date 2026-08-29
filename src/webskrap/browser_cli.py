@@ -28,8 +28,8 @@ from webskrap.browser_session import (
     ELEMENT_ACTIONS,
 )
 from webskrap.client import WebSkrapError
-from webskrap.models import WaitUntil
-from webskrap.parsing import parse_wait_until
+from webskrap.models import ElementState, LoadState, WaitUntil
+from webskrap.parsing import parse_element_state, parse_load_state, parse_wait_until
 
 browser_app = typer.Typer(
     help="Drive a persistent browser with Playwright CLI-style commands.",
@@ -71,6 +71,20 @@ def _parse_output_format(value: str) -> OutputFormat:
 def _parse_wait_until(value: str) -> WaitUntil:
     try:
         return parse_wait_until(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
+
+
+def _parse_load_state(value: str) -> LoadState:
+    try:
+        return parse_load_state(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
+
+
+def _parse_element_state(value: str) -> ElementState:
+    try:
+        return parse_element_state(value)
     except ValueError as exc:
         raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
 
@@ -323,6 +337,58 @@ def press_command(
         return await browser_session.page_state(page)
 
     _emit_state(_run_page_command(session, action, timeout_ms=timeout_ms), output_format)
+
+
+@browser_app.command("wait")
+def wait_command(
+    session: SessionOption = "default",
+    text: Annotated[
+        str | None, typer.Option("--text", help="Wait until this text is visible.")
+    ] = None,
+    text_gone: Annotated[
+        str | None, typer.Option("--text-gone", help="Wait until this text is gone.")
+    ] = None,
+    selector: Annotated[
+        str | None,
+        typer.Option("--selector", help="Wait on a snapshot ref (e12) or Playwright selector."),
+    ] = None,
+    state: Annotated[
+        str,
+        typer.Option("--state", help="attached, detached, visible, or hidden (with --selector)."),
+    ] = "visible",
+    load_state: Annotated[
+        str | None,
+        typer.Option("--load-state", help="domcontentloaded, load, or networkidle."),
+    ] = None,
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    format: FormatOption = "human",
+) -> None:
+    """Wait for one condition on the page (text, selector, or load state)."""
+    output_format = _parse_output_format(format)
+    parsed_state = _parse_element_state(state)
+    parsed_load_state = _parse_load_state(load_state) if load_state is not None else None
+    try:
+        # Fail before connecting when the conditions do not add up to exactly one.
+        browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
+    except WebSkrapError as exc:
+        _fail(str(exc))
+
+    state_payload = _run_page_command(
+        session,
+        lambda page: browser_session.wait_for(
+            page,
+            text=text,
+            text_gone=text_gone,
+            selector=selector,
+            selector_state=parsed_state,
+            load_state=parsed_load_state,
+            timeout_ms=timeout_ms,
+        ),
+        timeout_ms=timeout_ms,
+    )
+    if output_format == "human":
+        console.print(f"[bold]Matched:[/bold] {state_payload['matched']}")
+    _emit_state(state_payload, output_format)
 
 
 @browser_app.command("screenshot")
