@@ -8,7 +8,7 @@ import pytest
 
 from webskrap import mcp_server
 from webskrap.client import WebSkrapError
-from webskrap.models import FetchResult
+from webskrap.models import FetchResult, Link
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 
 
@@ -303,3 +303,39 @@ def test_stealth_fetch_accepts_an_offset(monkeypatch: Any) -> None:
     assert result["text"] == "body"
     assert result["text_offset"] == 9
     assert result["next_text_offset"] is None
+
+
+def test_fetch_does_not_collect_links_unless_asked(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.fetch("https://example.test"))
+
+    assert _FakeClient.calls[0]["include_links"] is False
+    assert result["links"] == []
+    assert result["links_truncated"] is False
+
+
+def test_fetch_forwards_the_link_budget(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    asyncio.run(mcp_server.fetch("https://example.test", include_links=True, max_links=5))
+
+    assert _FakeClient.calls[0]["include_links"] is True
+    assert _FakeClient.calls[0]["max_links"] == 5
+
+
+def test_shaped_links_report_what_the_cap_dropped(monkeypatch: Any) -> None:
+    class _LinkClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            result = await super().fetch(url, **kwargs)
+            return result.model_copy(
+                update={"links": [Link(href="https://a.test", text="A")], "links_total": 4}
+            )
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _LinkClient)
+
+    result = asyncio.run(mcp_server.fetch("https://example.test", include_links=True))
+
+    assert result["links"] == [{"href": "https://a.test", "text": "A"}]
+    assert result["links_total"] == 4
+    assert result["links_truncated"] is True

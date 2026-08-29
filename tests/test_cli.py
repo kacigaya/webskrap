@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from webskrap import cli
-from webskrap.models import FetchResult
+from webskrap.models import FetchResult, Link
 
 runner = CliRunner()
 
@@ -72,6 +72,9 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
         "text_offset": 0,
         "text_truncated": True,
         "next_text_offset": 5,
+        "links": [],
+        "links_total": 0,
+        "links_truncated": False,
         "elapsed_ms": 12.3,
         "cookie_notice_declined": None,
     }
@@ -393,3 +396,57 @@ def test_fetch_rejects_invalid_option_values(option: str, value: str, expected: 
 
     assert result.exit_code == 2
     assert "".join(expected.split()) in _plain(result.output)
+
+
+def test_fetch_links_are_opt_in(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert _FakeClient.calls[0]["include_links"] is False
+    assert json.loads(result.output)["links"] == []
+
+
+def test_fetch_links_flag_forwards_the_budget(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        ["fetch", "https://example.test", "--links", "--max-links", "7", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _FakeClient.calls[0]["include_links"] is True
+    assert _FakeClient.calls[0]["max_links"] == 7
+
+
+def test_fetch_human_summary_counts_links(monkeypatch: Any) -> None:
+    class _LinkClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            result = await super().fetch(url, **kwargs)
+            return result.model_copy(
+                update={"links": [Link(href="https://a.test", text="A")], "links_total": 3}
+            )
+
+    monkeypatch.setattr(cli, "WebSkrapClient", _LinkClient)
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--links"])
+
+    assert result.exit_code == 0, result.output
+    assert "1 of 3" in result.output
+
+
+def test_fetch_json_pages_through_text(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        ["fetch", "https://example.test", "--format", "json", "--max-chars", "5", "--offset", "5"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["text"] == ">abcd"
+    assert payload["text_offset"] == 5
+    assert payload["next_text_offset"] == 10

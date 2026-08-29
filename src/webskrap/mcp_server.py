@@ -46,6 +46,8 @@ async def fetch(
     max_chars: int = 20_000,
     offset: int = 0,
     text_only: bool = True,
+    include_links: bool = False,
+    max_links: int = 50,
     decline_cookies: bool = True,
 ) -> dict[str, Any]:
     """Fetch a URL with the Patchright stealth driver and return page data.
@@ -70,6 +72,10 @@ async def fetch(
             result's next_text_offset to read a long page in windows instead of
             fetching it again with a bigger max_chars.
         text_only: Return clean visible text (default) instead of raw HTML.
+        include_links: Also return the page's outbound links, so a crawl does
+            not need a second fetch of the raw HTML. Off by default: on a
+            link-heavy page they cost more than the text.
+        max_links: How many links to return; links_total counts them all.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
     """
@@ -89,6 +95,8 @@ async def fetch(
             wait_until=parse_wait_until(wait_until),
             timeout_ms=timeout_ms,
             text_only=text_only,
+            include_links=include_links,
+            max_links=max_links,
         )
     return shape_fetch_result(result, max_chars, offset)
 
@@ -108,6 +116,8 @@ async def stealth_fetch(
     max_chars: int = 20_000,
     offset: int = 0,
     text_only: bool = True,
+    include_links: bool = False,
+    max_links: int = 50,
     decline_cookies: bool = True,
 ) -> dict[str, Any]:
     """Fetch a URL with the Patchright stealth driver (CDP-leak-free).
@@ -134,6 +144,8 @@ async def stealth_fetch(
         offset: Character index to start the returned text at; pass back
             next_text_offset to continue.
         text_only: Return clean visible text (default) instead of raw HTML.
+        include_links: Also return the page's outbound links.
+        max_links: How many links to return; links_total counts them all.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
     """
@@ -156,6 +168,8 @@ async def stealth_fetch(
             config=config,
             timeout_ms=timeout_ms,
             text_only=text_only,
+            include_links=include_links,
+            max_links=max_links,
         )
     return shape_fetch_result(result, max_chars, offset)
 

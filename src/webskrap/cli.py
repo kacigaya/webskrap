@@ -182,6 +182,14 @@ def fetch_command(
         bool,
         typer.Option("--text-only", help="Return readable body text instead of HTML."),
     ] = False,
+    links: Annotated[
+        bool,
+        typer.Option("--links", help="Also collect the page's outbound links."),
+    ] = False,
+    max_links: Annotated[
+        int,
+        typer.Option("--max-links", min=0, help="Maximum links to collect."),
+    ] = 50,
     quiet: Annotated[
         bool,
         typer.Option("--quiet", help="Suppress human summary output."),
@@ -266,6 +274,8 @@ def fetch_command(
             offset=offset,
             stdout=stdout,
             text_only=text_only,
+            links=links,
+            max_links=max_links,
             quiet=quiet,
             wait_until=wait_until,
             timeout_ms=timeout_ms,
@@ -294,6 +304,8 @@ async def _fetch(
     offset: int,
     stdout: bool,
     text_only: bool,
+    links: bool,
+    max_links: int,
     quiet: bool,
     wait_until: str,
     timeout_ms: float,
@@ -332,6 +344,8 @@ async def _fetch(
         screenshot=screenshot or False,
         timeout_ms=timeout_ms,
         text_only=text_only,
+        include_links=links,
+        max_links=max_links,
     )
 
     if output:
@@ -354,6 +368,8 @@ async def _fetch(
     console.print(f"[bold]Title:[/bold] {result.title}")
     if result.cookie_notice_declined:
         console.print(f"[bold]Cookie notice:[/bold] declined ({result.cookie_notice_declined})")
+    if links:
+        console.print(f"[bold]Links:[/bold] {len(result.links)} of {result.links_total}")
     if result.screenshot_path:
         console.print(f"[bold]Screenshot:[/bold] {result.screenshot_path}")
     if output:

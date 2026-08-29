@@ -399,6 +399,13 @@ class SessionConfig(BaseModel):
         return options
 
 
+class Link(BaseModel):
+    """One outbound anchor: its resolved absolute URL and its visible label."""
+
+    href: str
+    text: str
+
+
 class FetchResult(BaseModel):
     """What one fetch produced.
 
@@ -422,6 +429,11 @@ class FetchResult(BaseModel):
     # Strategy that dismissed a cookie consent notice ("cmp" or "text"), or
     # None when nothing was declined.
     cookie_notice_declined: str | None = None
+    # Outbound links, collected only when the fetch asked for them. Empty and
+    # zero otherwise, so an empty list does not distinguish "no links" from
+    # "not requested" -- ``links_total`` is the count before the cap applied.
+    links: list[Link] = Field(default_factory=list)
+    links_total: int = 0
 
 
 class TextWindow(NamedTuple):
@@ -478,8 +490,8 @@ def shape_fetch_result(result: FetchResult, max_chars: int, offset: int = 0) -> 
     Text is windowed to ``max_chars`` characters from ``offset``.
     ``text_length``, ``text_offset`` and ``text_truncated`` report what was cut,
     and ``next_text_offset`` is what to pass back for the rest, so a clipped
-    page can be read through rather than fetched again. Cookies and
-    headers-heavy fields are left out.
+    page can be read through rather than fetched again. ``links`` is empty
+    unless the fetch collected them. Cookies are left out.
     """
     window = text_window(result.text or "", max_chars, offset)
     return {
@@ -494,6 +506,9 @@ def shape_fetch_result(result: FetchResult, max_chars: int, offset: int = 0) -> 
         "text_offset": window.offset,
         "text_truncated": window.truncated,
         "next_text_offset": window.next_offset,
+        "links": [link.model_dump() for link in result.links],
+        "links_total": result.links_total,
+        "links_truncated": result.links_total > len(result.links),
         "elapsed_ms": round(result.timings.get("elapsed_ms", 0.0), 1),
         "cookie_notice_declined": result.cookie_notice_declined,
     }
