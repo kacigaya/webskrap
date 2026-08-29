@@ -172,6 +172,22 @@ def test_browser_screenshot_rejects_paths_outside_the_output_root(
     assert not (tmp_path / "escape.png").exists()
 
 
+@pytest.mark.parametrize("session", [".", ".."])
+def test_browser_close_delete_data_rejects_traversal(
+    monkeypatch: Any, tmp_path: Path, session: str
+) -> None:
+    browser_root = tmp_path / "browser"
+    browser_root.mkdir()
+    marker = tmp_path / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(browser_root))
+
+    with pytest.raises(WebSkrapError, match="invalid session name"):
+        asyncio.run(mcp_server.browser_close(session=session, delete_data=True))
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
 @pytest.mark.browser
 def test_browser_mcp_lifecycle(monkeypatch: Any, persistent_session_env: Path) -> None:
     tmp_path = persistent_session_env

@@ -220,12 +220,14 @@ def test_list_sessions_reports_sandbox_state(
     ]
 
 
+@pytest.mark.parametrize("name", [".", "..", "../evil"])
 def test_create_session_dir_rejects_traversal(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str
 ) -> None:
     monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "browser"))
 
     with pytest.raises(WebSkrapError, match="invalid session name"):
-        browser_session.create_session_dir("../evil")
+        browser_session.create_session_dir(name)
 
+    assert not (tmp_path / "browser").exists()
     assert not (tmp_path / "evil").exists()
