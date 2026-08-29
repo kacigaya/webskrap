@@ -30,7 +30,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import Locator, Page, async_playwright
 
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import ElementState, LoadState, WaitUntil
+from webskrap.models import ElementState, LoadState, WaitUntil, text_window
 from webskrap.paths import secure_directory
 
 T = TypeVar("T")
@@ -711,3 +711,44 @@ async def wait_for(
     if load_state is not None:
         await page.wait_for_load_state(load_state, timeout=timeout_ms)
     return {**await page_state(page), "matched": condition}
+
+
+def shape_snapshot(result: dict[str, Any], max_chars: int, offset: int = 0) -> dict[str, Any]:
+    """Window a :func:`snapshot` payload's tree to ``max_chars`` from ``offset``.
+
+    An aria snapshot of a real page runs well past what a caller wants in one
+    piece, so the tree is paged the same way fetched text is: the reported
+    ``next_snapshot_offset`` is what to pass back for the rest, and None means
+    the whole tree has been read.
+    """
+    window = text_window(result["snapshot"], max_chars, offset)
+    return {
+        **result,
+        "snapshot": window.text,
+        "snapshot_length": window.length,
+        "snapshot_offset": window.offset,
+        "snapshot_truncated": window.truncated,
+        "next_snapshot_offset": window.next_offset,
+    }
+
+
+def shape_eval_result(value: Any, max_chars: int) -> dict[str, Any]:
+    """Bound an ``eval`` result so one careless expression cannot flood a caller.
+
+    ``document.body.innerHTML`` is one keystroke away from ``document.title``,
+    and the first can be megabytes. The value is returned as-is while its JSON
+    encoding fits ``max_chars``; past that ``result`` is None and the clipped
+    encoding is returned as ``result_json`` instead, so a truncated payload is
+    never mistaken for valid JSON. ``result_truncated`` is what tells a None
+    result apart from an expression that genuinely evaluated to null.
+    """
+    encoded = json.dumps(value, ensure_ascii=False, default=str)
+    limit = max(0, max_chars)
+    if len(encoded) <= limit:
+        return {"result": value, "result_length": len(encoded), "result_truncated": False}
+    return {
+        "result": None,
+        "result_json": encoded[:limit],
+        "result_length": len(encoded),
+        "result_truncated": True,
+    }

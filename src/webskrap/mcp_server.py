@@ -258,28 +258,29 @@ async def browser_snapshot(
     session: str = "default",
     depth: int | None = None,
     max_chars: int = 20_000,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Return an aria snapshot of the current page with eN element refs.
 
     Each element carries a ref like [ref=e15]; pass that ref (e.g. "e15") as
-    the target of browser_interact. Refs describe the current DOM, so take a
-    fresh snapshot after the page changes.
+    the target of browser_interact or browser_wait_for. Refs describe the
+    current DOM, so take a fresh snapshot after the page changes.
 
     Args:
         session: Browser session name.
-        depth: Maximum snapshot tree depth.
+        depth: Maximum snapshot tree depth. Lower it before raising max_chars:
+            a shallow tree of the whole page is usually more useful than the
+            first characters of a deep one.
         max_chars: Maximum characters of snapshot text to return.
+        offset: Character index to start at; pass back next_snapshot_offset to
+            read the rest of a clipped tree.
     """
     result = await _browser_action(
         session,
         lambda page: browser_session.snapshot(page, depth=depth),
         browser_session.DEFAULT_ACTION_TIMEOUT_MS,
     )
-    truncated = len(result["snapshot"]) > max_chars
-    if truncated:
-        result["snapshot"] = result["snapshot"][:max_chars]
-    result["snapshot_truncated"] = truncated
-    return result
+    return browser_session.shape_snapshot(result, max_chars, offset)
 
 
 @mcp.tool()
@@ -412,16 +413,24 @@ async def browser_eval(
     expression: str,
     session: str = "default",
     timeout_ms: float = 10_000,
+    max_chars: int = 20_000,
 ) -> dict[str, Any]:
     """Evaluate JavaScript on the session's current page.
+
+    The result is bounded: past max_chars, `result` is null and the clipped
+    JSON encoding is returned as `result_json` instead, with
+    `result_truncated` true. Narrow the expression rather than raising the
+    limit -- returning document.body.innerHTML wastes on markup what a
+    querySelector would have answered in a line.
 
     Args:
         expression: JavaScript expression or function to evaluate.
         session: Browser session name.
         timeout_ms: Action timeout in milliseconds.
+        max_chars: Maximum characters of encoded result to return.
     """
     result = await _browser_action(session, lambda page: page.evaluate(expression), timeout_ms)
-    return {"result": result}
+    return browser_session.shape_eval_result(result, max_chars)
 
 
 @mcp.tool()

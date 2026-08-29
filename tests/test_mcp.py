@@ -258,6 +258,10 @@ def test_browser_mcp_lifecycle(monkeypatch: Any, persistent_session_env: Path) -
         short = asyncio.run(mcp_server.browser_snapshot(max_chars=10))
         assert short["snapshot_truncated"] is True
         assert len(short["snapshot"]) == 10
+        # The clipped tail is reachable rather than lost.
+        rest = asyncio.run(mcp_server.browser_snapshot(offset=short["next_snapshot_offset"]))
+        assert short["snapshot"] + rest["snapshot"] == snapshot["snapshot"]
+        assert rest["next_snapshot_offset"] is None
 
         clicked = asyncio.run(mcp_server.browser_interact("click", ref))
         assert clicked["title"] == "mcp-test"
@@ -265,7 +269,8 @@ def test_browser_mcp_lifecycle(monkeypatch: Any, persistent_session_env: Path) -
         evaluated = asyncio.run(
             mcp_server.browser_eval("document.querySelector('button').textContent")
         )
-        assert evaluated == {"result": "clicked"}
+        assert evaluated["result"] == "clicked"
+        assert evaluated["result_truncated"] is False
 
         # Screenshots are confined to the output root, so ask for a relative
         # name and assert it landed inside it.
@@ -373,5 +378,19 @@ def test_browser_wait_for_deferred_text(persistent_session_env: Path) -> None:
 
         idle = asyncio.run(mcp_server.browser_wait_for(load_state="networkidle"))
         assert idle["matched"] == "load_state"
+    finally:
+        asyncio.run(mcp_server.browser_close())
+
+
+@pytest.mark.browser
+def test_browser_eval_bounds_a_large_result(persistent_session_env: Path) -> None:
+    asyncio.run(mcp_server.browser_open("data:text/html,<title>big</title>"))
+    try:
+        bounded = asyncio.run(mcp_server.browser_eval("'x'.repeat(500)", max_chars=20))
+
+        assert bounded["result"] is None
+        assert bounded["result_truncated"] is True
+        assert bounded["result_length"] == 502
+        assert len(bounded["result_json"]) == 20
     finally:
         asyncio.run(mcp_server.browser_close())

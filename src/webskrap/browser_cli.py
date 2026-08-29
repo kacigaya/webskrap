@@ -280,16 +280,36 @@ def snapshot_command(
     depth: Annotated[
         int | None, typer.Option("--depth", min=1, help="Maximum snapshot tree depth.")
     ] = None,
+    max_chars: Annotated[
+        int, typer.Option("--max-chars", min=0, help="Maximum snapshot characters.")
+    ] = 20_000,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+            help="Start at this character; pass back next_snapshot_offset to continue.",
+        ),
+    ] = 0,
     format: FormatOption = "human",
 ) -> None:
     """Print an aria snapshot of the page with `eN` element refs."""
     output_format = _parse_output_format(format)
-    result = _run_page_command(session, lambda page: browser_session.snapshot(page, depth=depth))
+    result = browser_session.shape_snapshot(
+        _run_page_command(session, lambda page: browser_session.snapshot(page, depth=depth)),
+        max_chars,
+        offset,
+    )
     if output_format == "json":
         _print_json(result)
         return
     _emit_state({"url": result["url"], "title": result["title"]}, output_format)
     typer.echo(result["snapshot"])
+    if result["snapshot_truncated"]:
+        stderr_console.print(
+            f"[yellow]truncated:[/yellow] {result['snapshot_length']} characters; "
+            f"continue with --offset {result['next_snapshot_offset']}"
+        )
 
 
 def _register_element_command(name: str, help_text: str) -> None:
@@ -421,6 +441,9 @@ def eval_command(
     expression: Annotated[str, typer.Argument(help="JavaScript expression or function.")],
     session: SessionOption = "default",
     timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    max_chars: Annotated[
+        int, typer.Option("--max-chars", min=0, help="Maximum encoded result characters.")
+    ] = 20_000,
     format: FormatOption = "human",
 ) -> None:
     """Evaluate JavaScript on the current page and print the JSON result."""
@@ -429,8 +452,16 @@ def eval_command(
     async def action(page: Page) -> Any:
         return await page.evaluate(expression)
 
-    result = _run_page_command(session, action, timeout_ms=timeout_ms)
+    payload = browser_session.shape_eval_result(
+        _run_page_command(session, action, timeout_ms=timeout_ms), max_chars
+    )
     if output_format == "json":
-        _print_json({"result": result})
+        _print_json(payload)
         return
-    typer.echo(json.dumps(result, ensure_ascii=False))
+    if payload["result_truncated"]:
+        typer.echo(payload["result_json"])
+        stderr_console.print(
+            f"[yellow]truncated:[/yellow] {payload['result_length']} encoded characters"
+        )
+        return
+    typer.echo(json.dumps(payload["result"], ensure_ascii=False))
