@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from webskrap.client import WebSkrapError
 from webskrap.errors import RECOVERY_HINTS, ErrorCode
 from webskrap.models import FetchResult, Link
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
+from webskrap.profiles import list_profiles
 
 
 class _FakeClient:
@@ -521,3 +523,42 @@ def test_a_playwright_call_log_is_reduced_to_its_first_line(monkeypatch: Any) ->
 
     assert "Call log" not in str(caught.value)
     assert caught.value.code is ErrorCode.TIMEOUT
+
+
+def test_resources_are_registered() -> None:
+    resources = {str(resource.uri) for resource in asyncio.run(mcp_server.mcp.list_resources())}
+
+    assert resources == {"webskrap://guide", "webskrap://profiles", "webskrap://sessions"}
+
+
+def test_profiles_resource_lists_the_names_the_fetch_tools_accept() -> None:
+    payload = json.loads(mcp_server.profiles_resource())
+
+    names = {profile["name"] for profile in payload["profiles"]}
+    assert "desktop-chrome" in names
+    assert names == {profile.name for profile in list_profiles()}
+
+
+def test_sessions_resource_matches_the_browser_list_tool(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+    (tmp_path / "shop" / "user-data").mkdir(parents=True)
+
+    assert json.loads(mcp_server.sessions_resource()) == asyncio.run(mcp_server.browser_list())
+
+
+def test_guide_documents_every_registered_tool() -> None:
+    guide = mcp_server.guide_resource()
+
+    # The guide is the long form the short instructions point at, so a tool
+    # that never reaches it is a tool an agent will not find.
+    for tool in asyncio.run(mcp_server.mcp.list_tools()):
+        assert f"`{tool.name}`" in guide, tool.name
+
+
+def test_guide_documents_every_error_code() -> None:
+    guide = mcp_server.guide_resource()
+
+    for code in ErrorCode:
+        if code is ErrorCode.INTERNAL:
+            continue
+        assert f"`{code}`" in guide, code
