@@ -12,6 +12,7 @@ from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
     BrowserProfile,
     FetchResult,
+    Link,
     ProxyConfig,
     ResourcePolicy,
     SessionConfig,
@@ -24,6 +25,7 @@ __all__ = [
     "BrowserProfile",
     "ErrorCode",
     "FetchResult",
+    "Link",
     "ProxyConfig",
     "ResourcePolicy",
     "SessionConfig",

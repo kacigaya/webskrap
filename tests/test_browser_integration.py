@@ -24,6 +24,16 @@ document.getElementById('onetrust-reject-all-handler').addEventListener('click',
 </script>
 </body></html>"""
 
+# Relative, duplicate, and javascript: anchors: link collection must resolve,
+# deduplicate, and drop them respectively.
+LINKS_PAGE = b"""<html><title>Links</title><body>
+<a href="/one">  One\n  link  </a>
+<a href="/two">Two</a>
+<a href="/one">One again</a>
+<a href="javascript:void(0)">Script</a>
+<a href="https://example.test/three">Three</a>
+</body></html>"""
+
 # An unbranded notice injected after load: only the text strategy can find it.
 LATE_TEXT_BANNER_PAGE = b"""<html><title>Notice</title><body>
 <p>Article body</p>
@@ -63,6 +73,13 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(CMP_BANNER_PAGE)
+            return
+
+        if self.path == "/links":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(LINKS_PAGE)
             return
 
         if self.path == "/late-text-banner":
@@ -168,3 +185,47 @@ async def test_per_call_patchright_config_starts_patchright() -> None:
         session = await client.session("patchright", config=config)
 
     assert type(session.context).__module__.startswith("patchright.")
+
+
+@pytest.mark.asyncio
+async def test_links_are_off_by_default(test_server: str) -> None:
+    async with WebSkrapClient() as client:
+        result = await client.fetch(f"{test_server}/links")
+
+    assert result.links == []
+    assert result.links_total == 0
+
+
+@pytest.mark.asyncio
+async def test_links_are_resolved_deduplicated_and_normalized(test_server: str) -> None:
+    async with WebSkrapClient() as client:
+        result = await client.fetch(f"{test_server}/links", include_links=True)
+
+    assert result.links_total == 3
+    assert [link.href for link in result.links] == [
+        f"{test_server}/one",
+        f"{test_server}/two",
+        "https://example.test/three",
+    ]
+    # Whitespace inside the anchor collapses, so the label stays one short line.
+    assert result.links[0].text == "One link"
+
+
+@pytest.mark.asyncio
+async def test_links_are_capped_but_still_counted(test_server: str) -> None:
+    async with WebSkrapClient() as client:
+        result = await client.fetch(f"{test_server}/links", include_links=True, max_links=2)
+
+    assert len(result.links) == 2
+    assert result.links_total == 3
+
+
+@pytest.mark.asyncio
+async def test_links_are_skipped_when_javascript_is_disabled(test_server: str) -> None:
+    config = SessionConfig(java_script_enabled=False)
+
+    async with WebSkrapClient() as client:
+        result = await client.fetch(f"{test_server}/links", config=config, include_links=True)
+
+    assert result.links == []
+    assert result.links_total == 0

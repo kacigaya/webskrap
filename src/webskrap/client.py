@@ -25,7 +25,14 @@ from playwright.async_api import Browser, BrowserContext, FloatRect, Page
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import BrowserProfile, FetchResult, ResourcePolicy, SessionConfig, WaitUntil
+from webskrap.models import (
+    BrowserProfile,
+    FetchResult,
+    Link,
+    ResourcePolicy,
+    SessionConfig,
+    WaitUntil,
+)
 from webskrap.profiles import get_profile
 
 # Cursor jitter below is pixel offsets and sleep durations, never a token,
@@ -34,6 +41,28 @@ from webskrap.profiles import get_profile
 # the millisecond sleeps between mouse moves, and it keeps the module free of
 # predictable-RNG calls that a security scanner would have to be told to ignore.
 uniform = SystemRandom().uniform
+
+# Collects every anchor's resolved absolute URL once, in document order, and
+# returns the first ``max`` of them plus the unique total. Deduplicating in the
+# page keeps a nav bar repeated in a footer from filling the whole budget, and
+# `a.href` (not getAttribute) resolves relative paths against the final URL.
+_LINKS_SCRIPT = """(max) => {
+  const seen = new Set();
+  const links = [];
+  for (const anchor of document.querySelectorAll('a[href]')) {
+    const href = anchor.href;
+    if (!href || href.startsWith('javascript:') || seen.has(href)) continue;
+    seen.add(href);
+    links.push({
+      href,
+      text: (anchor.innerText || anchor.textContent || '')
+        .replace(/\\s+/g, ' ')
+        .trim()
+        .slice(0, 120),
+    });
+  }
+  return { links: links.slice(0, Math.max(0, max)), total: links.length };
+}"""
 
 
 def _async_playwright(driver: str):
@@ -152,6 +181,8 @@ class WebSkrapSession:
         screenshot: bool | str | Path = False,
         timeout_ms: float | None = None,
         text_only: bool = False,
+        include_links: bool = False,
+        max_links: int = 50,
     ) -> FetchResult:
         """Open ``url`` in a new page, read it, and close the page.
 
@@ -168,6 +199,11 @@ class WebSkrapSession:
                 destination you control.
             timeout_ms: Navigation timeout; defaults to the config's.
             text_only: Return visible body text instead of page HTML.
+            include_links: Also collect the page's outbound links. Off by
+                default because a link-heavy page costs more to return than the
+                caller may want.
+            max_links: How many links to keep. ``FetchResult.links_total``
+                reports how many there were before the cap.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
@@ -194,6 +230,10 @@ class WebSkrapSession:
                 declined = await self.decline_cookies(page, timeout_ms=budget)
             title = await page.title()
             text = await page.locator("body").inner_text() if text_only else await page.content()
+            links, links_total = await _collect_links(
+                page,
+                max_links if include_links and self.config.java_script_enabled else None,
+            )
             screenshot_path = await _maybe_screenshot(page, screenshot)
             cookies = [dict(cookie) for cookie in await self.context.cookies()]
             elapsed_ms = (time.perf_counter() - started) * 1000
@@ -211,6 +251,8 @@ class WebSkrapSession:
                 timings={"elapsed_ms": elapsed_ms},
                 screenshot_path=screenshot_path,
                 cookie_notice_declined=declined,
+                links=links,
+                links_total=links_total,
             )
         finally:
             await page.close()
@@ -473,6 +515,8 @@ class WebSkrapClient:
         screenshot: bool | str | Path = False,
         timeout_ms: float | None = None,
         text_only: bool = False,
+        include_links: bool = False,
+        max_links: int = 50,
     ) -> FetchResult:
         """Fetch one URL in a throwaway session.
 
@@ -488,6 +532,8 @@ class WebSkrapClient:
             screenshot: True or a path to write a full-page PNG.
             timeout_ms: Navigation timeout override.
             text_only: Return visible body text instead of page HTML.
+            include_links: Also collect the page's outbound links.
+            max_links: How many links to keep.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`.
@@ -504,6 +550,8 @@ class WebSkrapClient:
                 screenshot=screenshot,
                 timeout_ms=timeout_ms,
                 text_only=text_only,
+                include_links=include_links,
+                max_links=max_links,
             )
         finally:
             await session.close()
@@ -757,3 +805,16 @@ async def _maybe_screenshot(page: Page, screenshot: bool | str | Path) -> Path |
     path.parent.mkdir(parents=True, exist_ok=True)
     await page.screenshot(path=str(path), full_page=True)
     return path
+
+
+async def _collect_links(page: Page, max_links: int | None) -> tuple[list[Link], int]:
+    """Return ``page``'s outbound links and how many there were before the cap.
+
+    ``max_links`` of None means the caller did not ask for links, or JavaScript
+    is disabled for this session and the script could not run; both return an
+    empty list and a zero total rather than failing the fetch.
+    """
+    if max_links is None:
+        return [], 0
+    collected = await page.evaluate(_LINKS_SCRIPT, max_links)
+    return [Link(**link) for link in collected["links"]], int(collected["total"])
