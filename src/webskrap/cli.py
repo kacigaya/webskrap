@@ -21,7 +21,8 @@ from rich.console import Console
 from rich.table import Table
 
 from webskrap.browser_cli import browser_app
-from webskrap.client import WebSkrapClient, browser_doctor
+from webskrap.client import WebSkrapClient
+from webskrap.diagnostics import diagnose
 from webskrap.models import (
     FetchResult,
     ResourcePolicy,
@@ -127,8 +128,8 @@ def doctor_command(
         raise typer.Exit(code=1)
 
 
-async def _doctor() -> dict[str, object]:
-    return await browser_doctor()
+async def _doctor() -> dict[str, Any]:
+    return await diagnose()
 
 
 @app.command("fetch")
@@ -487,12 +488,31 @@ def _print_install_result(results: list[InstallResult]) -> None:
             console.print(str(result["message"]))
 
 
-def _print_doctor_result(result: dict[str, object]) -> None:
+def _print_doctor_result(result: dict[str, Any]) -> None:
     message = str(result["message"])
     if result["ok"]:
         console.print(f"[green]{message}[/green]")
-        return
-    console.print("[yellow]Patchright is unavailable.[/yellow]")
-    console.print(message)
-    if hint := result.get("hint"):
-        console.print(str(hint))
+    else:
+        console.print("[yellow]Patchright is unavailable.[/yellow]")
+        console.print(message)
+        if hint := result.get("hint"):
+            console.print(str(hint))
+    _print_doctor_details(result)
+
+
+def _print_doctor_details(result: dict[str, Any]) -> None:
+    """Print the surrounding facts, skipping any a caller stubbed out."""
+    if versions := result.get("versions"):
+        installed = ", ".join(f"{name} {value or 'missing'}" for name, value in versions.items())
+        console.print(f"[bold]Versions:[/bold] {installed}")
+    if executable := result.get("executable_path"):
+        console.print(f"[bold]Chromium:[/bold] {executable}")
+    if paths := result.get("paths"):
+        for label, path in paths.items():
+            console.print(f"[bold]{label}:[/bold] {path}")
+    if environment := result.get("environment"):
+        overrides = {name: value for name, value in environment.items() if value is not None}
+        console.print(f"[bold]Environment:[/bold] {overrides or 'defaults'}")
+    if (sessions := result.get("sessions")) is not None:
+        running = sum(1 for entry in sessions if entry["running"])
+        console.print(f"[bold]Sessions:[/bold] {len(sessions)} ({running} running)")

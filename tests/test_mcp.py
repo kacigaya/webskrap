@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from webskrap import mcp_server
+from webskrap import diagnostics, mcp_server
 from webskrap.client import WebSkrapError
 from webskrap.models import FetchResult, Link
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
@@ -394,3 +394,18 @@ def test_browser_eval_bounds_a_large_result(persistent_session_env: Path) -> Non
         assert len(bounded["result_json"]) == 20
     finally:
         asyncio.run(mcp_server.browser_close())
+
+
+def test_doctor_reports_configuration(monkeypatch: Any, tmp_path: Path) -> None:
+    async def fake_doctor() -> dict[str, Any]:
+        return {"ok": True, "message": "ready", "channel": "chrome"}
+
+    monkeypatch.setattr(diagnostics, "browser_doctor", fake_doctor)
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    report = asyncio.run(mcp_server.doctor())
+
+    assert report["ok"] is True
+    assert report["versions"]["webskrap"]
+    assert report["paths"]["sessions_root"] == str(tmp_path)
+    assert report["sessions"] == []

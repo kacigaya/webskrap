@@ -450,3 +450,41 @@ def test_fetch_json_pages_through_text(monkeypatch: Any) -> None:
     assert payload["text"] == ">abcd"
     assert payload["text_offset"] == 5
     assert payload["next_text_offset"] == 10
+
+
+def test_doctor_human_prints_the_surrounding_facts(monkeypatch: Any) -> None:
+    async def fake_doctor() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "message": "ready",
+            "executable_path": "/browsers/chrome",
+            "versions": {"webskrap": "2.0.0", "patchright": None},
+            "paths": {"output_root": "/tmp/out"},
+            "environment": {"WEBSKRAP_OUTPUT_DIR": "/tmp/out", "WEBSKRAP_BROWSER_DIR": None},
+            "sessions": [{"session": "shop", "running": True}],
+        }
+
+    monkeypatch.setattr(cli, "_doctor", fake_doctor)
+
+    result = runner.invoke(cli.app, ["doctor"])
+
+    assert result.exit_code == 0, result.output
+    assert "webskrap 2.0.0" in result.output
+    # A driver that is not installed is named rather than silently omitted.
+    assert "patchright missing" in result.output
+    assert "/browsers/chrome" in result.output
+    assert "1 (1 running)" in result.output
+    # Only the overrides actually set are shown.
+    assert "WEBSKRAP_BROWSER_DIR" not in result.output
+
+
+def test_doctor_human_still_works_without_the_extra_sections(monkeypatch: Any) -> None:
+    async def fake_doctor() -> dict[str, Any]:
+        return {"ok": False, "message": "did not launch", "hint": "Run: webskrap install"}
+
+    monkeypatch.setattr(cli, "_doctor", fake_doctor)
+
+    result = runner.invoke(cli.app, ["doctor"])
+
+    assert result.exit_code == 1
+    assert "did not launch" in result.output
