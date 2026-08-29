@@ -98,6 +98,13 @@ account can plant anything there, which is as far as a local Python library can
 reasonably close it. A root you point at a world-writable directory is outside
 that guarantee.
 
+`stealth_fetch` applies the same trust-boundary rule to persistent browser
+profiles. Its `user_data_dir` is relative to `~/.webskrap/profiles` by default;
+set `WEBSKRAP_MCP_PROFILE_DIR` to move that root. Absolute paths, `..`
+traversal, the root itself, and symlinks resolving outside it are rejected.
+This restriction applies only to MCP tool input. The Python API continues to
+accept caller-chosen profile paths.
+
 ### Proxy credentials
 
 `ProxyConfig` holds proxy usernames and passwords in memory and passes them to

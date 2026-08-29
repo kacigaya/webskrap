@@ -106,6 +106,12 @@ Patchright options:
 }
 ```
 
+When `user_data_dir` is set, it must be relative to
+`~/.webskrap/profiles`. Set `WEBSKRAP_MCP_PROFILE_DIR` in the MCP server
+environment to move that root. Absolute paths, `..` traversal, and symlinks
+resolving outside the root are rejected. This confinement applies only to MCP
+tool input; Python callers can still choose any `SessionConfig.user_data_dir`.
+
 ## Interactive browser tools
 
 The `browser_*` tools drive the same persistent sessions as
@@ -202,7 +208,7 @@ native browser controls you need:
   "url": "https://example.com",
   "channel": "chrome",
   "headless": true,
-  "user_data_dir": ".webskrap/headless-profile",
+  "user_data_dir": "headless-profile",
   "mask_headless_user_agent": true,
   "patchright_context_profile": true,
   "webrtc_ip_handling_policy": "disable_non_proxied_udp"
