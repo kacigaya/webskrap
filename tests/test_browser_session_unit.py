@@ -231,3 +231,23 @@ def test_create_session_dir_rejects_traversal(
 
     assert not (tmp_path / "browser").exists()
     assert not (tmp_path / "evil").exists()
+
+
+def test_session_dir_rejects_symlink_without_touching_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "browser"
+    target = tmp_path / "target"
+    root.mkdir()
+    target.mkdir()
+    marker = target / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    (root / "default").symlink_to(target, target_is_directory=True)
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(root))
+
+    with pytest.raises(WebSkrapError, match="session directory must not be a symlink"):
+        browser_session.create_session_dir("default")
+    with pytest.raises(WebSkrapError, match="session directory must not be a symlink"):
+        browser_session.close_session("default", delete_data=True)
+
+    assert marker.read_text(encoding="utf-8") == "keep"

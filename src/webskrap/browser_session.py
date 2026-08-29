@@ -96,7 +96,8 @@ def session_dir(name: str) -> Path:
 
     Raises:
         WebSkrapError: If ``name`` is ``.`` or ``..``, or contains characters
-            other than letters, digits, ``.``, ``_`` or ``-``.
+            other than letters, digits, ``.``, ``_`` or ``-``, or if its
+            directory is a symlink.
     """
     # Session names become directory names, so reject path separators and
     # anything else that could escape the sessions root.
@@ -106,7 +107,11 @@ def session_dir(name: str) -> Path:
             "but not '.' or '..'"
         )
         raise WebSkrapError(msg)
-    return sessions_root() / name
+    directory = sessions_root() / name
+    if directory.is_symlink():
+        msg = f"session directory must not be a symlink: {directory}"
+        raise WebSkrapError(msg)
+    return directory
 
 
 def create_session_dir(name: str) -> Path:
