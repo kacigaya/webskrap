@@ -373,3 +373,47 @@ def test_wait_fails_when_the_condition_never_holds(persistent_session_env: Path)
         assert "Timeout" in result.output
     finally:
         runner.invoke(cli.app, ["browser", "close"], env=env)
+
+
+@pytest.mark.browser
+def test_snapshot_and_eval_are_bounded(persistent_session_env: Path) -> None:
+    env = _env(persistent_session_env)
+    assert runner.invoke(cli.app, ["browser", "open", INTERACTIVE_PAGE], env=env).exit_code == 0
+    try:
+        clipped = runner.invoke(
+            cli.app,
+            ["browser", "snapshot", "--max-chars", "12", "--format", "json"],
+            env=env,
+        )
+        assert clipped.exit_code == 0, clipped.output
+        head = json.loads(clipped.output)
+        assert len(head["snapshot"]) == 12
+        assert head["snapshot_truncated"] is True
+
+        rest = runner.invoke(
+            cli.app,
+            [
+                "browser",
+                "snapshot",
+                "--offset",
+                str(head["next_snapshot_offset"]),
+                "--format",
+                "json",
+            ],
+            env=env,
+        )
+        assert rest.exit_code == 0, rest.output
+        assert json.loads(rest.output)["next_snapshot_offset"] is None
+
+        bounded = runner.invoke(
+            cli.app,
+            ["browser", "eval", "'x'.repeat(500)", "--max-chars", "20", "--format", "json"],
+            env=env,
+        )
+        assert bounded.exit_code == 0, bounded.output
+        payload = json.loads(bounded.output)
+        assert payload["result"] is None
+        assert payload["result_truncated"] is True
+        assert payload["result_length"] == 502
+    finally:
+        runner.invoke(cli.app, ["browser", "close"], env=env)

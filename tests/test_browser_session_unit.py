@@ -391,3 +391,49 @@ def test_wait_condition_names_the_single_condition(kwargs: dict[str, str], expec
         )
         == expected
     )
+
+
+def test_shape_snapshot_pages_through_the_tree() -> None:
+    payload = {"url": "https://example.test", "title": "t", "snapshot": "0123456789"}
+
+    first = browser_session.shape_snapshot(payload, 4)
+    assert first["snapshot"] == "0123"
+    assert first["snapshot_length"] == 10
+    assert first["snapshot_truncated"] is True
+    assert first["next_snapshot_offset"] == 4
+    # The page state travels with every window, not just the first.
+    assert first["title"] == "t"
+
+    last = browser_session.shape_snapshot(payload, 100, 4)
+    assert last["snapshot"] == "456789"
+    assert last["snapshot_truncated"] is False
+    assert last["next_snapshot_offset"] is None
+
+
+def test_shape_eval_result_returns_small_values_untouched() -> None:
+    assert browser_session.shape_eval_result({"a": 1}, 100) == {
+        "result": {"a": 1},
+        "result_length": 8,
+        "result_truncated": False,
+    }
+
+
+def test_shape_eval_result_clips_a_large_value_to_encoded_json() -> None:
+    payload = browser_session.shape_eval_result("x" * 500, 20)
+
+    assert payload["result"] is None
+    assert payload["result_truncated"] is True
+    assert payload["result_length"] == 502
+    assert payload["result_json"] == '"' + "x" * 19
+
+
+def test_shape_eval_result_distinguishes_null_from_truncation() -> None:
+    # A null result and a clipped one both carry result=None, so only
+    # result_truncated tells them apart.
+    assert browser_session.shape_eval_result(None, 100)["result_truncated"] is False
+
+
+def test_shape_eval_result_encodes_values_json_cannot_represent() -> None:
+    payload = browser_session.shape_eval_result({"n": float("inf")}, 100)
+
+    assert payload["result_truncated"] is False
