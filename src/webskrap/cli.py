@@ -166,6 +166,14 @@ def fetch_command(
         int,
         typer.Option("--max-chars", min=0, help="Maximum JSON text characters."),
     ] = 20_000,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+            help="Start JSON text at this character; pass back next_text_offset to continue.",
+        ),
+    ] = 0,
     stdout: Annotated[
         bool,
         typer.Option("--stdout", help="Write fetched content to stdout."),
@@ -255,6 +263,7 @@ def fetch_command(
             output=output,
             output_format=output_format,
             max_chars=max_chars,
+            offset=offset,
             stdout=stdout,
             text_only=text_only,
             quiet=quiet,
@@ -282,6 +291,7 @@ async def _fetch(
     output: Path | None,
     output_format: str,
     max_chars: int,
+    offset: int,
     stdout: bool,
     text_only: bool,
     quiet: bool,
@@ -329,7 +339,7 @@ async def _fetch(
         output.write_text(result.text, encoding="utf-8")
 
     if parsed_output_format == "json":
-        _print_json(shape_fetch_result(result, max_chars))
+        _print_json(shape_fetch_result(result, max_chars, offset))
         return
 
     if stdout:

@@ -280,3 +280,26 @@ def test_browser_mcp_lifecycle(monkeypatch: Any, persistent_session_env: Path) -
     assert closed["closed"] == [{"session": "default", "deleted_data": False}]
     with pytest.raises(WebSkrapError, match="not open"):
         asyncio.run(mcp_server.browser_snapshot())
+
+
+def test_fetch_pages_through_text_with_offset(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    first = asyncio.run(mcp_server.fetch("https://example.test", max_chars=5))
+    assert first["text"] == "Reada"
+    assert first["next_text_offset"] == 5
+
+    rest = asyncio.run(
+        mcp_server.fetch("https://example.test", max_chars=5, offset=first["next_text_offset"])
+    )
+    assert rest["text"] == "ble b"
+
+
+def test_stealth_fetch_accepts_an_offset(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.stealth_fetch("https://example.test", max_chars=4, offset=9))
+
+    assert result["text"] == "body"
+    assert result["text_offset"] == 9
+    assert result["next_text_offset"] is None
