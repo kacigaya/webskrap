@@ -7,12 +7,14 @@ from pydantic import ValidationError
 
 from webskrap import (
     BrowserProfile,
+    FetchResult,
     ProxyConfig,
     ResourcePolicy,
     SessionConfig,
     Viewport,
     WebRtcIPHandlingPolicy,
 )
+from webskrap.models import TextWindow, shape_fetch_result, text_window
 
 
 def test_profile_generates_context_options() -> None:
@@ -372,3 +374,52 @@ def test_profile_user_agent_reaches_context_options() -> None:
 
 def test_slow_mo_reaches_launch_options() -> None:
     assert SessionConfig(slow_mo_ms=50).launch_options()["slow_mo"] == 50
+
+
+def test_text_window_reports_the_next_offset() -> None:
+    window = text_window("abcdef", 2)
+
+    assert window == TextWindow(text="ab", length=6, offset=0, truncated=True, next_offset=2)
+
+
+def test_text_window_finishes_without_a_next_offset() -> None:
+    window = text_window("abcdef", 2, 4)
+
+    assert window.text == "ef"
+    assert window.truncated is False
+    assert window.next_offset is None
+
+
+def test_text_window_clamps_instead_of_rejecting() -> None:
+    assert text_window("abcdef", 2, 99).text == ""
+    assert text_window("abcdef", -5).text == ""
+    assert text_window("abcdef", 100).text == "abcdef"
+
+
+def test_shape_fetch_result_pages_through_a_long_body() -> None:
+    result = FetchResult(
+        url="https://example.test",
+        final_url="https://example.test",
+        status=200,
+        ok=True,
+        headers={},
+        text="0123456789",
+        title="t",
+        cookies=[],
+        timings={"elapsed_ms": 1.0},
+    )
+
+    first = shape_fetch_result(result, 4)
+    assert first["text"] == "0123"
+    assert first["text_offset"] == 0
+    assert first["text_truncated"] is True
+    assert first["next_text_offset"] == 4
+
+    second = shape_fetch_result(result, 4, first["next_text_offset"])
+    assert second["text"] == "4567"
+    assert second["next_text_offset"] == 8
+
+    last = shape_fetch_result(result, 4, second["next_text_offset"])
+    assert last["text"] == "89"
+    assert last["text_truncated"] is False
+    assert last["next_text_offset"] is None

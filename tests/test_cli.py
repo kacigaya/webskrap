@@ -69,7 +69,9 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
         "headers": {"content-type": "text/html"},
         "text": "<html",
         "text_length": 19,
+        "text_offset": 0,
         "text_truncated": True,
+        "next_text_offset": 5,
         "elapsed_ms": 12.3,
         "cookie_notice_declined": None,
     }

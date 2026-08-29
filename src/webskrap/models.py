@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -424,16 +424,64 @@ class FetchResult(BaseModel):
     cookie_notice_declined: str | None = None
 
 
-def shape_fetch_result(result: FetchResult, max_chars: int) -> dict[str, Any]:
+class TextWindow(NamedTuple):
+    """One bounded slice of a longer string, plus how to ask for the next.
+
+    Attributes:
+        text: The slice itself.
+        length: Length of the whole string the slice came from.
+        offset: Index the slice starts at.
+        truncated: True when text remains after the slice.
+        next_offset: Offset to pass back for the following slice, or None at
+            the end. A caller reads a long page by following this until it is
+            None, instead of re-fetching with a larger limit.
+    """
+
+    text: str
+    length: int
+    offset: int
+    truncated: bool
+    next_offset: int | None
+
+
+def text_window(text: str, max_chars: int, offset: int = 0) -> TextWindow:
+    """Return the ``max_chars`` characters of ``text`` starting at ``offset``.
+
+    Both arguments are clamped rather than rejected: a negative limit reads as
+    0, and an offset past the end yields an empty, non-truncated window. This
+    is the paging behavior behind every bounded ``text`` and ``snapshot`` field
+    the CLI and MCP tools return. A limit of 0 consumes nothing, so
+    ``next_offset`` repeats ``offset`` rather than advancing.
+
+    Args:
+        text: The full string to slice.
+        max_chars: Maximum characters to return.
+        offset: Index to start at.
+    """
+    length = len(text)
+    limit = max(0, max_chars)
+    start = min(max(0, offset), length)
+    end = min(start + limit, length)
+    truncated = end < length
+    return TextWindow(
+        text=text[start:end],
+        length=length,
+        offset=start,
+        truncated=truncated,
+        next_offset=end if truncated else None,
+    )
+
+
+def shape_fetch_result(result: FetchResult, max_chars: int, offset: int = 0) -> dict[str, Any]:
     """Flatten a result into the JSON payload the CLI and MCP tools return.
 
-    Text is truncated to ``max_chars`` (negative values are treated as 0) with
-    ``text_length`` and ``text_truncated`` reporting what was cut, so a caller
-    can tell a short page from a clipped one. Cookies and headers-heavy fields
-    are left out.
+    Text is windowed to ``max_chars`` characters from ``offset``.
+    ``text_length``, ``text_offset`` and ``text_truncated`` report what was cut,
+    and ``next_text_offset`` is what to pass back for the rest, so a clipped
+    page can be read through rather than fetched again. Cookies and
+    headers-heavy fields are left out.
     """
-    limit = max(0, max_chars)
-    text = result.text or ""
+    window = text_window(result.text or "", max_chars, offset)
     return {
         "url": result.url,
         "final_url": result.final_url,
@@ -441,9 +489,11 @@ def shape_fetch_result(result: FetchResult, max_chars: int) -> dict[str, Any]:
         "ok": result.ok,
         "title": result.title,
         "headers": result.headers,
-        "text": text[:limit],
-        "text_length": len(text),
-        "text_truncated": len(text) > limit,
+        "text": window.text,
+        "text_length": window.length,
+        "text_offset": window.offset,
+        "text_truncated": window.truncated,
+        "next_text_offset": window.next_offset,
         "elapsed_ms": round(result.timings.get("elapsed_ms", 0.0), 1),
         "cookie_notice_declined": result.cookie_notice_declined,
     }

@@ -44,6 +44,7 @@ async def fetch(
     resource_policy: str = "all",
     timeout_ms: float = 60_000,
     max_chars: int = 20_000,
+    offset: int = 0,
     text_only: bool = True,
     decline_cookies: bool = True,
 ) -> dict[str, Any]:
@@ -65,6 +66,9 @@ async def fetch(
         resource_policy: all, lite (block images/fonts/media), or documents.
         timeout_ms: Navigation timeout in milliseconds.
         max_chars: Maximum characters of page text to return.
+        offset: Character index to start the returned text at. Pass back the
+            result's next_text_offset to read a long page in windows instead of
+            fetching it again with a bigger max_chars.
         text_only: Return clean visible text (default) instead of raw HTML.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
@@ -86,7 +90,7 @@ async def fetch(
             timeout_ms=timeout_ms,
             text_only=text_only,
         )
-    return shape_fetch_result(result, max_chars)
+    return shape_fetch_result(result, max_chars, offset)
 
 
 @mcp.tool()
@@ -102,6 +106,7 @@ async def stealth_fetch(
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
     max_chars: int = 20_000,
+    offset: int = 0,
     text_only: bool = True,
     decline_cookies: bool = True,
 ) -> dict[str, Any]:
@@ -126,6 +131,8 @@ async def stealth_fetch(
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
         max_chars: Maximum characters of page text to return.
+        offset: Character index to start the returned text at; pass back
+            next_text_offset to continue.
         text_only: Return clean visible text (default) instead of raw HTML.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
@@ -150,7 +157,7 @@ async def stealth_fetch(
             timeout_ms=timeout_ms,
             text_only=text_only,
         )
-    return shape_fetch_result(result, max_chars)
+    return shape_fetch_result(result, max_chars, offset)
 
 
 @mcp.tool()
