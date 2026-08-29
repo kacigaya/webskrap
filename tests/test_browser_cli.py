@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from webskrap import browser_session, cli
+from webskrap.errors import EXIT_CODES, RECOVERY_HINTS, ErrorCode
 
 runner = CliRunner()
 
@@ -66,7 +67,7 @@ def test_invalid_session_name_is_rejected(tmp_path: Path, session: str) -> None:
         env=_env(tmp_path),
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
     assert "invalid session name" in result.output
 
 
@@ -83,7 +84,7 @@ def test_close_delete_data_rejects_traversal(tmp_path: Path, session: str) -> No
         env={"WEBSKRAP_BROWSER_DIR": str(browser_root)},
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
     assert "invalid session name" in result.output
     assert marker.read_text(encoding="utf-8") == "keep"
 
@@ -91,7 +92,7 @@ def test_close_delete_data_rejects_traversal(tmp_path: Path, session: str) -> No
 def test_action_without_open_session_fails(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["browser", "goto", "https://example.test"], env=_env(tmp_path))
 
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_CODES[ErrorCode.NO_SESSION]
     assert "not open" in result.output
 
 
@@ -102,7 +103,7 @@ def test_corrupt_state_is_treated_as_missing(tmp_path: Path) -> None:
 
     result = runner.invoke(cli.app, ["browser", "snapshot"], env=_env(tmp_path))
 
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_CODES[ErrorCode.NO_SESSION]
     assert "not open" in result.output
 
 
@@ -149,7 +150,7 @@ def test_close_all_and_list_ignore_non_session_directories(tmp_path: Path) -> No
 def test_close_unknown_session_fails(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["browser", "close", "-s", "ghost"], env=_env(tmp_path))
 
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_CODES[ErrorCode.NO_SESSION]
     assert "not open" in result.output
 
 
@@ -192,7 +193,7 @@ def test_element_commands_validate_arity_before_connecting(
 ) -> None:
     result = runner.invoke(cli.app, command, env=_env(tmp_path))
 
-    assert result.exit_code == 1
+    assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
     assert message in result.output
 
 
@@ -287,7 +288,7 @@ def test_browser_session_lifecycle(persistent_session_env: Path) -> None:
     assert closed.exit_code == 0, closed.output
 
     after = runner.invoke(cli.app, ["browser", "snapshot"], env=env)
-    assert after.exit_code == 1
+    assert after.exit_code == EXIT_CODES[ErrorCode.NO_SESSION]
     assert "not open" in after.output
 
 
@@ -305,7 +306,7 @@ DEFERRED_PAGE = (
 def test_wait_requires_exactly_one_condition(tmp_path: Path) -> None:
     result = runner.invoke(cli.app, ["browser", "wait"], env=_env(tmp_path))
 
-    assert result.exit_code != 0
+    assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
     assert "exactly one of" in result.output
 
 
@@ -369,7 +370,7 @@ def test_wait_fails_when_the_condition_never_holds(persistent_session_env: Path)
             env=env,
         )
 
-        assert result.exit_code != 0
+        assert result.exit_code == EXIT_CODES[ErrorCode.TIMEOUT]
         assert "Timeout" in result.output
     finally:
         runner.invoke(cli.app, ["browser", "close"], env=env)
@@ -417,3 +418,33 @@ def test_snapshot_and_eval_are_bounded(persistent_session_env: Path) -> None:
         assert payload["result_length"] == 502
     finally:
         runner.invoke(cli.app, ["browser", "close"], env=env)
+
+
+def test_browser_json_failure_is_a_parseable_envelope(tmp_path: Path) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["browser", "snapshot", "--format", "json"],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == EXIT_CODES[ErrorCode.NO_SESSION]
+    payload = json.loads(result.output)
+    assert payload == {
+        "ok": False,
+        "error": "session 'default' is not open. Run: webskrap browser open",
+        "code": "no_session",
+        "hint": RECOVERY_HINTS[ErrorCode.NO_SESSION],
+    }
+
+
+def test_browser_json_failure_before_connecting_is_also_an_envelope(tmp_path: Path) -> None:
+    # Argument validation happens before the browser is touched; it must use
+    # the same envelope as a failure that reached the page.
+    result = runner.invoke(
+        cli.app,
+        ["browser", "fill", "e1", "--format", "json"],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
+    assert json.loads(result.output)["code"] == "usage"
