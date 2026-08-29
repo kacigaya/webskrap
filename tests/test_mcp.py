@@ -409,3 +409,21 @@ def test_doctor_reports_configuration(monkeypatch: Any, tmp_path: Path) -> None:
     assert report["versions"]["webskrap"]
     assert report["paths"]["sessions_root"] == str(tmp_path)
     assert report["sessions"] == []
+
+
+def test_server_instructions_carry_the_tool_choice_rules() -> None:
+    instructions = mcp_server.mcp.instructions or ""
+
+    # The rule an agent most needs before its first call, and the two limits it
+    # otherwise discovers by wasting a call.
+    assert "Prefer it over fetch" in instructions
+    assert "no web search tool" in instructions
+    assert "one page per session" in instructions
+    assert "next_text_offset" in instructions
+
+
+def test_server_instructions_stay_short_enough_to_ship_in_a_system_prompt() -> None:
+    # These are prepended to a client's context on every session, so they are
+    # budgeted rather than allowed to grow into a manual. SKILL.md is where the
+    # long form lives.
+    assert len(mcp_server.mcp.instructions or "") < 3_000

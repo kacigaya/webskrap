@@ -35,7 +35,48 @@ except ImportError as exc:  # pragma: no cover - optional dependency
     msg = "the MCP server requires mcp. Run: pip install webskrap"
     raise WebSkrapError(msg) from exc
 
-mcp = FastMCP("webskrap")
+INSTRUCTIONS = """WebSkrap drives a real Chromium (Patchright stealth build) so pages \
+that block plain HTTP clients still load.
+
+Choosing a tool
+- One page, nothing to remember afterwards: stealth_fetch. Prefer it over fetch.
+- fetch: the same stealth path with fewer knobs, when the defaults are enough.
+- Anything needing state across calls (clicking, forms, logins, multi-step flows):
+  browser_open, then browser_snapshot / browser_interact / browser_wait_for /
+  browser_eval, then browser_close.
+- Do not open a browser session to read a single page, and do not re-fetch a page
+  repeatedly to drive one flow.
+
+There is no web search tool. WebSkrap loads URLs you already have; find them with a
+search tool elsewhere.
+
+Working in a session
+- Headless only over MCP, one page per session, no tabs.
+- browser_snapshot returns [ref=eN] handles describing that snapshot only. After the
+  DOM changes, snapshot again before using a ref.
+- After an interaction that loads or reveals something, browser_wait_for is the right
+  next call, not another snapshot.
+
+Cost
+- max_chars defaults to 20000 characters, roughly 5k tokens. Start lower and page with
+  the returned next_text_offset / next_snapshot_offset.
+- resource_policy="lite" skips images, fonts and media.
+- text_only stays True unless you actually need markup.
+- Lower browser_snapshot's depth before raising its max_chars.
+- In browser_eval, return the value you want, not document.body.innerHTML.
+
+Failures
+Every error names a code and what to do: no_session (browser_open first), stale_ref
+(snapshot again), timeout (raise timeout_ms, or wait for a weaker load state),
+browser_launch (run `webskrap install`; on Linux ARM64 pass channel="chromium"),
+path_rejected (paths are relative to a confined root). Call doctor when an error does
+not explain itself.
+
+Writes are confined: screenshots to ./webskrap-output, persistent profiles under
+~/.webskrap/profiles. Do not attempt CAPTCHA solving or login-wall bypass.
+"""
+
+mcp = FastMCP("webskrap", instructions=INSTRUCTIONS)
 
 
 @mcp.tool()
