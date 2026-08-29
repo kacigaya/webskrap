@@ -27,6 +27,8 @@ history, so they summarize each release rather than list every change.
 - Concurrent open and close operations for the same persistent browser session
   are serialized across processes. This prevents duplicate Chromium launches,
   stale state files, and a close racing with an in-progress open.
+- `webskrap fetch --text-only --output` labels the saved artifact as text in
+  its human summary instead of calling it HTML.
 
 ### Added
 

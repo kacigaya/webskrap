@@ -347,7 +347,8 @@ async def _fetch(
     if result.screenshot_path:
         console.print(f"[bold]Screenshot:[/bold] {result.screenshot_path}")
     if output:
-        console.print(f"[bold]HTML:[/bold] {output}")
+        label = "Text" if text_only else "HTML"
+        console.print(f"[bold]{label}:[/bold] {output}")
 
 
 LAUNCH_FAILURE_MARKERS = (

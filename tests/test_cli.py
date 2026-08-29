@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -179,6 +180,26 @@ def test_fetch_stdout_text_only_prints_readable_text(monkeypatch: Any) -> None:
     assert result.exit_code == 0, result.output
     assert result.output == "Readable body"
     assert _FakeClient.calls[0]["text_only"] is True
+
+
+def test_fetch_text_output_summary_uses_text_label(monkeypatch: Any, tmp_path: Path) -> None:
+    _fake_client(monkeypatch)
+    output = tmp_path / "page.txt"
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "fetch",
+            "https://example.test",
+            "--text-only",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert f"Text: {output}" in result.output
+    assert "HTML:" not in result.output
 
 
 def test_fetch_quiet_suppresses_human_summary(monkeypatch: Any) -> None:
