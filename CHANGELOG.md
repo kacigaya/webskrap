@@ -32,6 +32,7 @@ history, so they summarize each release rather than list every change.
 
 ### Added
 
+- Python 3.14 support and CI coverage.
 - Dependabot configuration for the Python, GitHub Actions, and docs-site
   dependency trees, grouped so routine minor and patch bumps arrive as one
   weekly pull request and majors stay separate. `pip-audit` already failed CI

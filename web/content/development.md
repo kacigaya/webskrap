@@ -34,7 +34,7 @@ enforces:
 pytest -q -m "not live" --cov=webskrap --cov-report=term-missing --cov-fail-under=85
 ```
 
-CI runs the suite on Python 3.11, 3.12 and 3.13, type-checks `src/webskrap`
+CI runs the suite on Python 3.11, 3.12, 3.13 and 3.14, type-checks `src/webskrap`
 with Pyright in `standard` mode, audits dependencies with `pip-audit`, and
 validates package metadata with `twine check` before any release upload.
 [CONTRIBUTING.md](https://github.com/kacigaya/webskrap/blob/main/CONTRIBUTING.md)

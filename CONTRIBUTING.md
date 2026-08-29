@@ -5,7 +5,7 @@ what a reviewable pull request looks like.
 
 ## Requirements
 
-- Python 3.11, 3.12, or 3.13 (CI runs all three).
+- Python 3.11, 3.12, 3.13, or 3.14 (CI runs all four).
 - [uv](https://docs.astral.sh/uv/) for environments and dependencies.
 - A Chromium build for browser tests, installed via `webskrap install`.
 
