@@ -12,10 +12,10 @@ from __future__ import annotations
 import asyncio
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for browser installs, no shell
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, TypedDict
+from typing import Annotated, Any, NoReturn, Protocol, TypedDict
 
-import click
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -573,13 +573,64 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _describe_parameter(parameter: click.Parameter) -> dict[str, Any]:
+class _ParameterType(Protocol):
+    """The part of a Click parameter type :func:`describe_command` reads."""
+
+    @property
+    def name(self) -> str: ...
+
+
+class _Parameter(Protocol):
+    """The part of a Click parameter :func:`describe_command` reads."""
+
+    @property
+    def name(self) -> str | None: ...
+
+    @property
+    def opts(self) -> Sequence[str]: ...
+
+    @property
+    def param_type_name(self) -> str: ...
+
+    @property
+    def required(self) -> bool: ...
+
+    @property
+    def multiple(self) -> bool: ...
+
+    @property
+    def default(self) -> object: ...
+
+    @property
+    def type(self) -> _ParameterType: ...
+
+
+class _Command(Protocol):
+    """The part of a Click command :func:`describe_command` reads.
+
+    A structural type, not ``click.Command``: Typer builds its commands from
+    its own Click-compatible classes, which are private and do not subclass
+    Click's. Naming what is actually read keeps the check honest without
+    reaching into ``typer._click``. Every member is read-only, which is both
+    true of this use and what keeps the sequences covariant.
+    """
+
+    @property
+    def help(self) -> str | None: ...
+
+    @property
+    def short_help(self) -> str | None: ...
+
+    @property
+    def params(self) -> Sequence[_Parameter]: ...
+
+
+def _describe_parameter(parameter: _Parameter) -> dict[str, Any]:
     """Describe one option or positional argument.
 
-    Read structurally rather than by class: Typer builds its commands from its
-    own Click-compatible classes, which do not subclass ``click.Argument`` or
-    ``click.Option``, so an isinstance check would silently call every
-    parameter an option.
+    ``param_type_name`` is read rather than the parameter's class, because
+    Typer's parameters do not subclass ``click.Argument`` or ``click.Option``
+    and an isinstance check would silently call every parameter an option.
     """
     choices = getattr(parameter.type, "choices", None)
     return {
@@ -595,7 +646,7 @@ def _describe_parameter(parameter: click.Parameter) -> dict[str, Any]:
     }
 
 
-def describe_command(command: click.Command, name: str) -> dict[str, Any]:
+def describe_command(command: _Command, name: str) -> dict[str, Any]:
     """Describe ``command`` and, for a group, everything under it.
 
     The auto-generated ``--help`` flag is left out: it is on every command and
