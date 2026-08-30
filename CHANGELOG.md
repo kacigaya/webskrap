@@ -9,6 +9,16 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-30
+
+### Changed
+
+- Reworked the WebSkrap skill around task routing, shared-code boundaries, and
+  public-contract checks. Detailed Python, CLI, and MCP guidance now lives in
+  focused references that agents load only when needed.
+- Updated documentation tests to verify skill routing and source-of-truth links
+  without duplicating dynamic command, tool, environment, and error catalogs.
+
 ## [2.0.0] - 2026-08-30
 
 Everything in this release is aimed at one problem: an agent driving WebSkrap
