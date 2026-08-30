@@ -9,6 +9,71 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-30
+
+Everything in this release is aimed at one problem: an agent driving WebSkrap
+had to learn the tool surface by making calls that failed. Failures said what
+broke but not what to do; truncated results were dead ends; and the MCP server
+shipped a dozen tool descriptions with no statement of how they fit together.
+
+### Added
+
+- `webskrap.errors`: an `ErrorCode` for every failure, a fixed recovery hint per
+  code, and a CLI exit status per code. Playwright's own exceptions are
+  classified through the same table, so a caller does not need to know which
+  layer raised.
+- Offset paging for anything that gets truncated. Fetch payloads carry
+  `text_offset` and `next_text_offset`, snapshots carry `snapshot_offset` and
+  `next_snapshot_offset`, and both accept an `offset` to resume from. A clipped
+  result no longer has to be re-fetched with a larger limit.
+- Bounded link extraction (`include_links`, `max_links`, `FetchResult.links`,
+  `links_total`). Hrefs resolve against the final URL; duplicates and
+  `javascript:` targets are dropped. Off by default.
+- A wait primitive: `browser_wait_for` (MCP) and `webskrap browser wait` (CLI),
+  waiting on visible text, absent text, a selector reaching a state, or a load
+  state. Exactly one condition is accepted.
+- MCP server `instructions` stating which tool to use for which goal, the
+  session limits, the cost levers, and that there is no search tool.
+- MCP tool titles and readOnly/destructive/idempotent/openWorld annotations.
+  Interaction tools are marked destructive because a click or an Enter submits
+  forms on sites WebSkrap does not own.
+- MCP resources `webskrap://guide`, `webskrap://profiles` and
+  `webskrap://sessions`, so static facts cost no tool call.
+- `webskrap schema`, describing every command, option, type, choice and default
+  as one JSON document.
+- `webskrap.diagnostics`: `doctor` now also reports installed versions, the
+  Chromium binary in use, the confined roots, which `WEBSKRAP_*` overrides are
+  set, and every session with its running state.
+
+### Changed
+
+- **Breaking.** CLI failures exit with a status per error kind (2 usage,
+  3 timeout, 4 navigation, 5 browser launch, 6 sandbox, 7 no session,
+  8 unreachable session, 9 stale ref, 10 rejected path) instead of always 1. A
+  command that ran to completion and reports a negative result -- `doctor` on a
+  host with no browser -- still exits 1.
+- **Breaking.** CLI failures under `--format json` print
+  `{"ok": false, "error", "code", "hint"}` to stdout instead of Rich markup on
+  stderr, so a parser gets a parseable answer whether or not the command worked.
+- **Breaking.** MCP tool failures carry their code and recovery hint in the
+  message rather than only the first line of the underlying exception.
+- **Breaking.** Fetch payloads gain `text_offset`, `next_text_offset`, `links`,
+  `links_total` and `links_truncated`.
+- **Breaking.** `browser_eval` and `webskrap browser eval` bound their result:
+  past `max_chars` the value is returned as clipped JSON in `result_json` with
+  `result_truncated` set, so one `document.body.innerHTML` cannot flood a
+  caller.
+- **Breaking.** `browser_snapshot` payloads gain `snapshot_length`,
+  `snapshot_offset` and `next_snapshot_offset`.
+- **Breaking.** `browser_doctor` reports `driver`, `channel` and
+  `executable_path`.
+- `WebSkrapError` moved to `webskrap.errors` and accepts an optional code. It is
+  still exported from `webskrap` and still importable from `webskrap.client`.
+- `webskrap browser snapshot` accepts `--max-chars` and `--offset`, matching the
+  MCP tool it had drifted from.
+- SKILL.md is organized around the questions an agent arrives with: which entry
+  point, what comes back, how to keep it small, and what to do about each error.
+
 ## [1.0.2] - 2026-08-29
 
 ### Changed
