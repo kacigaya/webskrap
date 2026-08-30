@@ -521,3 +521,56 @@ def test_fetch_human_failure_prints_the_hint_to_stderr(monkeypatch: Any) -> None
     assert result.exit_code == EXIT_CODES[ErrorCode.TIMEOUT]
     assert "Timeout 30000ms exceeded" in result.output
     assert "browser_wait_for" in result.output
+
+
+def test_schema_describes_the_whole_command_tree() -> None:
+    result = runner.invoke(cli.app, ["schema"])
+
+    assert result.exit_code == 0, result.output
+    schema = json.loads(result.output)
+    assert schema["name"] == "webskrap"
+    top_level = {command["name"] for command in schema["commands"]}
+    assert {"fetch", "doctor", "install", "profiles", "browser", "schema"} <= top_level
+
+    browser = next(command for command in schema["commands"] if command["name"] == "browser")
+    assert {"open", "close", "snapshot", "wait", "eval"} <= {
+        command["name"] for command in browser["commands"]
+    }
+
+
+def test_schema_reports_kinds_defaults_and_choices() -> None:
+    schema = json.loads(runner.invoke(cli.app, ["schema"]).output)
+    fetch = next(command for command in schema["commands"] if command["name"] == "fetch")
+    parameters = {parameter["name"]: parameter for parameter in fetch["parameters"]}
+
+    # Typer's parameter classes do not subclass click's, so a wrong reading
+    # here would report the positional URL as an option.
+    assert parameters["url"]["kind"] == "argument"
+    assert parameters["url"]["required"] is True
+    assert parameters["profile"]["kind"] == "option"
+    assert parameters["profile"]["default"] == "desktop-chrome"
+    assert parameters["resource_policy"]["choices"] == ["all", "lite", "documents"]
+    assert parameters["launch_args"]["multiple"] is True
+
+
+def test_schema_omits_the_help_flag_every_command_has() -> None:
+    schema = json.loads(runner.invoke(cli.app, ["schema"]).output)
+
+    for command in schema["commands"]:
+        assert "help" not in {parameter["name"] for parameter in command["parameters"]}
+
+
+def test_schema_defaults_are_json_serializable() -> None:
+    # A schema that cannot round-trip is not a schema; enum and Path defaults
+    # are the ones that would break it.
+    schema = json.loads(runner.invoke(cli.app, ["schema"]).output)
+
+    assert json.loads(json.dumps(schema)) == schema
+
+
+def test_schema_human_format_lists_commands() -> None:
+    result = runner.invoke(cli.app, ["schema", "--format", "human"])
+
+    assert result.exit_code == 0, result.output
+    assert "WebSkrap Commands" in result.output
+    assert "browser open" in "".join(result.output.split("\n"))

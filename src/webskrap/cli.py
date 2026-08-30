@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Annotated, Any, NoReturn, TypedDict
 
+import click
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -114,6 +115,43 @@ def profiles_command(
         )
 
     console.print(table)
+
+
+@app.command("schema")
+def schema_command(
+    format: Annotated[
+        str,
+        typer.Option("--format", help="Output format: json or human."),
+    ] = "json",
+) -> None:
+    """Describe every command, option and default as one JSON document.
+
+    Written for callers that generate invocations rather than read help text:
+    one payload instead of a `--help` run per subcommand.
+    """
+    output_format = parse_output_format(format)
+    schema = describe_command(typer.main.get_command(app), "webskrap")
+    if output_format == "json":
+        print_json(schema)
+        return
+
+    table = Table(title="WebSkrap Commands")
+    table.add_column("Command")
+    table.add_column("Summary")
+    for path, summary in _walk_command_summaries(schema, ()):
+        table.add_row(path, summary)
+    console.print(table)
+
+
+def _walk_command_summaries(
+    schema: dict[str, Any], prefix: tuple[str, ...]
+) -> list[tuple[str, str]]:
+    """Flatten a schema into ``("browser open", "Start ...")`` rows."""
+    path = (*prefix, str(schema["name"]))
+    rows = [] if schema.get("commands") else [(" ".join(path[1:]) or path[0], str(schema["help"]))]
+    for child in schema.get("commands", []):
+        rows.extend(_walk_command_summaries(child, path))
+    return rows
 
 
 @app.command("doctor")
@@ -520,3 +558,60 @@ def _print_doctor_details(result: dict[str, Any]) -> None:
     if (sessions := result.get("sessions")) is not None:
         running = sum(1 for entry in sessions if entry["running"])
         console.print(f"[bold]Sessions:[/bold] {len(sessions)} ({running} running)")
+
+
+def _json_safe(value: Any) -> Any:
+    """Reduce a click default to something json.dumps accepts.
+
+    Defaults reach here as enum members, Paths and tuples as often as as plain
+    scalars, and a schema that cannot be serialized is no schema at all.
+    """
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, list | tuple):
+        return [_json_safe(item) for item in value]
+    return str(value)
+
+
+def _describe_parameter(parameter: click.Parameter) -> dict[str, Any]:
+    """Describe one option or positional argument.
+
+    Read structurally rather than by class: Typer builds its commands from its
+    own Click-compatible classes, which do not subclass ``click.Argument`` or
+    ``click.Option``, so an isinstance check would silently call every
+    parameter an option.
+    """
+    choices = getattr(parameter.type, "choices", None)
+    return {
+        "name": parameter.name,
+        "kind": parameter.param_type_name,
+        "flags": list(parameter.opts),
+        "type": parameter.type.name,
+        "choices": [str(choice) for choice in choices] if choices else None,
+        "required": bool(parameter.required),
+        "multiple": bool(parameter.multiple),
+        "default": _json_safe(parameter.default),
+        "help": getattr(parameter, "help", None),
+    }
+
+
+def describe_command(command: click.Command, name: str) -> dict[str, Any]:
+    """Describe ``command`` and, for a group, everything under it.
+
+    The auto-generated ``--help`` flag is left out: it is on every command and
+    tells a caller nothing about that one.
+    """
+    described: dict[str, Any] = {
+        "name": name,
+        "help": (command.help or command.short_help or "").strip().split("\n\n")[0].strip(),
+        "parameters": [
+            _describe_parameter(parameter)
+            for parameter in command.params
+            if parameter.name != "help"
+        ],
+    }
+    if children := getattr(command, "commands", None):
+        described["commands"] = [
+            describe_command(child, child_name) for child_name, child in sorted(children.items())
+        ]
+    return described
