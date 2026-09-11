@@ -51,6 +51,22 @@ webskrap fetch https://example.com --format json --max-chars 12000
 JSON output includes `url`, `final_url`, `status`, `ok`, `title`, `headers`,
 `text`, `text_length`, `text_truncated`, and `elapsed_ms`.
 
+## Search the web
+
+```bash
+webskrap search "example domain"
+webskrap search "example domain" --engine bing --max-results 5 --format json
+```
+
+Loads DuckDuckGo's HTML results page (`--engine ddg`, the default) or Bing's
+through the same stealth browser and prints each hit's title, URL, and snippet
+with the engine's click-tracking unwrapped. Google is not offered. JSON output
+includes `query`, `engine`, `hits`, `hits_total`, and `hits_truncated`.
+
+A `blocked` failure (exit 11) means the engine served a bot challenge instead
+of results. Switch engine, reuse `--user-data-dir`, or change exit IP; nothing
+is retried and no CAPTCHA is solved.
+
 ## Text and stdout
 
 Print raw fetched content to stdout:

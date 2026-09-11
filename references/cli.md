@@ -24,6 +24,17 @@ webskrap fetch https://example.com --quiet --output page.html
 Use `--offset` with the previous result's next offset to continue reading a
 long page. Do not re-fetch with an ever larger limit.
 
+`webskrap search` loads a results page through the same stealth path and
+prints the organic hits. `--engine` is `ddg` (default) or `bing`.
+
+```bash
+webskrap search "example domain"
+webskrap search "example domain" --engine bing --max-results 5 --format json
+```
+
+A `blocked` failure (exit 11) means the engine served a bot challenge; switch
+engine, reuse `--user-data-dir`, or change exit IP instead of retrying.
+
 On Linux ARM64, the `chrome` channel may be unavailable. `fetch` retries a
 failed launch with bundled Chromium. Pass `--channel chromium` to avoid the
 first attempt.

@@ -6,7 +6,8 @@
 
 <p align="center">
   <strong>Async-first Python scraping on Playwright, with persistent sessions,
-  resource routing, Patchright stealth, a CLI, and an MCP server for agents.</strong>
+  resource routing, Patchright stealth, web search, a CLI, and an MCP server
+  for agents.</strong>
 </p>
 
 <p align="center">
@@ -40,6 +41,28 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+## Search
+
+Searches load the engine's own results page in the same stealth browser and
+return the organic hits with click-tracking unwrapped. DuckDuckGo's HTML
+endpoint is the default; Bing is the alternative. Google is not offered.
+
+```python
+async with WebSkrapClient() as client:
+    result = await client.search("example domain", max_results=5)
+    for hit in result.hits:
+        print(hit.title, hit.url)
+```
+
+```bash
+webskrap search "example domain" --engine ddg --max-results 10 --format json
+```
+
+An engine that distrusts the exit address serves a bot challenge; that is
+reported as a `blocked` error, not as zero hits. Switch engine, reuse a
+persistent profile, or change exit IP. Nothing is retried and no CAPTCHA is
+solved.
 
 ## Documentation
 

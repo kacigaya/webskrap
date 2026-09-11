@@ -13,9 +13,11 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 
 | Symbol | Description |
 | --- | --- |
-| `WebSkrapClient` | Owns the Playwright lifecycle. Use it as an async context manager and call `fetch()` for one-shot requests or `session()` for persistent contexts. |
-| `WebSkrapSession` | A persistent browser context kept open across requests. Exposes `fetch()`, `human_click()`, `decline_cookies()`, and the underlying Playwright `context`. |
+| `WebSkrapClient` | Owns the Playwright lifecycle. Use it as an async context manager and call `fetch()` or `search()` for one-shot requests or `session()` for persistent contexts. |
+| `WebSkrapSession` | A persistent browser context kept open across requests. Exposes `fetch()`, `search()`, `human_click()`, `decline_cookies()`, and the underlying Playwright `context`. |
 | `FetchResult` | Result of a fetch: `url`, `final_url`, `status`, `ok`, `headers`, `text`, `title`, `cookies`, `timings`, `screenshot_path`, and `cookie_notice_declined`. |
+| `SearchResult` | Result of a search: `query`, `engine`, the results page's `url`, `final_url`, `status`, `ok`, the capped `hits`, `hits_total`, `timings`, and `cookie_notice_declined`. |
+| `SearchHit` | One organic result: `title`, `url` (click-tracking unwrapped), and `snippet`. |
 | `decline_cookies(page)` | Click the reject control of a cookie consent notice on any Playwright page. Returns the strategy that clicked, or `None`. |
 
 ## Configuration
@@ -25,6 +27,7 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 | `SessionConfig` | Per-session or per-call settings: driver, channel, headless, timeouts, `user_data_dir`, `storage_state`, `resource_policy`, `decline_cookies`, `decline_cookies_timeout_ms`, proxy, and stealth options. |
 | `ProxyConfig` | Proxy `server` with optional `username` and `password`. |
 | `ResourcePolicy` | Request-blocking preset: `ALL`, `LITE`, or `DOCUMENTS`. |
+| `SearchEngine` | Results page a search loads: `DDG` (DuckDuckGo HTML, default) or `BING`. Google is not offered. |
 | `WebRtcIPHandlingPolicy` | Allowed WebRTC ICE policy values: `default`, `default_public_and_private_interfaces`, `default_public_interface_only`, `disable_non_proxied_udp`. |
 
 ## CLI and MCP internals

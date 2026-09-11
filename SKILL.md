@@ -1,6 +1,6 @@
 ---
 name: webskrap
-description: Use when writing, debugging, documenting, or reviewing Python scraping and browser automation code with WebSkrap. Not for ordinary HTTP clients or web search.
+description: Use when writing, debugging, documenting, or reviewing Python scraping, web search, and browser automation code with WebSkrap. Not for ordinary HTTP clients or search APIs.
 ---
 
 # WebSkrap
@@ -9,7 +9,9 @@ WebSkrap is an async Python scraping package built on Playwright, with
 Patchright support for stealth-oriented browser sessions. The Python API,
 `webskrap` CLI, and `webskrap-mcp` server share core behavior.
 
-WebSkrap loads known URLs. It does not search the web.
+WebSkrap loads known URLs and searches for unknown ones by loading DuckDuckGo
+or Bing's results page in the same browser. It calls no search API and it
+does not offer Google.
 
 ## Workflow
 
@@ -28,6 +30,7 @@ WebSkrap loads known URLs. It does not search the web.
 | Task | Implementation | Tests and contracts |
 | --- | --- | --- |
 | Fetching, sessions, links, or screenshots | `src/webskrap/client.py`, `src/webskrap/models.py` | `tests/test_client_unit.py`, `tests/test_models.py` |
+| Search engines, redirect unwrapping, or results parsing | `src/webskrap/search.py`, `src/webskrap/models.py` | `tests/test_search.py` and its fixtures under `tests/fixtures/search/` |
 | Parsing | `src/webskrap/parsing.py` | `tests/test_parsing.py` |
 | Errors, hints, or exit statuses | `src/webskrap/errors.py`, `src/webskrap/cli_output.py` | `tests/test_errors.py`, CLI and MCP callers |
 | Main CLI commands | `src/webskrap/cli.py` | `tests/test_cli.py`, `tests/test_diagnostics.py` |
@@ -39,14 +42,17 @@ WebSkrap loads known URLs. It does not search the web.
 | Documentation and examples | `README.md`, `src/webskrap/guide.md` | `tests/test_docs.py`, current CLI help, public Python exports |
 
 Search for every constructor, serializer, command, and schema that uses a
-changed model or field. Fetch behavior crosses Python, CLI, and MCP. Persistent
-browser behavior crosses the browser CLI and MCP.
+changed model or field. Fetch and search behavior cross Python, CLI, and MCP.
+Persistent browser behavior crosses the browser CLI and MCP. Engine markup
+lives only in `src/webskrap/search.py`; when an engine changes, refresh its
+fixture and fix that one extractor.
 
 ## Choose the public surface
 
 | Need | Python | CLI | MCP |
 | --- | --- | --- | --- |
 | Fetch one known URL | `client.fetch()` | `webskrap fetch` | `stealth_fetch` |
+| Find URLs for a query | `client.search()` | `webskrap search` | `search` |
 | Preserve cookies or storage | `client.session()` | `webskrap browser open` | `browser_open` |
 | Click, fill, wait, or run a flow | Playwright page from a session | `webskrap browser` | `browser_interact` and related tools |
 | Diagnose installation | Inspect raised error | `webskrap doctor` | `doctor` |

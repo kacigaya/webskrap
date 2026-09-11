@@ -30,5 +30,7 @@ def test_skill_routes_dynamic_contracts_to_their_sources() -> None:
         assert f"`{source}`" in SKILL
 
 
-def test_skill_states_that_there_is_no_search() -> None:
-    assert "does not search the web" in SKILL
+def test_skill_states_how_search_works_and_what_it_excludes() -> None:
+    assert "calls no search API" in SKILL
+    assert "does not offer Google" in SKILL
+    assert "`src/webskrap/search.py`" in SKILL

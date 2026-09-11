@@ -9,6 +9,9 @@ boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
 - `stealth_fetch` is the default one-shot fetch. It exposes fingerprint,
   WebRTC, user-agent, and persistent-profile controls.
 - `fetch` is the simpler one-shot form.
+- `search` finds URLs for a query on DuckDuckGo (default) or Bing, with the
+  same stealth controls as `stealth_fetch`. Google is not offered. Follow up
+  with `stealth_fetch` on the hits worth reading.
 - `doctor` reports readiness, versions, paths, environment overrides, and
   persistent sessions.
 - `browser_open` and the other `browser_*` tools drive a stateful flow.

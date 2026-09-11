@@ -59,6 +59,27 @@ Links resolve against the final URL. Duplicate and `javascript:` targets are
 dropped. `links_total` is the count before the cap. A session with
 `java_script_enabled=False` cannot collect links.
 
+## Search
+
+`client.search(query, engine=..., max_results=...)` and
+`session.search(...)` load the engine's results page through the same fetch
+path, so `SessionConfig` proxy, consent, and profile settings apply. Engines
+are `SearchEngine.DDG` (default) and `SearchEngine.BING`; Google is not
+offered.
+
+```python
+from webskrap import SearchEngine, WebSkrapClient
+
+async with WebSkrapClient() as client:
+    result = await client.search("example domain", engine=SearchEngine.BING, max_results=5)
+for hit in result.hits:
+    print(hit.title, hit.url, hit.snippet)
+```
+
+`SearchResult.hits` is capped by `max_results`; `hits_total` counts the page.
+Destinations are unwrapped from the engine's click redirects and deduplicated.
+A bot challenge raises `WebSkrapError` with code `blocked`; nothing is retried.
+
 ## Detection-sensitive pages
 
 Headed Patchright is the strongest available mode for strict detection
