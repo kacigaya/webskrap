@@ -53,8 +53,8 @@ class _FakeClient:
         return SearchResult(
             query=query,
             engine=kwargs["engine"],
-            url="https://html.duckduckgo.com/html/?q=example+domain",
-            final_url="https://html.duckduckgo.com/html/?q=example+domain",
+            url="https://www.bing.com/search?q=example+domain",
+            final_url="https://www.bing.com/search?q=example+domain",
             status=200,
             ok=True,
             hits=hits[: kwargs["max_results"]],
@@ -163,7 +163,7 @@ def test_search_is_registered_read_only_and_open_world() -> None:
     assert tool.annotations.readOnlyHint is True
     assert tool.annotations.openWorldHint is True
     assert tool.inputSchema["required"] == ["query"]
-    assert tool.inputSchema["properties"]["engine"]["default"] == "ddg"
+    assert tool.inputSchema["properties"]["engine"]["default"] == "bing"
     assert tool.inputSchema["properties"]["max_results"]["default"] == 10
 
 
@@ -174,9 +174,9 @@ def test_search_returns_the_shared_payload(monkeypatch: Any) -> None:
 
     assert result == {
         "query": "example domain",
-        "engine": "ddg",
-        "url": "https://html.duckduckgo.com/html/?q=example+domain",
-        "final_url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "engine": "bing",
+        "url": "https://www.bing.com/search?q=example+domain",
+        "final_url": "https://www.bing.com/search?q=example+domain",
         "status": 200,
         "ok": True,
         "hits": [
@@ -197,20 +197,20 @@ def test_search_uses_the_stealth_fetch_configuration(monkeypatch: Any, tmp_path:
     asyncio.run(
         mcp_server.search(
             "example domain",
-            engine="bing",
-            user_data_dir="search/bing",
+            engine="ddg",
+            user_data_dir="search/ddg",
             webrtc_ip_handling_policy="disable_non_proxied_udp",
             decline_cookies=False,
         )
     )
 
     call = _FakeClient.calls[0]
-    assert call["engine"] is SearchEngine.BING
+    assert call["engine"] is SearchEngine.DDG
     config = call["config"]
     assert config.driver == "patchright"
     assert config.channel == "chrome"
     assert config.headless is True
-    assert config.user_data_dir == root / "search" / "bing"
+    assert config.user_data_dir == root / "search" / "ddg"
     assert config.webrtc_ip_handling_policy == "disable_non_proxied_udp"
     assert config.decline_cookies is False
 

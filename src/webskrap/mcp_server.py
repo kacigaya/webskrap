@@ -79,7 +79,7 @@ Choosing a tool
 - Do not open a browser session to read a single page, and do not re-fetch a page
   repeatedly to drive one flow.
 
-- search: find URLs for a query (DuckDuckGo by default, engine="bing" as fallback),
+- search: find URLs for a query (Bing by default, engine="ddg" for DuckDuckGo),
   then stealth_fetch the ones worth reading. No Google. A `blocked` error means the
   engine served a bot challenge: switch engine or exit IP, do not retry as is.
 
@@ -256,7 +256,7 @@ async def stealth_fetch(
 @mcp.tool(title="Search the web", annotations=_hints(read_only=True, open_world=True))
 async def search(
     query: str,
-    engine: str = "ddg",
+    engine: str = "bing",
     max_results: int = 10,
     profile: str = "desktop-chrome",
     channel: str = "chrome",
@@ -281,7 +281,7 @@ async def search(
 
     Args:
         query: Words to search for.
-        engine: ddg (DuckDuckGo, default) or bing.
+        engine: bing (default) or ddg (DuckDuckGo).
         max_results: How many hits to return; hits_total counts them all.
         profile: Bundled profile applied when patchright_context_profile is set.
         channel: Browser channel, e.g. chrome. Use chromium on Linux ARM64.
