@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from webskrap.models import ResourcePolicy
+from webskrap.models import ResourcePolicy, SearchEngine
 from webskrap.parsing import (
+    parse_engine,
     parse_resource_policy,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
@@ -44,6 +45,23 @@ def test_parse_resource_policy(value: str, expected: ResourcePolicy) -> None:
 def test_parse_resource_policy_rejects_other_values(value: str) -> None:
     with pytest.raises(ValueError, match="resource_policy must be one of"):
         parse_resource_policy(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("ddg", SearchEngine.DDG, id="ddg"),
+        pytest.param("bing", SearchEngine.BING, id="bing"),
+    ],
+)
+def test_parse_engine(value: str, expected: SearchEngine) -> None:
+    assert parse_engine(value) is expected
+
+
+@pytest.mark.parametrize("value", ["google", "", "DDG", "duckduckgo"])
+def test_parse_engine_rejects_other_values(value: str) -> None:
+    with pytest.raises(ValueError, match="engine must be one of: ddg, bing"):
+        parse_engine(value)
 
 
 @pytest.mark.parametrize(

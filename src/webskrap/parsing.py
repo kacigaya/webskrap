@@ -13,6 +13,7 @@ from webskrap.models import (
     ElementState,
     LoadState,
     ResourcePolicy,
+    SearchEngine,
     WaitUntil,
     WebRtcIPHandlingPolicy,
 )
@@ -76,6 +77,19 @@ def parse_resource_policy(value: str) -> ResourcePolicy:
     except ValueError as exc:
         allowed = ", ".join(p.value for p in ResourcePolicy)
         raise ValueError(f"resource_policy must be one of: {allowed}") from exc
+
+
+def parse_engine(value: str) -> SearchEngine:
+    """Parse a :class:`~webskrap.models.SearchEngine` name.
+
+    Raises:
+        ValueError: If ``value`` is not a known engine.
+    """
+    try:
+        return SearchEngine(value)
+    except ValueError as exc:
+        allowed = ", ".join(engine.value for engine in SearchEngine)
+        raise ValueError(f"engine must be one of: {allowed}") from exc
 
 
 def parse_webrtc_ip_handling_policy(value: str | None) -> WebRtcIPHandlingPolicy | None:
