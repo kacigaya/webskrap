@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-09-11
+
 ### Changed
 
 - Bing is the default search engine for the Python API, CLI, and MCP tool
