@@ -4,6 +4,7 @@
 
 | Goal | Call |
 | --- | --- |
+| Find URLs for a topic | `search`, then `stealth_fetch` the hits worth reading |
 | Read one page | `stealth_fetch` (preferred) or `fetch` |
 | Read a page and follow its links | `stealth_fetch` with `include_links=true` |
 | Read a long page | `stealth_fetch`, then repeat with `offset=next_text_offset` |
@@ -15,7 +16,12 @@ fingerprint, WebRTC, user-agent and persistent-profile control, and is the one
 to reach for by default. Neither keeps cookies between calls: that is what a
 browser session is for.
 
-There is no search tool. WebSkrap loads URLs; finding them is somebody else's job.
+`search` loads DuckDuckGo's HTML results page (`engine="ddg"`, the default) or
+Bing's (`engine="bing"`) in the same stealth browser and returns the organic
+hits with their click-tracking unwrapped. Google is not offered. Some exit
+addresses get a bot challenge from DuckDuckGo; that is the `blocked` error, and
+the answer is the other engine, a persistent `user_data_dir`, or another exit
+IP, not a retry.
 
 ## A session, start to finish
 
@@ -34,6 +40,7 @@ One page per session, no tabs, headless only over MCP.
 | Tool | Keys |
 | --- | --- |
 | `fetch`, `stealth_fetch` | `url`, `final_url`, `status`, `ok`, `title`, `headers`, `text`, `text_length`, `text_offset`, `text_truncated`, `next_text_offset`, `links`, `links_total`, `links_truncated`, `elapsed_ms`, `cookie_notice_declined` |
+| `search` | `query`, `engine`, `url`, `final_url`, `status`, `ok`, `hits` (`title`, `url`, `snippet`), `hits_total`, `hits_truncated`, `elapsed_ms`, `cookie_notice_declined` |
 | `browser_open` | `session`, `pid`, `port`, `reused`, `chromium_sandbox` |
 | `browser_goto` | `status`, `url`, `title` |
 | `browser_snapshot` | `url`, `title`, `snapshot`, `snapshot_length`, `snapshot_offset`, `snapshot_truncated`, `next_snapshot_offset` |
@@ -54,6 +61,7 @@ One page per session, no tabs, headless only over MCP.
 | `text_only=true` | Readable text instead of markup. On by default. |
 | `depth` | Shallower snapshot beats a clipped deep one. |
 | `include_links=false` | On by default; links cost more than the text on some pages. |
+| `max_results` | A search returns 10 hits by default; `hits_total` says how many the page had. |
 
 ## When it fails
 

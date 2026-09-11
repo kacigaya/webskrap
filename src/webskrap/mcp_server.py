@@ -20,9 +20,10 @@ from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
-from webskrap.models import SessionConfig, shape_fetch_result
+from webskrap.models import SessionConfig, shape_fetch_result, shape_search_result
 from webskrap.parsing import (
     parse_element_state,
+    parse_engine,
     parse_load_state,
     parse_resource_policy,
     parse_wait_until,
@@ -78,8 +79,9 @@ Choosing a tool
 - Do not open a browser session to read a single page, and do not re-fetch a page
   repeatedly to drive one flow.
 
-There is no web search tool. WebSkrap loads URLs you already have; find them with a
-search tool elsewhere.
+- search: find URLs for a query (DuckDuckGo by default, engine="bing" as fallback),
+  then stealth_fetch the ones worth reading. No Google. A `blocked` error means the
+  engine served a bot challenge: switch engine or exit IP, do not retry as is.
 
 Working in a session
 - Headless only over MCP, one page per session, no tabs.
@@ -249,6 +251,75 @@ async def stealth_fetch(
                 max_links=max_links,
             )
         return shape_fetch_result(result, max_chars, offset)
+
+
+@mcp.tool(title="Search the web", annotations=_hints(read_only=True, open_world=True))
+async def search(
+    query: str,
+    engine: str = "ddg",
+    max_results: int = 10,
+    profile: str = "desktop-chrome",
+    channel: str = "chrome",
+    headless: bool = True,
+    user_data_dir: str | None = None,
+    patchright_context_profile: bool = False,
+    reduce_fingerprint_surface: bool = False,
+    mask_headless_user_agent: bool = False,
+    webrtc_ip_handling_policy: str | None = None,
+    timeout_ms: float = 90_000,
+    decline_cookies: bool = True,
+) -> dict[str, Any]:
+    """Search the web and return the organic hits as title, url and snippet.
+
+    Loads the engine's own results page with the stealth driver, so the same
+    channel, profile and persistent-profile controls as stealth_fetch apply.
+    Returns destinations with the engine's click-tracking unwrapped; follow up
+    with stealth_fetch on the ones worth reading. Google is not offered. A
+    `blocked` error means the engine served a bot challenge instead of
+    results: try the other engine, a persistent user_data_dir, or another
+    exit IP rather than retrying unchanged.
+
+    Args:
+        query: Words to search for.
+        engine: ddg (DuckDuckGo, default) or bing.
+        max_results: How many hits to return; hits_total counts them all.
+        profile: Bundled profile applied when patchright_context_profile is set.
+        channel: Browser channel, e.g. chrome. Use chromium on Linux ARM64.
+        headless: Run headless. Headed is more robust against detection.
+        user_data_dir: Persistent browser profile directory, relative to the
+            MCP profile root.
+        patchright_context_profile: Apply locale/timezone/media profile metadata.
+        reduce_fingerprint_surface: Disable WebGL and canvas readback via flags.
+        mask_headless_user_agent: Rewrite the HeadlessChrome UA token to Chrome.
+        webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
+            disable_non_proxied_udp.
+        timeout_ms: Navigation timeout in milliseconds.
+        decline_cookies: Click a cookie consent notice's reject button on the
+            results page before reading it.
+    """
+    with _tool_errors():
+        config = SessionConfig(
+            driver="patchright",
+            channel=channel,
+            headless=headless,
+            user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
+            navigation_timeout_ms=timeout_ms,
+            patchright_context_profile=patchright_context_profile,
+            reduce_fingerprint_surface=reduce_fingerprint_surface,
+            mask_headless_user_agent=mask_headless_user_agent,
+            webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+            decline_cookies=decline_cookies,
+        )
+        async with WebSkrapClient() as client:
+            result = await client.search(
+                query,
+                engine=parse_engine(engine),
+                max_results=max_results,
+                profile=get_profile(profile),
+                config=config,
+                timeout_ms=timeout_ms,
+            )
+        return shape_search_result(result)
 
 
 @mcp.tool(title="Check WebSkrap readiness", annotations=_hints(read_only=True, idempotent=True))

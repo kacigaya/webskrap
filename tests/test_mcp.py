@@ -10,7 +10,7 @@ import pytest
 from webskrap import diagnostics, mcp_server
 from webskrap.client import WebSkrapError
 from webskrap.errors import RECOVERY_HINTS, ErrorCode
-from webskrap.models import FetchResult, Link
+from webskrap.models import FetchResult, Link, SearchEngine, SearchHit, SearchResult
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 from webskrap.profiles import list_profiles
 
@@ -41,6 +41,24 @@ class _FakeClient:
             text=text,
             title="Example",
             cookies=[],
+            timings={"elapsed_ms": 12.34},
+        )
+
+    async def search(self, query: str, **kwargs: Any) -> SearchResult:
+        self.calls.append({"query": query, **kwargs})
+        hits = [
+            SearchHit(title="Example Domain", url="https://example.com/", snippet="Illustrative."),
+            SearchHit(title="IANA", url="https://www.iana.org/help/example-domains"),
+        ]
+        return SearchResult(
+            query=query,
+            engine=kwargs["engine"],
+            url="https://html.duckduckgo.com/html/?q=example+domain",
+            final_url="https://html.duckduckgo.com/html/?q=example+domain",
+            status=200,
+            ok=True,
+            hits=hits[: kwargs["max_results"]],
+            hits_total=len(hits),
             timings={"elapsed_ms": 12.34},
         )
 
@@ -134,6 +152,93 @@ def test_stealth_fetch_rejects_profile_symlink_outside_root(
         )
 
     assert _FakeClient.calls == []
+
+
+def test_search_is_registered_read_only_and_open_world() -> None:
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    tool = tools["search"]
+    assert tool.title == "Search the web"
+    assert tool.annotations is not None
+    assert tool.annotations.readOnlyHint is True
+    assert tool.annotations.openWorldHint is True
+    assert tool.inputSchema["required"] == ["query"]
+    assert tool.inputSchema["properties"]["engine"]["default"] == "ddg"
+    assert tool.inputSchema["properties"]["max_results"]["default"] == 10
+
+
+def test_search_returns_the_shared_payload(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.search("example domain", max_results=1))
+
+    assert result == {
+        "query": "example domain",
+        "engine": "ddg",
+        "url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "final_url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "status": 200,
+        "ok": True,
+        "hits": [
+            {"title": "Example Domain", "url": "https://example.com/", "snippet": "Illustrative."}
+        ],
+        "hits_total": 2,
+        "hits_truncated": True,
+        "elapsed_ms": 12.3,
+        "cookie_notice_declined": None,
+    }
+
+
+def test_search_uses_the_stealth_fetch_configuration(monkeypatch: Any, tmp_path: Path) -> None:
+    _fake_client(monkeypatch)
+    root = tmp_path / "profiles"
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(root))
+
+    asyncio.run(
+        mcp_server.search(
+            "example domain",
+            engine="bing",
+            user_data_dir="search/bing",
+            webrtc_ip_handling_policy="disable_non_proxied_udp",
+            decline_cookies=False,
+        )
+    )
+
+    call = _FakeClient.calls[0]
+    assert call["engine"] is SearchEngine.BING
+    config = call["config"]
+    assert config.driver == "patchright"
+    assert config.channel == "chrome"
+    assert config.headless is True
+    assert config.user_data_dir == root / "search" / "bing"
+    assert config.webrtc_ip_handling_policy == "disable_non_proxied_udp"
+    assert config.decline_cookies is False
+
+
+def test_search_rejects_an_unknown_engine(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    with pytest.raises(WebSkrapError) as excinfo:
+        asyncio.run(mcp_server.search("example domain", engine="google"))
+
+    assert excinfo.value.code is ErrorCode.USAGE
+    assert "engine must be one of: ddg, bing" in str(excinfo.value)
+    assert _FakeClient.calls == []
+
+
+def test_search_blocked_failure_carries_its_hint(monkeypatch: Any) -> None:
+    class _BlockedClient(_FakeClient):
+        async def search(self, query: str, **kwargs: Any) -> SearchResult:
+            raise WebSkrapError("ddg answered with a bot challenge", code=ErrorCode.BLOCKED)
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _BlockedClient)
+
+    with pytest.raises(WebSkrapError) as excinfo:
+        asyncio.run(mcp_server.search("example domain"))
+
+    assert excinfo.value.code is ErrorCode.BLOCKED
+    assert "[code: blocked]" in str(excinfo.value)
+    assert RECOVERY_HINTS[ErrorCode.BLOCKED] in str(excinfo.value)
 
 
 def test_browser_tools_are_registered() -> None:
@@ -422,7 +527,8 @@ def test_server_instructions_carry_the_tool_choice_rules() -> None:
     # The rule an agent most needs before its first call, and the two limits it
     # otherwise discovers by wasting a call.
     assert "Prefer it over fetch" in instructions
-    assert "no web search tool" in instructions
+    assert "search: find URLs" in instructions
+    assert "No Google" in instructions
     assert "one page per session" in instructions
     assert "next_text_offset" in instructions
 
@@ -446,7 +552,7 @@ def test_every_tool_declares_a_title_and_annotations() -> None:
 def test_read_only_tools_are_marked_read_only() -> None:
     annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
 
-    for name in ("fetch", "stealth_fetch", "doctor", "browser_snapshot", "browser_list"):
+    for name in ("fetch", "stealth_fetch", "search", "doctor", "browser_snapshot", "browser_list"):
         assert annotations[name].readOnlyHint is True, name
     for name in ("browser_interact", "browser_eval", "browser_close"):
         assert annotations[name].readOnlyHint is False, name
@@ -467,7 +573,7 @@ def test_tools_that_can_lose_data_or_submit_forms_are_marked_destructive() -> No
 def test_tools_that_reach_the_open_web_say_so() -> None:
     annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
 
-    for name in ("fetch", "stealth_fetch", "browser_goto", "browser_interact"):
+    for name in ("fetch", "stealth_fetch", "search", "browser_goto", "browser_interact"):
         assert annotations[name].openWorldHint is True, name
     for name in ("doctor", "browser_list", "browser_snapshot"):
         assert annotations[name].openWorldHint is False, name
