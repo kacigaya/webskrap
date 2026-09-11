@@ -37,6 +37,8 @@ class ErrorCode(StrEnum):
     SANDBOX = "sandbox"
     #: A path was refused by the output or profile confinement rules.
     PATH_REJECTED = "path_rejected"
+    #: The site answered with a bot challenge or CAPTCHA instead of content.
+    BLOCKED = "blocked"
     #: Anything not yet classified.
     INTERNAL = "internal"
 
@@ -73,6 +75,11 @@ RECOVERY_HINTS: dict[ErrorCode, str] = {
         "Paths are confined to a root. Pass a relative path, or move the root with "
         "WEBSKRAP_OUTPUT_DIR / WEBSKRAP_MCP_PROFILE_DIR."
     ),
+    ErrorCode.BLOCKED: (
+        "The site served a bot challenge instead of content. Try another engine or exit IP "
+        "(proxy), reuse a persistent user_data_dir, or run headed. WebSkrap does not solve "
+        "CAPTCHAs."
+    ),
     ErrorCode.INTERNAL: "Unexpected failure. Re-run with `webskrap doctor` to check the install.",
 }
 
@@ -90,6 +97,7 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.SESSION_UNREACHABLE: 8,
     ErrorCode.STALE_REF: 9,
     ErrorCode.PATH_REJECTED: 10,
+    ErrorCode.BLOCKED: 11,
 }
 
 # Lowercased substrings that identify a failure whose raise site did not set a

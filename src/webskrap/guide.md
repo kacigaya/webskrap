@@ -67,6 +67,7 @@ One page per session, no tabs, headless only over MCP.
 | `browser_launch` | Run `webskrap install`; on Linux ARM64 pass `channel="chromium"`. |
 | `sandbox` | Set `WEBSKRAP_CHROMIUM_SANDBOX=0` only where the sandbox cannot start. |
 | `path_rejected` | Paths are relative to a confined root. |
+| `blocked` | The site served a bot challenge. Switch engine or exit IP; no CAPTCHA solving. |
 | `usage` | Re-read the argument's documented values. |
 
 ## Limits

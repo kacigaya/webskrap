@@ -96,6 +96,14 @@ def test_exit_code_maps_the_classification() -> None:
     assert exit_code(WebSkrapError("session 'a' is not open")) == EXIT_CODES[ErrorCode.NO_SESSION]
 
 
+def test_blocked_is_only_ever_tagged_at_the_raise_site() -> None:
+    # A bot challenge is recognised from the page markup, not from an
+    # exception message, so nothing in the message table should claim it.
+    assert classify(WebSkrapError("blocked by a bot challenge")) is ErrorCode.INTERNAL
+    assert classify(WebSkrapError("blocked", code=ErrorCode.BLOCKED)) is ErrorCode.BLOCKED
+    assert exit_code(WebSkrapError("x", code=ErrorCode.BLOCKED)) == 11
+
+
 @pytest.mark.parametrize(
     ("name", "expected"),
     [
