@@ -48,10 +48,9 @@ class ResourcePolicy(StrEnum):
 class SearchEngine(StrEnum):
     """Which search engine's results page a search loads.
 
-    ``DDG`` is DuckDuckGo's no-JavaScript HTML endpoint, the default because it
-    has the simplest markup and no consent wall. ``BING`` is the fallback when
-    DuckDuckGo answers with a bot challenge. Google is absent on purpose: from
-    a fresh headless session it serves a consent wall or a CAPTCHA, and its
+    ``BING`` is the default because DuckDuckGo frequently serves bot challenges.
+    ``DDG`` selects DuckDuckGo's no-JavaScript HTML endpoint. Google is absent
+    on purpose: from a fresh headless session it serves a consent wall or a CAPTCHA, and its
     markup changes too often to keep an extractor honest.
     """
 

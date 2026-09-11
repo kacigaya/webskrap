@@ -311,18 +311,18 @@ def _search_session(page: _SearchPage, **config: object) -> WebSkrapSession:
 
 @pytest.mark.asyncio
 async def test_search_loads_the_results_page_and_caps_the_hits() -> None:
-    page = _SearchPage("ddg.html")
+    page = _SearchPage("bing.html")
 
     result = await _search_session(page).search("example domain", max_results=2)
 
-    assert page.requested == ["https://html.duckduckgo.com/html/?q=example+domain"]
+    assert page.requested == ["https://www.bing.com/search?q=example+domain"]
     # The body wait covers Bing's head-only redirect interstitial; it is on
     # the navigation budget, not the consent one.
     assert page.ready_waits == [SessionConfig().navigation_timeout_ms]
     assert page.closed is True
     assert result.query == "example domain"
     assert "elapsed_ms" in result.timings
-    assert result.engine is SearchEngine.DDG
+    assert result.engine is SearchEngine.BING
     assert result.url == page.requested[0]
     assert result.status == 200
     assert result.ok is True
@@ -330,18 +330,18 @@ async def test_search_loads_the_results_page_and_caps_the_hits() -> None:
         "https://example.com/",
         "https://www.iana.org/help/example-domains",
     ]
-    assert result.hits_total == 4
+    assert result.hits_total == 3
 
 
 @pytest.mark.asyncio
 async def test_search_selects_the_engine() -> None:
-    page = _SearchPage("bing.html")
+    page = _SearchPage("ddg.html")
 
-    result = await _search_session(page).search("example domain", engine=SearchEngine.BING)
+    result = await _search_session(page).search("example domain", engine=SearchEngine.DDG)
 
-    assert page.requested == ["https://www.bing.com/search?q=example+domain"]
-    assert result.engine is SearchEngine.BING
-    assert result.hits_total == 3
+    assert page.requested == ["https://html.duckduckgo.com/html/?q=example+domain"]
+    assert result.engine is SearchEngine.DDG
+    assert result.hits_total == 4
 
 
 @pytest.mark.asyncio
@@ -360,14 +360,14 @@ async def test_search_goes_through_the_consent_path(monkeypatch: pytest.MonkeyPa
 @pytest.mark.asyncio
 async def test_search_reports_a_challenge_page_as_blocked() -> None:
     with pytest.raises(WebSkrapError) as excinfo:
-        await _search_session(_SearchPage("ddg_challenge.html")).search("example domain")
+        await _search_session(_SearchPage("bing_challenge.html")).search("example domain")
 
     assert excinfo.value.code is ErrorCode.BLOCKED
 
 
 @pytest.mark.asyncio
 async def test_search_rejects_a_blank_query_before_opening_a_page() -> None:
-    page = _SearchPage("ddg.html")
+    page = _SearchPage("bing.html")
 
     with pytest.raises(WebSkrapError) as excinfo:
         await _search_session(page).search("   ")
@@ -378,7 +378,7 @@ async def test_search_rejects_a_blank_query_before_opening_a_page() -> None:
 
 @pytest.mark.asyncio
 async def test_search_on_a_closed_session_fails() -> None:
-    session = _search_session(_SearchPage("ddg.html"))
+    session = _search_session(_SearchPage("bing.html"))
     session._closed = True
 
     with pytest.raises(WebSkrapError, match="is closed"):
@@ -387,7 +387,7 @@ async def test_search_on_a_closed_session_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_client_search_uses_a_throwaway_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    page = _SearchPage("ddg.html")
+    page = _SearchPage("bing.html")
     session = _search_session(page)
     closed: list[str] = []
 
@@ -404,7 +404,9 @@ async def test_client_search_uses_a_throwaway_session(monkeypatch: pytest.Monkey
     await client.close()
 
     assert [hit.url for hit in result.hits] == ["https://example.com/"]
-    assert result.hits_total == 4
+    assert result.hits_total == 3
+    assert result.engine is SearchEngine.BING
+    assert page.requested == ["https://www.bing.com/search?q=example+domain"]
     assert closed == [session.name]
     assert client._sessions == {}
 

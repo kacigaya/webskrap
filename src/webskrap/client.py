@@ -270,7 +270,7 @@ class WebSkrapSession:
         self,
         query: str,
         *,
-        engine: SearchEngine = SearchEngine.DDG,
+        engine: SearchEngine = SearchEngine.BING,
         max_results: int = 10,
         timeout_ms: float | None = None,
     ) -> SearchResult:
@@ -644,7 +644,7 @@ class WebSkrapClient:
         self,
         query: str,
         *,
-        engine: SearchEngine = SearchEngine.DDG,
+        engine: SearchEngine = SearchEngine.BING,
         max_results: int = 10,
         profile: str | BrowserProfile | None = None,
         config: SessionConfig | None = None,
