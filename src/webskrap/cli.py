@@ -442,8 +442,8 @@ def search_command(
     query: Annotated[str, typer.Argument(help="Words to search for.")],
     engine: Annotated[
         SearchEngine,
-        typer.Option("--engine", "-e", help="Search engine: ddg (DuckDuckGo) or bing."),
-    ] = SearchEngine.DDG,
+        typer.Option("--engine", "-e", help="Search engine: bing (default) or ddg (DuckDuckGo)."),
+    ] = SearchEngine.BING,
     max_results: Annotated[
         int,
         typer.Option("--max-results", "-n", min=0, help="Maximum hits to return."),
@@ -532,7 +532,7 @@ def search_command(
 ) -> None:
     """Search the web through the stealth browser and list the organic hits.
 
-    Loads DuckDuckGo's HTML results page (or Bing's with --engine bing) and
+    Loads Bing's results page (or DuckDuckGo's HTML page with --engine ddg) and
     prints each hit's title, URL and snippet with the engine's click-tracking
     unwrapped. Google is not offered. A `blocked` failure means the engine
     served a bot challenge: switch engine or exit IP rather than retrying.

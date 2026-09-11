@@ -61,8 +61,8 @@ class _FakeClient:
         return SearchResult(
             query=query,
             engine=kwargs["engine"],
-            url="https://html.duckduckgo.com/html/?q=example+domain",
-            final_url="https://html.duckduckgo.com/html/?q=example+domain",
+            url="https://www.bing.com/search?q=example+domain",
+            final_url="https://www.bing.com/search?q=example+domain",
             status=200,
             ok=True,
             hits=hits[: kwargs["max_results"]],
@@ -565,9 +565,9 @@ def test_search_json_is_the_shared_payload(monkeypatch: Any) -> None:
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {
         "query": "example domain",
-        "engine": "ddg",
-        "url": "https://html.duckduckgo.com/html/?q=example+domain",
-        "final_url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "engine": "bing",
+        "url": "https://www.bing.com/search?q=example+domain",
+        "final_url": "https://www.bing.com/search?q=example+domain",
         "status": 200,
         "ok": True,
         "hits": [
@@ -579,7 +579,7 @@ def test_search_json_is_the_shared_payload(monkeypatch: Any) -> None:
         "cookie_notice_declined": None,
     }
     call = _FakeClient.calls[0]
-    assert call["engine"] is SearchEngine.DDG
+    assert call["engine"] is SearchEngine.BING
     assert call["max_results"] == 1
     config = call["config"]
     assert config.driver == "patchright"
@@ -597,7 +597,7 @@ def test_search_forwards_engine_and_stealth_options(monkeypatch: Any, tmp_path: 
             "search",
             "example domain",
             "--engine",
-            "bing",
+            "ddg",
             "--user-data-dir",
             str(tmp_path / "profile"),
             "--no-decline-cookies",
@@ -612,7 +612,7 @@ def test_search_forwards_engine_and_stealth_options(monkeypatch: Any, tmp_path: 
 
     assert result.exit_code == 0, result.output
     call = _FakeClient.calls[0]
-    assert call["engine"] is SearchEngine.BING
+    assert call["engine"] is SearchEngine.DDG
     config = call["config"]
     assert config.user_data_dir == tmp_path / "profile"
     assert config.decline_cookies is False
@@ -628,7 +628,7 @@ def test_search_human_output_lists_the_hits(monkeypatch: Any) -> None:
 
     assert result.exit_code == 0, result.output
     plain = _plain(result.output)
-    assert "Engine:ddg" in plain
+    assert "Engine:bing" in plain
     assert "Hits:2of2" in plain
     assert "1.ExampleDomain" in plain
     assert "https://example.com/" in plain
