@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-11
+
 ### Added
 
 - Web search. `client.search()` and `session.search()` load DuckDuckGo's
