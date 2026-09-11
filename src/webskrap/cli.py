@@ -18,6 +18,7 @@ from typing import Annotated, Any, NoReturn, Protocol, TypedDict, TypeVar
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from webskrap.browser_cli import browser_app
@@ -424,7 +425,7 @@ async def _fetch(
 
     console.print(f"[bold]Status:[/bold] {result.status}")
     console.print(f"[bold]Final URL:[/bold] {result.final_url}")
-    console.print(f"[bold]Title:[/bold] {result.title}")
+    console.print(f"[bold]Title:[/bold] {escape(result.title)}")
     if result.cookie_notice_declined:
         console.print(f"[bold]Cookie notice:[/bold] declined ({result.cookie_notice_declined})")
     if links:
@@ -621,11 +622,13 @@ async def _search(
     console.print(f"[bold]Hits:[/bold] {len(result.hits)} of {result.hits_total}")
     if result.cookie_notice_declined:
         console.print(f"[bold]Cookie notice:[/bold] declined ({result.cookie_notice_declined})")
+    # Titles and snippets are page-controlled text; escaped so a "[/bold]" in
+    # a result cannot break the render or inject a terminal hyperlink.
     for index, hit in enumerate(result.hits, start=1):
-        console.print(f"\n[bold]{index}. {hit.title}[/bold]")
-        console.print(f"   {hit.url}")
+        console.print(f"\n[bold]{index}. {escape(hit.title)}[/bold]")
+        console.print(f"   {escape(hit.url)}")
         if hit.snippet:
-            console.print(f"   {hit.snippet}")
+            console.print(f"   {escape(hit.snippet)}")
 
 
 LAUNCH_FAILURE_MARKERS = (

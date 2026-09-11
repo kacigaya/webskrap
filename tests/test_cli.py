@@ -636,6 +636,24 @@ def test_search_human_output_lists_the_hits(monkeypatch: Any) -> None:
     assert "2.IANA" in plain
 
 
+def test_search_human_output_does_not_render_page_text_as_markup(monkeypatch: Any) -> None:
+    class _MarkupClient(_FakeClient):
+        async def search(self, query: str, **kwargs: Any) -> SearchResult:
+            result = await super().search(query, **kwargs)
+            result.hits[0].title = "[PDF] Report [/bold] [link=https://evil.test]x[/link]"
+            result.hits[0].snippet = "see [1] and [2]"
+            return result
+
+    monkeypatch.setattr(cli, "WebSkrapClient", _MarkupClient)
+
+    result = runner.invoke(cli.app, ["search", "example domain"])
+
+    assert result.exit_code == 0, result.output
+    plain = _plain(result.output)
+    assert "[PDF]Report[/bold][link=https://evil.test]x[/link]" in plain
+    assert "see[1]and[2]" in plain
+
+
 @pytest.mark.parametrize(
     ("option", "value", "expected"),
     [
