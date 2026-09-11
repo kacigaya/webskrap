@@ -64,7 +64,7 @@ dropped. `links_total` is the count before the cap. A session with
 `client.search(query, engine=..., max_results=...)` and
 `session.search(...)` load the engine's results page through the same fetch
 path, so `SessionConfig` proxy, consent, and profile settings apply. Engines
-are `SearchEngine.DDG` (default) and `SearchEngine.BING`; Google is not
+are `SearchEngine.BING` (default) and `SearchEngine.DDG`; Google is not
 offered.
 
 ```python

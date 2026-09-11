@@ -43,7 +43,7 @@ python -m webskrap.mcp_server
 | --- | --- |
 | `fetch` | Fetch a URL with the Patchright stealth driver (waits for `networkidle`). |
 | `stealth_fetch` | Same stealth driver with finer fingerprint/WebRTC/UA controls. |
-| `search` | Find URLs for a query on DuckDuckGo (default) or Bing, with the `stealth_fetch` stealth controls. |
+| `search` | Find URLs for a query on Bing (default) or DuckDuckGo, with the `stealth_fetch` stealth controls. |
 | `doctor` | Check that Patchright and Chromium can launch. |
 | `browser_open` | Start (or reuse) a persistent headless browser session. |
 | `browser_goto` | Navigate the session's current page. |
@@ -113,7 +113,7 @@ environment to move that root. Absolute paths, `..` traversal, and symlinks
 resolving outside the root are rejected. This confinement applies only to MCP
 tool input; Python callers can still choose any `SessionConfig.user_data_dir`.
 
-`search` takes `query`, `engine` (`ddg` or `bing`), `max_results`, and the
+`search` takes `query`, `engine` (`bing` by default, or `ddg`), `max_results`, and the
 channel, profile, fingerprint and `user_data_dir` arguments `stealth_fetch`
 takes. It returns `hits` (`title`, `url`, `snippet`) with the engine's
 click-tracking unwrapped, plus `hits_total` and `hits_truncated`. Google is

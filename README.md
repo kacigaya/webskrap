@@ -46,8 +46,8 @@ asyncio.run(main())
 
 A search loads the engine's results page in the same stealth browser and
 returns the organic hits. Click-tracking redirects are unwrapped, so each
-`url` is the destination itself. DuckDuckGo's HTML endpoint is the default,
-Bing is the other option, Google is not offered.
+`url` is the destination itself. Bing is the default; use `engine="ddg"` for
+DuckDuckGo's HTML endpoint. Google is not offered.
 
 ```python
 async with WebSkrapClient() as client:

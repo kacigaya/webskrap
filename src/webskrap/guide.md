@@ -16,9 +16,9 @@ fingerprint, WebRTC, user-agent and persistent-profile control, and is the one
 to reach for by default. Neither keeps cookies between calls: that is what a
 browser session is for.
 
-`search` loads DuckDuckGo's HTML results page (`engine="ddg"`, the default) or
-Bing's (`engine="bing"`) in the same stealth browser and returns the organic
-hits with their click-tracking unwrapped. Google is not offered. Some exit
+`search` loads Bing's results page (`engine="bing"`, the default) or
+DuckDuckGo's HTML page (`engine="ddg"`) in the same stealth browser and
+returns the organic hits with their click-tracking unwrapped. Google is not offered. Some exit
 addresses get a bot challenge from DuckDuckGo; that is the `blocked` error, and
 the answer is the other engine, a persistent `user_data_dir`, or another exit
 IP, not a retry.

@@ -27,7 +27,7 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 | `SessionConfig` | Per-session or per-call settings: driver, channel, headless, timeouts, `user_data_dir`, `storage_state`, `resource_policy`, `decline_cookies`, `decline_cookies_timeout_ms`, proxy, and stealth options. |
 | `ProxyConfig` | Proxy `server` with optional `username` and `password`. |
 | `ResourcePolicy` | Request-blocking preset: `ALL`, `LITE`, or `DOCUMENTS`. |
-| `SearchEngine` | Results page a search loads: `DDG` (DuckDuckGo HTML, default) or `BING`. Google is not offered. |
+| `SearchEngine` | Results page a search loads: `BING` (default) or `DDG` (DuckDuckGo HTML). Google is not offered. |
 | `WebRtcIPHandlingPolicy` | Allowed WebRTC ICE policy values: `default`, `default_public_and_private_interfaces`, `default_public_interface_only`, `disable_non_proxied_udp`. |
 
 ## CLI and MCP internals

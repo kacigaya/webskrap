@@ -58,9 +58,9 @@ webskrap search "example domain"
 webskrap search "example domain" --engine bing --max-results 5 --format json
 ```
 
-`search` loads DuckDuckGo's HTML results page (`--engine ddg`, the default)
-or Bing's in the same stealth browser and prints each hit's title, URL and
-snippet. The engine's click-tracking redirect is unwrapped, so the URL is the
+`search` loads Bing's results page (`--engine bing`, the default)
+or DuckDuckGo's HTML page (`--engine ddg`) in the same stealth browser and
+prints each hit's title, URL and snippet. The engine's click-tracking redirect is unwrapped, so the URL is the
 destination. Google is not offered. JSON output carries `query`, `engine`,
 `hits`, `hits_total` and `hits_truncated`.
 

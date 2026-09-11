@@ -25,7 +25,7 @@ Use `--offset` with the previous result's next offset to continue reading a
 long page. Do not re-fetch with an ever larger limit.
 
 `webskrap search` loads a results page through the same stealth path and
-prints the organic hits. `--engine` is `ddg` (default) or `bing`.
+prints the organic hits. `--engine` is `bing` (default) or `ddg`.
 
 ```bash
 webskrap search "example domain"

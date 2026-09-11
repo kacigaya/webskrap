@@ -9,6 +9,12 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Changed
+
+- Bing is the default search engine for the Python API, CLI, and MCP tool
+  because DuckDuckGo frequently serves bot challenges. DuckDuckGo remains
+  available through `engine="ddg"` or `--engine ddg`.
+
 ## [2.1.0] - 2026-09-11
 
 ### Added
