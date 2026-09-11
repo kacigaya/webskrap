@@ -67,7 +67,7 @@ config = SessionConfig(storage_state="state.json")
 Both hold real credentials: cookies, local storage, and any logged-in session
 you established, unencrypted and surviving process exit. Put them somewhere
 only your user can read, and delete them when the work is done. The persistent
-sessions managed by `webskrap browser` do this for you — their directories
+sessions managed by `webskrap browser` do this for you: their directories
 under `~/.webskrap/browser/` are created `0700` on POSIX.
 
 ## Headed debugging

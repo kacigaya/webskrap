@@ -58,14 +58,15 @@ webskrap search "example domain"
 webskrap search "example domain" --engine bing --max-results 5 --format json
 ```
 
-Loads DuckDuckGo's HTML results page (`--engine ddg`, the default) or Bing's
-through the same stealth browser and prints each hit's title, URL, and snippet
-with the engine's click-tracking unwrapped. Google is not offered. JSON output
-includes `query`, `engine`, `hits`, `hits_total`, and `hits_truncated`.
+`search` loads DuckDuckGo's HTML results page (`--engine ddg`, the default)
+or Bing's in the same stealth browser and prints each hit's title, URL and
+snippet. The engine's click-tracking redirect is unwrapped, so the URL is the
+destination. Google is not offered. JSON output carries `query`, `engine`,
+`hits`, `hits_total` and `hits_truncated`.
 
 A `blocked` failure (exit 11) means the engine served a bot challenge instead
-of results. Switch engine, reuse `--user-data-dir`, or change exit IP; nothing
-is retried and no CAPTCHA is solved.
+of results. Switch engine, reuse `--user-data-dir`, or change the exit IP.
+Nothing is retried and no CAPTCHA is solved.
 
 ## Text and stdout
 
@@ -223,9 +224,9 @@ or leave a stale state file behind.
 ### Chromium sandbox
 
 `open` keeps Chromium's OS sandbox, which is what contains a renderer
-compromised by a hostile page. Some environments cannot start it — containers
-without unprivileged user namespaces, or images that disable them — and there
-the browser exits during startup with a message saying so.
+compromised by a hostile page. Some environments cannot start it, such as
+containers without unprivileged user namespaces or images that disable them.
+There the browser exits during startup with a message saying so.
 
 ```bash
 webskrap browser open --no-sandbox            # this session only

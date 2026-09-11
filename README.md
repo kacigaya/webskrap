@@ -44,9 +44,10 @@ asyncio.run(main())
 
 ## Search
 
-Searches load the engine's own results page in the same stealth browser and
-return the organic hits with click-tracking unwrapped. DuckDuckGo's HTML
-endpoint is the default; Bing is the alternative. Google is not offered.
+A search loads the engine's results page in the same stealth browser and
+returns the organic hits. Click-tracking redirects are unwrapped, so each
+`url` is the destination itself. DuckDuckGo's HTML endpoint is the default,
+Bing is the other option, Google is not offered.
 
 ```python
 async with WebSkrapClient() as client:
@@ -59,10 +60,10 @@ async with WebSkrapClient() as client:
 webskrap search "example domain" --engine ddg --max-results 10 --format json
 ```
 
-An engine that distrusts the exit address serves a bot challenge; that is
-reported as a `blocked` error, not as zero hits. Switch engine, reuse a
-persistent profile, or change exit IP. Nothing is retried and no CAPTCHA is
-solved.
+When an engine distrusts the exit address it serves a bot challenge. That
+comes back as a `blocked` error, not as zero hits. Switch engine, reuse a
+persistent profile, or change the exit IP. WebSkrap does not retry and does
+not solve CAPTCHAs.
 
 ## Documentation
 

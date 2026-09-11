@@ -43,7 +43,7 @@ python -m webskrap.mcp_server
 | --- | --- |
 | `fetch` | Fetch a URL with the Patchright stealth driver (waits for `networkidle`). |
 | `stealth_fetch` | Same stealth driver with finer fingerprint/WebRTC/UA controls. |
-| `search` | Find URLs for a query on DuckDuckGo (default) or Bing; same stealth controls as `stealth_fetch`. |
+| `search` | Find URLs for a query on DuckDuckGo (default) or Bing, with the `stealth_fetch` stealth controls. |
 | `doctor` | Check that Patchright and Chromium can launch. |
 | `browser_open` | Start (or reuse) a persistent headless browser session. |
 | `browser_goto` | Navigate the session's current page. |
@@ -114,11 +114,11 @@ resolving outside the root are rejected. This confinement applies only to MCP
 tool input; Python callers can still choose any `SessionConfig.user_data_dir`.
 
 `search` takes `query`, `engine` (`ddg` or `bing`), `max_results`, and the
-same channel, profile, fingerprint, and `user_data_dir` arguments as
-`stealth_fetch`. It returns `hits` (`title`, `url`, `snippet`) with the
-engine's click-tracking unwrapped, plus `hits_total` and `hits_truncated`.
-Google is not offered. A `blocked` error means the engine served a bot
-challenge; switch engine or exit IP rather than retrying.
+channel, profile, fingerprint and `user_data_dir` arguments `stealth_fetch`
+takes. It returns `hits` (`title`, `url`, `snippet`) with the engine's
+click-tracking unwrapped, plus `hits_total` and `hits_truncated`. Google is
+not offered. A `blocked` error means the engine served a bot challenge.
+Switch engine or exit IP instead of retrying.
 
 ## Interactive browser tools
 
@@ -148,7 +148,7 @@ after the page changes. Failed actions return a one-line error.
 
 `browser_screenshot` writes only under `./webskrap-output`, relative to the
 directory the server runs in. Set `WEBSKRAP_OUTPUT_DIR` to move that root, and
-point it somewhere you are willing to have written to — not a source tree or
+point it somewhere you are willing to have written to, not a source tree or
 `$HOME`.
 
 `path` is a relative destination inside that root. Nested paths work

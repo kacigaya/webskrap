@@ -16,8 +16,8 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 | `WebSkrapClient` | Owns the Playwright lifecycle. Use it as an async context manager and call `fetch()` or `search()` for one-shot requests or `session()` for persistent contexts. |
 | `WebSkrapSession` | A persistent browser context kept open across requests. Exposes `fetch()`, `search()`, `human_click()`, `decline_cookies()`, and the underlying Playwright `context`. |
 | `FetchResult` | Result of a fetch: `url`, `final_url`, `status`, `ok`, `headers`, `text`, `title`, `cookies`, `timings`, `screenshot_path`, and `cookie_notice_declined`. |
-| `SearchResult` | Result of a search: `query`, `engine`, the results page's `url`, `final_url`, `status`, `ok`, the capped `hits`, `hits_total`, `timings`, and `cookie_notice_declined`. |
-| `SearchHit` | One organic result: `title`, `url` (click-tracking unwrapped), and `snippet`. |
+| `SearchResult` | Result of a search: `query`, `engine`, the results page's `url`, `final_url`, `status` and `ok`, the capped `hits`, `hits_total`, `timings`, and `cookie_notice_declined`. |
+| `SearchHit` | One organic result: `title`, `url` with the click-tracking redirect unwrapped, and `snippet`. |
 | `decline_cookies(page)` | Click the reject control of a cookie consent notice on any Playwright page. Returns the strategy that clicked, or `None`. |
 
 ## Configuration

@@ -11,21 +11,21 @@ history, so they summarize each release rather than list every change.
 
 ### Added
 
-- Web search, with no new dependencies. `client.search()` and
-  `session.search()` load DuckDuckGo's HTML results page (default) or Bing's
-  through the same stealth session a fetch uses, so proxies, consent
-  dismissal and persistent profiles apply, and parse the organic hits in
-  Python. Destinations are unwrapped from each engine's click-tracking
-  redirect and deduplicated. `SearchEngine`, `SearchHit` and `SearchResult`
-  are exported. Google is deliberately not offered.
+- Web search. `client.search()` and `session.search()` load DuckDuckGo's
+  HTML results page (the default) or Bing's in the same session a fetch
+  uses, so proxy, consent and persistent-profile settings apply, then parse
+  the organic hits in Python. Each engine's click-tracking redirect is
+  unwrapped and duplicate destinations are dropped. No new dependencies.
+  Google is not offered. New exports: `SearchEngine`, `SearchHit`,
+  `SearchResult`.
 - `webskrap search "query" --engine ddg --max-results 10`, with `--format
-  json` and the same stealth options as `fetch`.
-- MCP tool `search`, with the same controls as `stealth_fetch` plus `engine`
-  and `max_results`. The server instructions and guide now route "find URLs"
-  to it instead of saying there is no search.
+  json` and the stealth options `fetch` has.
+- MCP tool `search`, with the `stealth_fetch` controls plus `engine` and
+  `max_results`. The server instructions and guide used to say there was no
+  search tool; they now route "find URLs" to it.
 - `ErrorCode.BLOCKED` (exit 11) for a site that answers with a bot challenge
-  instead of content. A search reports it rather than returning zero hits;
-  nothing is retried and no CAPTCHA is solved.
+  instead of content. A search raises it instead of returning zero hits.
+  Nothing is retried and no CAPTCHA is solved.
 
 ## [2.0.1] - 2026-08-30
 

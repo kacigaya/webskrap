@@ -9,9 +9,9 @@ WebSkrap is an async Python scraping package built on Playwright, with
 Patchright support for stealth-oriented browser sessions. The Python API,
 `webskrap` CLI, and `webskrap-mcp` server share core behavior.
 
-WebSkrap loads known URLs and searches for unknown ones by loading DuckDuckGo
-or Bing's results page in the same browser. It calls no search API and it
-does not offer Google.
+WebSkrap loads known URLs. To find URLs it loads DuckDuckGo or Bing's
+results page in the same browser and parses the hits. It calls no search API
+and it does not offer Google.
 
 ## Workflow
 
@@ -44,8 +44,8 @@ does not offer Google.
 Search for every constructor, serializer, command, and schema that uses a
 changed model or field. Fetch and search behavior cross Python, CLI, and MCP.
 Persistent browser behavior crosses the browser CLI and MCP. Engine markup
-lives only in `src/webskrap/search.py`; when an engine changes, refresh its
-fixture and fix that one extractor.
+lives only in `src/webskrap/search.py`. When an engine changes its page,
+refresh that engine's fixture and fix that one extractor.
 
 ## Choose the public surface
 
