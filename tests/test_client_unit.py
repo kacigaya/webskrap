@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -12,8 +13,11 @@ from webskrap.client import (
     _resource_route_handler,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
-from webskrap.models import ResourcePolicy, SessionConfig
+from webskrap.errors import ErrorCode
+from webskrap.models import ResourcePolicy, SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
+
+SEARCH_FIXTURES = Path(__file__).parent / "fixtures" / "search"
 
 
 class _Request:
@@ -271,6 +275,131 @@ async def test_fetch_skips_cookie_decline_when_disabled() -> None:
 
     assert result.cookie_notice_declined is None
     assert page.consent_waits == []
+
+
+class _SearchPage(_FetchPage):
+    """A fetch page that serves a saved results page and records the URL."""
+
+    def __init__(self, fixture: str) -> None:
+        super().__init__()
+        self.html = (SEARCH_FIXTURES / fixture).read_text(encoding="utf-8")
+        self.requested: list[str] = []
+
+    async def goto(self, url: str, **_kwargs: object) -> _Response:
+        self.requested.append(url)
+        return _Response()
+
+    async def content(self) -> str:
+        return self.html
+
+
+def _search_session(page: _SearchPage, **config: object) -> WebSkrapSession:
+    return WebSkrapSession(
+        name="test",
+        context=_FetchContext(page),  # type: ignore[arg-type]
+        config=SessionConfig(**config),  # type: ignore[arg-type]
+        profile=get_profile(None),
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_loads_the_results_page_and_caps_the_hits() -> None:
+    page = _SearchPage("ddg.html")
+
+    result = await _search_session(page).search("example domain", max_results=2)
+
+    assert page.requested == ["https://html.duckduckgo.com/html/?q=example+domain"]
+    assert page.closed is True
+    assert result.query == "example domain"
+    assert result.engine is SearchEngine.DDG
+    assert result.url == page.requested[0]
+    assert result.status == 200
+    assert result.ok is True
+    assert [hit.url for hit in result.hits] == [
+        "https://example.com/",
+        "https://www.iana.org/help/example-domains",
+    ]
+    assert result.hits_total == 4
+
+
+@pytest.mark.asyncio
+async def test_search_selects_the_engine() -> None:
+    page = _SearchPage("bing.html")
+
+    result = await _search_session(page).search("example domain", engine=SearchEngine.BING)
+
+    assert page.requested == ["https://www.bing.com/search?q=example+domain"]
+    assert result.engine is SearchEngine.BING
+    assert result.hits_total == 3
+
+
+@pytest.mark.asyncio
+async def test_search_goes_through_the_consent_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_decline(_page: object, *, timeout_ms: float) -> str:
+        return "cmp"
+
+    monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
+    session = _search_session(_SearchPage("bing.html"), decline_cookies=True)
+
+    result = await session.search("example domain", engine=SearchEngine.BING)
+
+    assert result.cookie_notice_declined == "cmp"
+
+
+@pytest.mark.asyncio
+async def test_search_reports_a_challenge_page_as_blocked() -> None:
+    with pytest.raises(WebSkrapError) as excinfo:
+        await _search_session(_SearchPage("ddg_challenge.html")).search("example domain")
+
+    assert excinfo.value.code is ErrorCode.BLOCKED
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_a_blank_query_before_opening_a_page() -> None:
+    page = _SearchPage("ddg.html")
+
+    with pytest.raises(WebSkrapError) as excinfo:
+        await _search_session(page).search("   ")
+
+    assert excinfo.value.code is ErrorCode.USAGE
+    assert page.requested == []
+
+
+@pytest.mark.asyncio
+async def test_search_on_a_closed_session_fails() -> None:
+    session = _search_session(_SearchPage("ddg.html"))
+    session._closed = True
+
+    with pytest.raises(WebSkrapError, match="is closed"):
+        await session.search("example domain")
+
+
+@pytest.mark.asyncio
+async def test_client_search_uses_a_throwaway_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = _SearchPage("ddg.html")
+    session = _search_session(page)
+    closed: list[str] = []
+
+    async def fake_close() -> None:
+        closed.append(session.name)
+        session._closed = True
+
+    monkeypatch.setattr(session, "close", fake_close)
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
+    client = WebSkrapClient()
+    monkeypatch.setattr(client, "_create_session", lambda *_args: _resolved(session))
+
+    result = await client.search("example domain", max_results=1)
+    await client.close()
+
+    assert [hit.url for hit in result.hits] == ["https://example.com/"]
+    assert result.hits_total == 4
+    assert closed == [session.name]
+    assert client._sessions == {}
+
+
+async def _resolved(session: WebSkrapSession) -> WebSkrapSession:
+    return session
 
 
 @pytest.mark.asyncio

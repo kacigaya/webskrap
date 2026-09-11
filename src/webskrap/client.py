@@ -30,10 +30,13 @@ from webskrap.models import (
     FetchResult,
     Link,
     ResourcePolicy,
+    SearchEngine,
+    SearchResult,
     SessionConfig,
     WaitUntil,
 )
 from webskrap.profiles import get_profile
+from webskrap.search import parse_results, search_url
 
 # Cursor jitter below is pixel offsets and sleep durations, never a token,
 # identifier, or security decision, so `random` would be adequate. It draws
@@ -268,6 +271,53 @@ class WebSkrapSession:
             )
         finally:
             await page.close()
+
+    async def search(
+        self,
+        query: str,
+        *,
+        engine: SearchEngine = SearchEngine.DDG,
+        max_results: int = 10,
+        timeout_ms: float | None = None,
+    ) -> SearchResult:
+        """Load ``engine``'s results page for ``query`` and return its hits.
+
+        A search is a :meth:`fetch` of the results page followed by parsing in
+        :mod:`webskrap.search`, so the session's proxy, consent dismissal and
+        persistent profile apply unchanged. Nothing is retried: an engine that
+        serves a challenge page is reported, not argued with.
+
+        Args:
+            query: Words to search for; surrounding whitespace is ignored.
+            engine: Which engine's results page to load.
+            max_results: How many hits to keep. ``SearchResult.hits_total``
+                reports how many the page held before the cap.
+            timeout_ms: Navigation timeout; defaults to the config's.
+
+        Returns:
+            A :class:`~webskrap.models.SearchResult`.
+
+        Raises:
+            WebSkrapError: If the session is closed, the query is blank
+                (``usage``), or the engine answered with a bot challenge
+                (``blocked``).
+        """
+        self._ensure_open()
+        url = search_url(engine, query)
+        page = await self.fetch(url, timeout_ms=timeout_ms)
+        hits = parse_results(engine, page.text)
+        return SearchResult(
+            query=query,
+            engine=engine,
+            url=url,
+            final_url=page.final_url,
+            status=page.status,
+            ok=page.ok,
+            hits=hits[: max(0, max_results)],
+            hits_total=len(hits),
+            timings=page.timings,
+            cookie_notice_declined=page.cookie_notice_declined,
+        )
 
     async def decline_cookies(self, page: Page, *, timeout_ms: float | None = None) -> str | None:
         """Click a cookie consent notice's reject control on ``page``.
@@ -564,6 +614,44 @@ class WebSkrapClient:
                 text_only=text_only,
                 include_links=include_links,
                 max_links=max_links,
+            )
+        finally:
+            await session.close()
+            self._sessions.pop(name, None)
+
+    async def search(
+        self,
+        query: str,
+        *,
+        engine: SearchEngine = SearchEngine.DDG,
+        max_results: int = 10,
+        profile: str | BrowserProfile | None = None,
+        config: SessionConfig | None = None,
+        timeout_ms: float | None = None,
+    ) -> SearchResult:
+        """Search in a throwaway session; see :meth:`WebSkrapSession.search`.
+
+        Args:
+            query: Words to search for.
+            engine: Which engine's results page to load.
+            max_results: How many hits to keep.
+            profile: Profile name, :class:`~webskrap.models.BrowserProfile`, or
+                None for the default.
+            config: Session config; defaults to ``default_config``.
+            timeout_ms: Navigation timeout override.
+
+        Returns:
+            A :class:`~webskrap.models.SearchResult`.
+
+        Raises:
+            WebSkrapError: If the client is closing, the browser cannot start,
+                the query is blank, or the engine served a bot challenge.
+        """
+        name = f"_single_{uuid4().hex}"
+        session = await self.session(name, config=config, profile=profile)
+        try:
+            return await session.search(
+                query, engine=engine, max_results=max_results, timeout_ms=timeout_ms
             )
         finally:
             await session.close()
