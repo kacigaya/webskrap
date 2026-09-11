@@ -10,11 +10,14 @@ from webskrap import (
     FetchResult,
     ProxyConfig,
     ResourcePolicy,
+    SearchEngine,
+    SearchHit,
+    SearchResult,
     SessionConfig,
     Viewport,
     WebRtcIPHandlingPolicy,
 )
-from webskrap.models import TextWindow, shape_fetch_result, text_window
+from webskrap.models import TextWindow, shape_fetch_result, shape_search_result, text_window
 
 
 def test_profile_generates_context_options() -> None:
@@ -423,3 +426,64 @@ def test_shape_fetch_result_pages_through_a_long_body() -> None:
     assert last["text"] == "89"
     assert last["text_truncated"] is False
     assert last["next_text_offset"] is None
+
+
+def _search_result(hits: list[SearchHit], total: int) -> SearchResult:
+    return SearchResult(
+        query="example domain",
+        engine=SearchEngine.DDG,
+        url="https://html.duckduckgo.com/html/?q=example+domain",
+        final_url="https://html.duckduckgo.com/html/?q=example+domain",
+        status=200,
+        ok=True,
+        hits=hits,
+        hits_total=total,
+        timings={"elapsed_ms": 12.34},
+    )
+
+
+def test_search_hit_snippet_is_optional() -> None:
+    hit = SearchHit(title="Example Domain", url="https://example.com/")
+
+    assert hit.snippet == ""
+
+
+def test_shape_search_result_reports_what_the_cap_hid() -> None:
+    hits = [SearchHit(title="Example Domain", url="https://example.com/", snippet="Illustrative.")]
+
+    payload = shape_search_result(_search_result(hits, 3))
+
+    assert payload == {
+        "query": "example domain",
+        "engine": "ddg",
+        "url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "final_url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "status": 200,
+        "ok": True,
+        "hits": [
+            {"title": "Example Domain", "url": "https://example.com/", "snippet": "Illustrative."}
+        ],
+        "hits_total": 3,
+        "hits_truncated": True,
+        "elapsed_ms": 12.3,
+        "cookie_notice_declined": None,
+    }
+
+
+def test_shape_search_result_is_not_truncated_when_every_hit_is_returned() -> None:
+    payload = shape_search_result(_search_result([], 0))
+
+    assert payload["hits"] == []
+    assert payload["hits_truncated"] is False
+
+
+def test_search_result_rejects_an_unknown_engine() -> None:
+    with pytest.raises(ValidationError):
+        SearchResult(
+            query="q",
+            engine="google",  # type: ignore[arg-type]
+            url="https://example.test",
+            final_url="https://example.test",
+            status=200,
+            ok=True,
+        )

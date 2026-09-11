@@ -45,6 +45,20 @@ class ResourcePolicy(StrEnum):
     DOCUMENTS = "documents"
 
 
+class SearchEngine(StrEnum):
+    """Which search engine's results page a search loads.
+
+    ``DDG`` is DuckDuckGo's no-JavaScript HTML endpoint, the default because it
+    has the simplest markup and no consent wall. ``BING`` is the fallback when
+    DuckDuckGo answers with a bot challenge. Google is absent on purpose: from
+    a fresh headless session it serves a consent wall or a CAPTCHA, and its
+    markup changes too often to keep an extractor honest.
+    """
+
+    DDG = "ddg"
+    BING = "bing"
+
+
 class Viewport(BaseModel):
     """A pixel size, used for both the page viewport and the virtual screen."""
 
@@ -442,6 +456,43 @@ class FetchResult(BaseModel):
     links_total: int = 0
 
 
+class SearchHit(BaseModel):
+    """One organic result: where it points, what it is called, and its blurb.
+
+    ``url`` is the destination itself, with the engine's click-tracking
+    redirect already unwrapped. ``snippet`` is empty when the engine showed
+    none.
+    """
+
+    title: str
+    url: str
+    snippet: str = ""
+
+
+class SearchResult(BaseModel):
+    """What one search produced.
+
+    ``url`` is the results page that was loaded; ``ok`` and ``status`` judge
+    that page's HTTP response, not whether anything was found. ``hits`` is
+    capped by the caller's ``max_results`` and ``hits_total`` counts what the
+    page held before the cap, so a short list is distinguishable from a short
+    page.
+    """
+
+    query: str
+    engine: SearchEngine
+    url: str
+    final_url: str
+    status: int | None
+    ok: bool
+    hits: list[SearchHit] = Field(default_factory=list)
+    hits_total: int = 0
+    timings: dict[str, float] = Field(default_factory=dict)
+    # Strategy that dismissed a cookie consent notice on the results page, or
+    # None when nothing was declined.
+    cookie_notice_declined: str | None = None
+
+
 class TextWindow(NamedTuple):
     """One bounded slice of a longer string, plus how to ask for the next.
 
@@ -515,6 +566,28 @@ def shape_fetch_result(result: FetchResult, max_chars: int, offset: int = 0) -> 
         "links": [link.model_dump() for link in result.links],
         "links_total": result.links_total,
         "links_truncated": result.links_total > len(result.links),
+        "elapsed_ms": round(result.timings.get("elapsed_ms", 0.0), 1),
+        "cookie_notice_declined": result.cookie_notice_declined,
+    }
+
+
+def shape_search_result(result: SearchResult) -> dict[str, Any]:
+    """Flatten a search into the JSON payload the CLI and MCP tools return.
+
+    Hits are already capped by the search itself; ``hits_truncated`` says
+    whether the cap hid any, so a caller knows a larger ``max_results`` would
+    return more without loading the page again to find out.
+    """
+    return {
+        "query": result.query,
+        "engine": result.engine.value,
+        "url": result.url,
+        "final_url": result.final_url,
+        "status": result.status,
+        "ok": result.ok,
+        "hits": [hit.model_dump() for hit in result.hits],
+        "hits_total": result.hits_total,
+        "hits_truncated": result.hits_total > len(result.hits),
         "elapsed_ms": round(result.timings.get("elapsed_ms", 0.0), 1),
         "cookie_notice_declined": result.cookie_notice_declined,
     }
