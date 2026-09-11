@@ -236,13 +236,7 @@ class WebSkrapSession:
                 wait_until=wait_until,
                 timeout=timeout_ms or self.config.navigation_timeout_ms,
             )
-            declined = None
-            if self.config.decline_cookies:
-                budget = self.config.decline_cookies_timeout_ms
-                if wait_until == "networkidle":
-                    # The navigation already waited out the CMP script.
-                    budget = min(budget, SETTLED_PAGE_TIMEOUT_MS)
-                declined = await self.decline_cookies(page, timeout_ms=budget)
+            declined = await self._decline_after_navigation(page, wait_until)
             title = await page.title()
             text = await page.locator("body").inner_text() if text_only else await page.content()
             links, links_total = await _collect_links(
@@ -282,10 +276,10 @@ class WebSkrapSession:
     ) -> SearchResult:
         """Load ``engine``'s results page for ``query`` and return its hits.
 
-        A search is a :meth:`fetch` of the results page followed by parsing in
-        :mod:`webskrap.search`, so the session's proxy, consent dismissal and
-        persistent profile apply unchanged. Nothing is retried: an engine that
-        serves a challenge page is reported, not argued with.
+        The page is loaded like a :meth:`fetch` -- same context, so the
+        session's proxy, consent dismissal and persistent profile apply
+        unchanged -- and parsed by :mod:`webskrap.search`. Nothing is retried:
+        an engine that serves a challenge page is reported, not argued with.
 
         Args:
             query: Words to search for; surrounding whitespace is ignored.
@@ -304,20 +298,47 @@ class WebSkrapSession:
         """
         self._ensure_open()
         url = search_url(engine, query)
-        page = await self.fetch(url, timeout_ms=timeout_ms)
-        hits = parse_results(engine, page.text)
+        started = time.perf_counter()
+        timeout = timeout_ms or self.config.navigation_timeout_ms
+        page = await self.context.new_page()
+        try:
+            response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            # Bing answers a cookie-less session with a head-only interstitial
+            # whose script navigates to the real page, and reading at
+            # DOMContentLoaded can catch it. Every results, no-results or
+            # challenge page renders something in the body, so wait for that;
+            # the wait survives the interstitial's navigation.
+            await page.wait_for_selector("body > *", state="attached", timeout=timeout)
+            declined = await self._decline_after_navigation(page, "domcontentloaded")
+            html = await page.content()
+            final_url = page.url
+        finally:
+            await page.close()
+        hits = parse_results(engine, html)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        status = response.status if response else None
         return SearchResult(
             query=query,
             engine=engine,
             url=url,
-            final_url=page.final_url,
-            status=page.status,
-            ok=page.ok,
+            final_url=final_url,
+            status=status,
+            ok=status is not None and 200 <= status < 400,
             hits=hits[: max(0, max_results)],
             hits_total=len(hits),
-            timings=page.timings,
-            cookie_notice_declined=page.cookie_notice_declined,
+            timings={"elapsed_ms": elapsed_ms},
+            cookie_notice_declined=declined,
         )
+
+    async def _decline_after_navigation(self, page: Page, wait_until: WaitUntil) -> str | None:
+        """Dismiss a consent notice once ``page`` has navigated, if configured."""
+        if not self.config.decline_cookies:
+            return None
+        budget = self.config.decline_cookies_timeout_ms
+        if wait_until == "networkidle":
+            # The navigation already waited out the CMP script.
+            budget = min(budget, SETTLED_PAGE_TIMEOUT_MS)
+        return await self.decline_cookies(page, timeout_ms=budget)
 
     async def decline_cookies(self, page: Page, *, timeout_ms: float | None = None) -> str | None:
         """Click a cookie consent notice's reject control on ``page``.

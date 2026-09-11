@@ -284,10 +284,17 @@ class _SearchPage(_FetchPage):
         super().__init__()
         self.html = (SEARCH_FIXTURES / fixture).read_text(encoding="utf-8")
         self.requested: list[str] = []
+        self.ready_waits: list[float] = []
 
     async def goto(self, url: str, **_kwargs: object) -> _Response:
         self.requested.append(url)
         return _Response()
+
+    async def wait_for_selector(self, selector: str, *, timeout: float, **_state: object) -> object:
+        if selector == "body > *":
+            self.ready_waits.append(timeout)
+            return object()
+        return await super().wait_for_selector(selector, timeout=timeout)
 
     async def content(self) -> str:
         return self.html
@@ -309,8 +316,12 @@ async def test_search_loads_the_results_page_and_caps_the_hits() -> None:
     result = await _search_session(page).search("example domain", max_results=2)
 
     assert page.requested == ["https://html.duckduckgo.com/html/?q=example+domain"]
+    # The body wait covers Bing's head-only redirect interstitial; it is on
+    # the navigation budget, not the consent one.
+    assert page.ready_waits == [SessionConfig().navigation_timeout_ms]
     assert page.closed is True
     assert result.query == "example domain"
+    assert "elapsed_ms" in result.timings
     assert result.engine is SearchEngine.DDG
     assert result.url == page.requested[0]
     assert result.status == 200
