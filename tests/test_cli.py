@@ -10,8 +10,15 @@ import pytest
 from typer.testing import CliRunner
 
 from webskrap import cli
-from webskrap.errors import EXIT_CODES, RECOVERY_HINTS, ErrorCode
-from webskrap.models import FetchResult, Link
+from webskrap.errors import EXIT_CODES, RECOVERY_HINTS, ErrorCode, WebSkrapError
+from webskrap.models import (
+    FetchResult,
+    Link,
+    ResourcePolicy,
+    SearchEngine,
+    SearchHit,
+    SearchResult,
+)
 
 runner = CliRunner()
 
@@ -42,6 +49,24 @@ class _FakeClient:
             text=text,
             title="Example",
             cookies=[],
+            timings={"elapsed_ms": 12.34},
+        )
+
+    async def search(self, query: str, **kwargs: Any) -> SearchResult:
+        self.calls.append({"query": query, **kwargs})
+        hits = [
+            SearchHit(title="Example Domain", url="https://example.com/", snippet="Illustrative."),
+            SearchHit(title="IANA", url="https://www.iana.org/help/example-domains"),
+        ]
+        return SearchResult(
+            query=query,
+            engine=kwargs["engine"],
+            url="https://html.duckduckgo.com/html/?q=example+domain",
+            final_url="https://html.duckduckgo.com/html/?q=example+domain",
+            status=200,
+            ok=True,
+            hits=hits[: kwargs["max_results"]],
+            hits_total=len(hits),
             timings={"elapsed_ms": 12.34},
         )
 
@@ -114,15 +139,21 @@ class _LaunchFailingClient(_FakeClient):
     fail_channels: tuple[str | None, ...] = ("chrome",)
     attempts: list[str | None] = []
 
-    async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
-        channel = kwargs["config"].channel
-        self.attempts.append(channel)
-        if channel in self.fail_channels:
+    def _launch(self, config: Any) -> None:
+        self.attempts.append(config.channel)
+        if config.channel in self.fail_channels:
             raise RuntimeError(
-                f"Chromium distribution '{channel}' is not found at /opt/google/chrome\n"
+                f"Chromium distribution '{config.channel}' is not found at /opt/google/chrome\n"
                 'Run "playwright install chrome"'
             )
+
+    async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+        self._launch(kwargs["config"])
         return await super().fetch(url, **kwargs)
+
+    async def search(self, query: str, **kwargs: Any) -> SearchResult:
+        self._launch(kwargs["config"])
+        return await super().search(query, **kwargs)
 
 
 def test_fetch_falls_back_to_chromium_when_channel_is_missing(monkeypatch: Any) -> None:
@@ -523,6 +554,134 @@ def test_fetch_human_failure_prints_the_hint_to_stderr(monkeypatch: Any) -> None
     assert "browser_wait_for" in result.output
 
 
+def test_search_json_is_the_shared_payload(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        ["search", "example domain", "--format", "json", "--max-results", "1"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "query": "example domain",
+        "engine": "ddg",
+        "url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "final_url": "https://html.duckduckgo.com/html/?q=example+domain",
+        "status": 200,
+        "ok": True,
+        "hits": [
+            {"title": "Example Domain", "url": "https://example.com/", "snippet": "Illustrative."}
+        ],
+        "hits_total": 2,
+        "hits_truncated": True,
+        "elapsed_ms": 12.3,
+        "cookie_notice_declined": None,
+    }
+    call = _FakeClient.calls[0]
+    assert call["engine"] is SearchEngine.DDG
+    assert call["max_results"] == 1
+    config = call["config"]
+    assert config.driver == "patchright"
+    assert config.headless is True
+    assert config.channel == "chrome"
+    assert config.decline_cookies is True
+
+
+def test_search_forwards_engine_and_stealth_options(monkeypatch: Any, tmp_path: Path) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "search",
+            "example domain",
+            "--engine",
+            "bing",
+            "--user-data-dir",
+            str(tmp_path / "profile"),
+            "--no-decline-cookies",
+            "--resource-policy",
+            "lite",
+            "--webrtc-ip-handling-policy",
+            "disable_non_proxied_udp",
+            "--launch-arg",
+            "--lang=en-GB",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    call = _FakeClient.calls[0]
+    assert call["engine"] is SearchEngine.BING
+    config = call["config"]
+    assert config.user_data_dir == tmp_path / "profile"
+    assert config.decline_cookies is False
+    assert config.resource_policy is ResourcePolicy.LITE
+    assert config.webrtc_ip_handling_policy == "disable_non_proxied_udp"
+    assert "--lang=en-GB" in config.launch_args
+
+
+def test_search_human_output_lists_the_hits(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(cli.app, ["search", "example domain"])
+
+    assert result.exit_code == 0, result.output
+    plain = _plain(result.output)
+    assert "Engine:ddg" in plain
+    assert "Hits:2of2" in plain
+    assert "1.ExampleDomain" in plain
+    assert "https://example.com/" in plain
+    assert "Illustrative." in plain
+    assert "2.IANA" in plain
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "expected"),
+    [
+        pytest.param("--engine", "google", "is not one of 'ddg', 'bing'", id="engine"),
+        pytest.param("--format", "yaml", "human, json", id="output-format"),
+        pytest.param("--max-results", "-1", "x>=0", id="max-results"),
+    ],
+)
+def test_search_rejects_invalid_option_values(option: str, value: str, expected: str) -> None:
+    result = runner.invoke(cli.app, ["search", "example domain", option, value])
+
+    assert result.exit_code == 2
+    assert "".join(expected.split()) in _plain(result.output)
+
+
+def test_search_falls_back_to_chromium_when_channel_is_missing(monkeypatch: Any) -> None:
+    _FakeClient.calls = []
+    _LaunchFailingClient.attempts = []
+    _LaunchFailingClient.fail_channels = ("chrome",)
+    monkeypatch.setattr(cli, "WebSkrapClient", _LaunchFailingClient)
+
+    result = runner.invoke(cli.app, ["search", "example domain", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert "retrying with chromium" in result.output
+    assert _LaunchFailingClient.attempts == ["chrome", None]
+
+
+def test_search_blocked_failure_is_a_parseable_envelope(monkeypatch: Any) -> None:
+    class _BlockedClient(_FakeClient):
+        async def search(self, query: str, **kwargs: Any) -> SearchResult:
+            raise WebSkrapError(
+                "ddg answered with a bot challenge instead of results", code=ErrorCode.BLOCKED
+            )
+
+    monkeypatch.setattr(cli, "WebSkrapClient", _BlockedClient)
+
+    result = runner.invoke(cli.app, ["search", "example domain", "--format", "json"])
+
+    assert result.exit_code == EXIT_CODES[ErrorCode.BLOCKED]
+    payload = json.loads(result.output)
+    assert payload["ok"] is False
+    assert payload["code"] == "blocked"
+    assert payload["hint"] == RECOVERY_HINTS[ErrorCode.BLOCKED]
+
+
 def test_schema_describes_the_whole_command_tree() -> None:
     result = runner.invoke(cli.app, ["schema"])
 
@@ -530,7 +689,7 @@ def test_schema_describes_the_whole_command_tree() -> None:
     schema = json.loads(result.output)
     assert schema["name"] == "webskrap"
     top_level = {command["name"] for command in schema["commands"]}
-    assert {"fetch", "doctor", "install", "profiles", "browser", "schema"} <= top_level
+    assert {"fetch", "search", "doctor", "install", "profiles", "browser", "schema"} <= top_level
 
     browser = next(command for command in schema["commands"] if command["name"] == "browser")
     assert {"open", "close", "snapshot", "wait", "eval"} <= {

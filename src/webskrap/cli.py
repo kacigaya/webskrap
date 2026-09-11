@@ -1,7 +1,7 @@
 """Typer entry point for the ``webskrap`` command.
 
 Subcommands cover installing browsers, listing profiles, checking the
-install, and fetching pages; persistent-session commands live in
+install, fetching pages, and searching; persistent-session commands live in
 :mod:`webskrap.browser_cli` under ``webskrap browser``. This layer parses
 arguments, formats output, and turns failures into one-line errors with a
 non-zero exit code.
@@ -12,9 +12,9 @@ from __future__ import annotations
 import asyncio
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for browser installs, no shell
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, Protocol, TypedDict
+from typing import Annotated, Any, NoReturn, Protocol, TypedDict, TypeVar
 
 import typer
 from rich.console import Console
@@ -34,10 +34,13 @@ from webskrap.errors import ErrorCode, WebSkrapError, first_line
 from webskrap.models import (
     FetchResult,
     ResourcePolicy,
+    SearchEngine,
+    SearchResult,
     SessionConfig,
     WaitUntil,
     WebRtcIPHandlingPolicy,
     shape_fetch_result,
+    shape_search_result,
 )
 from webskrap.parsing import (
     parse_wait_until,
@@ -48,6 +51,8 @@ from webskrap.profiles import get_profile, list_profiles
 app = typer.Typer(help="WebSkrap browser scraping toolkit.")
 app.add_typer(browser_app, name="browser")
 console = Console()
+
+T = TypeVar("T")
 
 
 class InstallResult(TypedDict):
@@ -431,6 +436,198 @@ async def _fetch(
         console.print(f"[bold]{label}:[/bold] {output}")
 
 
+@app.command("search")
+def search_command(
+    query: Annotated[str, typer.Argument(help="Words to search for.")],
+    engine: Annotated[
+        SearchEngine,
+        typer.Option("--engine", "-e", help="Search engine: ddg (DuckDuckGo) or bing."),
+    ] = SearchEngine.DDG,
+    max_results: Annotated[
+        int,
+        typer.Option("--max-results", "-n", min=0, help="Maximum hits to return."),
+    ] = 10,
+    profile: Annotated[
+        str,
+        typer.Option(
+            "--profile",
+            "-p",
+            help="Bundled profile metadata (requires --patchright-context-profile).",
+        ),
+    ] = "desktop-chrome",
+    channel: Annotated[
+        str | None,
+        typer.Option("--channel", help="Browser channel for headless Patchright stealth."),
+    ] = "chrome",
+    user_data_dir: Annotated[
+        Path | None,
+        typer.Option("--user-data-dir", help="Persistent browser profile directory."),
+    ] = None,
+    output_format: Annotated[
+        str,
+        typer.Option("--format", help="Output format: human or json."),
+    ] = "human",
+    timeout_ms: Annotated[
+        float,
+        typer.Option("--timeout-ms", min=1, help="Navigation timeout."),
+    ] = 30_000,
+    resource_policy: Annotated[
+        ResourcePolicy,
+        typer.Option("--resource-policy", help="Resource routing preset."),
+    ] = ResourcePolicy.ALL,
+    decline_cookies: Annotated[
+        bool,
+        typer.Option(
+            "--decline-cookies/--no-decline-cookies",
+            help="Click the reject button of a cookie consent notice on the results page.",
+        ),
+    ] = True,
+    decline_cookies_timeout_ms: Annotated[
+        float,
+        typer.Option(
+            "--decline-cookies-timeout-ms",
+            min=0,
+            help="How long to wait for a cookie consent notice to appear.",
+        ),
+    ] = 2_000,
+    patchright_context_profile: Annotated[
+        bool,
+        typer.Option(
+            "--patchright-context-profile",
+            help="Apply locale/timezone/media profile metadata in Patchright contexts.",
+        ),
+    ] = False,
+    reduce_fingerprint_surface: Annotated[
+        bool,
+        typer.Option(
+            "--reduce-fingerprint-surface",
+            help="Disable Chromium WebGL and canvas readback with native browser flags.",
+        ),
+    ] = False,
+    mask_headless_user_agent: Annotated[
+        bool,
+        typer.Option(
+            "--mask-headless-user-agent",
+            help="Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag.",
+        ),
+    ] = False,
+    launch_args: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--launch-arg",
+            help="Additional browser launch argument. Repeat for multiple args.",
+        ),
+    ] = None,
+    webrtc_ip_handling_policy: Annotated[
+        str | None,
+        typer.Option(
+            "--webrtc-ip-handling-policy",
+            help=(
+                "Chromium WebRTC IP policy: default, default_public_and_private_interfaces, "
+                "default_public_interface_only, or disable_non_proxied_udp."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Search the web through the stealth browser and list the organic hits.
+
+    Loads DuckDuckGo's HTML results page (or Bing's with --engine bing) and
+    prints each hit's title, URL and snippet with the engine's click-tracking
+    unwrapped. Google is not offered. A `blocked` failure means the engine
+    served a bot challenge: switch engine or exit IP rather than retrying.
+    """
+    asyncio.run(
+        _search(
+            query=query,
+            engine=engine,
+            max_results=max_results,
+            profile=profile,
+            channel=channel,
+            user_data_dir=user_data_dir,
+            output_format=output_format,
+            timeout_ms=timeout_ms,
+            resource_policy=resource_policy,
+            decline_cookies=decline_cookies,
+            decline_cookies_timeout_ms=decline_cookies_timeout_ms,
+            patchright_context_profile=patchright_context_profile,
+            reduce_fingerprint_surface=reduce_fingerprint_surface,
+            mask_headless_user_agent=mask_headless_user_agent,
+            launch_args=launch_args or [],
+            webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+        )
+    )
+
+
+async def _search(
+    *,
+    query: str,
+    engine: SearchEngine,
+    max_results: int,
+    profile: str,
+    channel: str | None,
+    user_data_dir: Path | None,
+    output_format: str,
+    timeout_ms: float,
+    resource_policy: ResourcePolicy,
+    decline_cookies: bool,
+    decline_cookies_timeout_ms: float,
+    patchright_context_profile: bool,
+    reduce_fingerprint_surface: bool,
+    mask_headless_user_agent: bool,
+    launch_args: list[str],
+    webrtc_ip_handling_policy: str | None,
+) -> None:
+    parsed_output_format = parse_output_format(output_format)
+    config = SessionConfig(
+        driver="patchright",
+        headless=True,
+        channel=channel,
+        user_data_dir=user_data_dir,
+        navigation_timeout_ms=timeout_ms,
+        resource_policy=resource_policy,
+        decline_cookies=decline_cookies,
+        decline_cookies_timeout_ms=decline_cookies_timeout_ms,
+        patchright_context_profile=patchright_context_profile,
+        reduce_fingerprint_surface=reduce_fingerprint_surface,
+        mask_headless_user_agent=mask_headless_user_agent,
+        launch_args=launch_args,
+        webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+    )
+
+    try:
+        result = await _with_channel_fallback(
+            lambda resolved: _run_search(
+                resolved,
+                query=query,
+                engine=engine,
+                max_results=max_results,
+                profile=get_profile(profile),
+                timeout_ms=timeout_ms,
+            ),
+            config,
+            parsed_output_format,
+        )
+    except (typer.Exit, typer.Abort, typer.BadParameter):
+        raise
+    except Exception as exc:
+        fail(exc, parsed_output_format)
+
+    if parsed_output_format == "json":
+        print_json(shape_search_result(result))
+        return
+
+    console.print(f"[bold]Engine:[/bold] {result.engine.value}")
+    console.print(f"[bold]Status:[/bold] {result.status}")
+    console.print(f"[bold]Hits:[/bold] {len(result.hits)} of {result.hits_total}")
+    if result.cookie_notice_declined:
+        console.print(f"[bold]Cookie notice:[/bold] declined ({result.cookie_notice_declined})")
+    for index, hit in enumerate(result.hits, start=1):
+        console.print(f"\n[bold]{index}. {hit.title}[/bold]")
+        console.print(f"   {hit.url}")
+        if hit.snippet:
+            console.print(f"   {hit.snippet}")
+
+
 LAUNCH_FAILURE_MARKERS = (
     "executable doesn't exist",
     "is not found at",
@@ -455,17 +652,25 @@ async def _run_fetch(config: SessionConfig, **kwargs: Any) -> FetchResult:
         return await client.fetch(config=config, **kwargs)
 
 
-async def _fetch_with_channel_fallback(
-    config: SessionConfig, output_format: OutputFormat, **kwargs: Any
-) -> FetchResult:
-    """Fetch, retrying on bundled chromium when the chosen channel cannot launch.
+async def _run_search(config: SessionConfig, **kwargs: Any) -> SearchResult:
+    async with WebSkrapClient() as client:
+        return await client.search(config=config, **kwargs)
+
+
+async def _with_channel_fallback(
+    run: Callable[[SessionConfig], Awaitable[T]],
+    config: SessionConfig,
+    output_format: OutputFormat,
+) -> T:
+    """Run, retrying on bundled chromium when the chosen channel cannot launch.
 
     The default channel is `chrome`, which does not exist on every platform
     (Linux ARM64 has no Chrome build). Falling back keeps `webskrap fetch`
-    working there instead of dumping a Playwright traceback.
+    and `webskrap search` working there instead of dumping a Playwright
+    traceback.
     """
     try:
-        return await _run_fetch(config, **kwargs)
+        return await run(config)
     except Exception as exc:
         if not _is_launch_failure(exc):
             raise
@@ -475,11 +680,19 @@ async def _fetch_with_channel_fallback(
             f"[yellow]channel '{config.channel}' did not launch; retrying with chromium[/yellow]"
         )
         try:
-            return await _run_fetch(config.model_copy(update={"channel": None}), **kwargs)
+            return await run(config.model_copy(update={"channel": None}))
         except Exception as retry_exc:
             if not _is_launch_failure(retry_exc):
                 raise
             _fail_launch(retry_exc, output_format)
+
+
+async def _fetch_with_channel_fallback(
+    config: SessionConfig, output_format: OutputFormat, **kwargs: Any
+) -> FetchResult:
+    return await _with_channel_fallback(
+        lambda resolved: _run_fetch(resolved, **kwargs), config, output_format
+    )
 
 
 def _parse_wait_until(value: str) -> WaitUntil:
