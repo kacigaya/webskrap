@@ -29,6 +29,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "monthly" as const,
       priority: 0.6,
     },
+    { url: `${SITE_URL}/privacy/`, lastModified: now, changeFrequency: "yearly" as const, priority: 0.3 },
+    { url: `${SITE_URL}/cookies/`, lastModified: now, changeFrequency: "yearly" as const, priority: 0.3 },
   ];
 
   return [...routes, ...docs];
