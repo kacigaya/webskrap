@@ -1,3 +1,4 @@
+import { SiteFooter } from "@/components/site-footer";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -26,10 +27,17 @@ export default function DocsLayout({
             />
             <span className="font-semibold tracking-tight">WebSkrap</span>
           </Link>
-          <nav aria-label="Documentation utilities" className="flex items-center gap-2">
+          <nav
+            aria-label="Documentation utilities"
+            className="flex items-center gap-2"
+          >
             <MobileDocsMenu />
             <ThemeToggle />
-            <Button variant="outline" size="sm" render={<a href={GITHUB_URL} />}>
+            <Button
+              variant="outline"
+              size="sm"
+              render={<a href={GITHUB_URL} />}
+            >
               GitHub
             </Button>
           </nav>
@@ -44,6 +52,7 @@ export default function DocsLayout({
         </aside>
         <main className="min-w-0 flex-1 py-10">{children}</main>
       </div>
+      <SiteFooter />
     </div>
   );
 }
