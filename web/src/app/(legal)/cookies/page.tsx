@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   title: "Cookies policy",
   description:
     "How WebSkrap handles cookies, browser storage, and preferences.",
-  alternates: { canonical: null },
+  alternates: { canonical: "https://kacigaya.github.io/webskrap/cookies/" },
   openGraph: {
     title: "Cookies policy | WebSkrap",
     description:
