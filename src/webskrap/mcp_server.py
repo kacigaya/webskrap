@@ -12,6 +12,7 @@ import json
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from importlib import resources
+from importlib.metadata import version
 from typing import Any, TypeVar
 
 from playwright.async_api import Page
@@ -35,7 +36,7 @@ from webskrap.profiles import get_profile, list_profiles
 T = TypeVar("T")
 
 try:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
     from mcp.types import ToolAnnotations
 except ImportError as exc:  # pragma: no cover - optional dependency
     msg = "the MCP server requires mcp. Run: pip install webskrap"
@@ -60,10 +61,10 @@ def _hints(
     actually constrain the tools live in paths.py and browser_session.py.
     """
     return ToolAnnotations(
-        readOnlyHint=read_only,
-        destructiveHint=destructive,
-        idempotentHint=idempotent,
-        openWorldHint=open_world,
+        read_only_hint=read_only,
+        destructive_hint=destructive,
+        idempotent_hint=idempotent,
+        open_world_hint=open_world,
     )
 
 
@@ -109,7 +110,7 @@ Writes are confined: screenshots to ./webskrap-output, persistent profiles under
 ~/.webskrap/profiles. Do not attempt CAPTCHA solving or login-wall bypass.
 """
 
-mcp = FastMCP("webskrap", instructions=INSTRUCTIONS)
+mcp = MCPServer("webskrap", instructions=INSTRUCTIONS, version=version("webskrap"))
 
 
 @mcp.tool(title="Fetch a page", annotations=_hints(read_only=True, open_world=True))

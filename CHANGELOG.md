@@ -9,6 +9,14 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Changed
+
+- The MCP server runs on the `mcp` 2.x SDK (`MCPServer`, formerly
+  `FastMCP`). Installs now require `mcp>=2`; the wire protocol, tool names,
+  and tool annotations are unchanged. The server also reports the installed
+  WebSkrap version in `serverInfo`, where the 2.x SDK would otherwise send an
+  empty string.
+
 ## [2.1.1] - 2026-09-11
 
 ### Changed
