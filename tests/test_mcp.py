@@ -160,11 +160,11 @@ def test_search_is_registered_read_only_and_open_world() -> None:
     tool = tools["search"]
     assert tool.title == "Search the web"
     assert tool.annotations is not None
-    assert tool.annotations.readOnlyHint is True
-    assert tool.annotations.openWorldHint is True
-    assert tool.inputSchema["required"] == ["query"]
-    assert tool.inputSchema["properties"]["engine"]["default"] == "bing"
-    assert tool.inputSchema["properties"]["max_results"]["default"] == 10
+    assert tool.annotations.read_only_hint is True
+    assert tool.annotations.open_world_hint is True
+    assert tool.input_schema["required"] == ["query"]
+    assert tool.input_schema["properties"]["engine"]["default"] == "bing"
+    assert tool.input_schema["properties"]["max_results"]["default"] == 10
 
 
 def test_search_returns_the_shared_payload(monkeypatch: Any) -> None:
@@ -553,9 +553,9 @@ def test_read_only_tools_are_marked_read_only() -> None:
     annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
 
     for name in ("fetch", "stealth_fetch", "search", "doctor", "browser_snapshot", "browser_list"):
-        assert annotations[name].readOnlyHint is True, name
+        assert annotations[name].read_only_hint is True, name
     for name in ("browser_interact", "browser_eval", "browser_close"):
-        assert annotations[name].readOnlyHint is False, name
+        assert annotations[name].read_only_hint is False, name
 
 
 def test_tools_that_can_lose_data_or_submit_forms_are_marked_destructive() -> None:
@@ -563,20 +563,20 @@ def test_tools_that_can_lose_data_or_submit_forms_are_marked_destructive() -> No
 
     # browser_close --delete_data throws away cookies and logins; a click or an
     # Enter can submit a form on a site WebSkrap does not own.
-    assert annotations["browser_close"].destructiveHint is True
-    assert annotations["browser_interact"].destructiveHint is True
-    assert annotations["browser_press"].destructiveHint is True
+    assert annotations["browser_close"].destructive_hint is True
+    assert annotations["browser_interact"].destructive_hint is True
+    assert annotations["browser_press"].destructive_hint is True
     # Listing sessions must not look like closing one.
-    assert annotations["browser_list"].destructiveHint is False
+    assert annotations["browser_list"].destructive_hint is False
 
 
 def test_tools_that_reach_the_open_web_say_so() -> None:
     annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
 
     for name in ("fetch", "stealth_fetch", "search", "browser_goto", "browser_interact"):
-        assert annotations[name].openWorldHint is True, name
+        assert annotations[name].open_world_hint is True, name
     for name in ("doctor", "browser_list", "browser_snapshot"):
-        assert annotations[name].openWorldHint is False, name
+        assert annotations[name].open_world_hint is False, name
 
 
 def test_tool_failures_carry_their_code_and_hint(monkeypatch: Any, tmp_path: Path) -> None:
