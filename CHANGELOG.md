@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-15
+
+### Added
+
+- Privacy and cookie policy pages on the documentation site, linked from the
+  site footer.
+
 ### Changed
 
 - The MCP server runs on the `mcp` 2.x SDK (`MCPServer`, formerly
