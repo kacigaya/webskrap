@@ -207,3 +207,39 @@ def test_existing_output_root_keeps_its_permissions(
     resolve_output_path("shot.png")
 
     assert stat.S_IMODE(root.stat().st_mode) == 0o755
+
+
+@posix_only
+def test_nested_output_directories_are_created_owner_only(tmp_path: Path) -> None:
+    root = tmp_path / "out"
+
+    resolved = resolve_output_path("runs/today/page.png", root=root)
+
+    assert resolved == root / "runs" / "today" / "page.png"
+    assert stat.S_IMODE((root / "runs").stat().st_mode) == 0o700
+    assert stat.S_IMODE((root / "runs" / "today").stat().st_mode) == 0o700
+
+
+def test_resolve_rejects_a_symlinked_parent_directory(tmp_path: Path) -> None:
+    # A symlink pointing inside the root still passes the resolve-time check,
+    # so creation must refuse to walk through it: the link could be repointed
+    # between this call and the browser's write.
+    root = tmp_path / "out"
+    (root / "real").mkdir(parents=True)
+    (root / "other").mkdir(parents=True)
+    (root / "real" / "link").symlink_to(root / "other", target_is_directory=True)
+
+    with pytest.raises(WebSkrapError, match="must not be a symlink"):
+        resolve_output_path("real/link/shot.png", root=root)
+
+
+def test_tree_creation_refuses_to_ascend_above_the_root(tmp_path: Path) -> None:
+    from webskrap.paths import _ensure_owner_only_tree
+
+    root = tmp_path / "out"
+    root.mkdir()
+
+    with pytest.raises(WebSkrapError, match="must stay inside"):
+        _ensure_owner_only_tree(root, Path("../escape/x.png"))
+
+    assert not (tmp_path / "escape").exists()

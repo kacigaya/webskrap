@@ -437,3 +437,35 @@ def test_shape_eval_result_encodes_values_json_cannot_represent() -> None:
     payload = browser_session.shape_eval_result({"n": float("inf")}, 100)
 
     assert payload["result_truncated"] is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("file:///etc/passwd", id="file"),
+        pytest.param("ftp://example.test/x", id="ftp"),
+        pytest.param("https://user:pass@example.test/", id="userinfo"),
+    ],
+)
+def test_goto_rejects_unfetchable_targets(url: str) -> None:
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(browser_session.goto(None, url, "load"))  # type: ignore[arg-type]
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_is_session_dir_rejects_a_symlink(tmp_path: Path) -> None:
+    session = tmp_path / "shop"
+    (session / "user-data").mkdir(parents=True)
+    link = tmp_path / "shoplink"
+    link.symlink_to(session, target_is_directory=True)
+
+    assert browser_session.is_session_dir(session) is True
+    assert browser_session.is_session_dir(link) is False
+
+
+def test_sessions_root_expands_a_tilde_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", "~/sessions")
+
+    assert str(browser_session.sessions_root()).endswith("sessions")
+    assert "~" not in str(browser_session.sessions_root())

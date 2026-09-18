@@ -51,6 +51,13 @@ symlinks that leave it.
 The sandbox opt-out is an environment variable, never an MCP argument. Page
 content must not be able to persuade the client to disable the browser sandbox.
 
+Fetch and navigation URLs must be public `http(s)` without credentials.
+Private or local hosts are rejected unless `WEBSKRAP_ALLOW_PRIVATE_NET=1`.
+
+`browser_eval` runs page script in a possibly logged-in profile: prefer
+snapshot, interact, and wait_for, never evaluate page-controlled text, and set
+`WEBSKRAP_ALLOW_EVAL=0` where models must not run page script.
+
 ## Failures
 
 A fetch with an HTTP error status returns normally with `ok: false`. A raised

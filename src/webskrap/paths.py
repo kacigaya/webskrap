@@ -75,11 +75,16 @@ def resolve_mcp_profile_path(path: str | os.PathLike[str]) -> Path:
 
     try:
         secure_directory(resolved_base, tighten_existing=False)
+        _ensure_owner_only_tree(resolved_base, candidate)
+        # The profile directory itself (unlike a screenshot file) must exist:
+        # created or tightened owner-only, never chmod-ed through a link.
         secure_directory(resolved)
     except OSError as exc:
         msg = f"could not create profile directory {resolved}: {exc}"
         raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED) from exc
-    return resolved
+    return _recheck_containment(
+        base, resolved_base, candidate, resolved, noun="profile path", env_var=MCP_PROFILE_DIR_ENV
+    )
 
 
 def resolve_output_path(
@@ -137,11 +142,80 @@ def resolve_output_path(
         # local attacker cannot plant symlinks inside the default output
         # directory. A root the user set up keeps the permissions they chose.
         secure_directory(resolved_base, tighten_existing=False)
-        resolved.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_owner_only_tree(resolved_base, candidate)
     except OSError as exc:
         msg = f"could not create output directory {resolved.parent}: {exc}"
         raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED) from exc
-    return resolved
+    return _recheck_containment(
+        base, resolved_base, candidate, resolved, noun="output path", env_var=OUTPUT_DIR_ENV
+    )
+
+
+def _ensure_owner_only_tree(base: Path, candidate: Path) -> None:
+    """Create the parent directories of ``candidate`` below ``base`` owner-only.
+
+    ``mkdir(parents=True)`` leaves intermediate components at the process umask
+    (often world-readable), which is wrong for profile and screenshot output.
+    Each missing level is created ``0700`` instead, and a symlink met along the
+    way is rejected rather than followed or created through.
+
+    The walk uses the unresolved ``candidate`` on purpose: a symlink pointing
+    inside the root resolves inside, so the resolve-time containment check
+    passes it, yet the file would land somewhere the caller did not name.
+    ``..`` segments are rejected rather than followed.
+
+    Raises:
+        WebSkrapError: If a component of the path is a symlink.
+    """
+    normalized_parent = Path(os.path.normpath(candidate)).parent
+    current = base
+    for part in normalized_parent.parts:
+        if part in ("", os.curdir):
+            continue
+        if part == os.pardir:
+            # Unreachable after normpath plus the containment check above
+            # (a leading `..` cannot resolve inside the base); refused rather
+            # than walked, so creation can never ascend above the root.
+            msg = f"path must stay inside {base}: '{candidate}' escapes it."
+            raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
+        current = current / part
+        if current.is_symlink():
+            msg = f"path must not be a symlink: {current}"
+            raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
+        existed = current.is_dir()
+        current.mkdir(parents=False, exist_ok=True, mode=PRIVATE_DIR_MODE)
+        if os.name == "posix" and not existed:
+            _chmod_no_follow(current)
+
+
+def _recheck_containment(
+    base: Path,
+    resolved_base: Path,
+    candidate: Path,
+    resolved: Path,
+    *,
+    noun: str,
+    env_var: str,
+) -> Path:
+    """Re-resolve ``candidate`` and reject it if confinement no longer holds.
+
+    Creation and the browser's later write are two separate steps, so a local
+    writer inside a custom root could swap a component for a symlink in
+    between. Re-resolving immediately before returning narrows that window to
+    the caller's own write; the default root's ``0700`` mode closes it for the
+    common case.
+    """
+    rechecked = (resolved_base / candidate).resolve()
+    if rechecked != resolved or resolved_base not in rechecked.parents:
+        msg = (
+            f"{noun} must stay inside {base}: '{candidate}' escapes it. "
+            f"Set {env_var} to write elsewhere."
+        )
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
+    if rechecked.is_symlink():
+        msg = f"{noun} must not be a symlink: {rechecked}"
+        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
+    return rechecked
 
 
 def secure_directory(path: Path, *, tighten_existing: bool = True) -> Path:

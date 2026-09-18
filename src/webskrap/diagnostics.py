@@ -66,5 +66,9 @@ async def diagnose() -> dict[str, Any]:
         # default" from "explicitly set to the default".
         "environment": {name: os.environ.get(name) for name in ENVIRONMENT_VARIABLES},
         "chromium_sandbox": browser_session.sandbox_enabled(),
+        # One-shot fetch/search resolve the same default through their own
+        # config: sandboxed unless the operator opted out above.
+        "chromium_sandbox_one_shot": browser_session.sandbox_enabled(None),
+        "sessions_root_symlink": browser_session.sessions_root().is_symlink(),
         "sessions": browser_session.list_sessions(),
     }

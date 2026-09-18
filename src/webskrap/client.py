@@ -10,6 +10,7 @@ own errors (timeouts, navigation failures) propagate unchanged.
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import tempfile
 import time
@@ -37,6 +38,9 @@ from webskrap.models import (
 )
 from webskrap.profiles import get_profile
 from webskrap.search import parse_results, search_url
+from webskrap.urls import validate_url
+
+logger = logging.getLogger(__name__)
 
 # Cursor jitter below is pixel offsets and sleep durations, never a token,
 # identifier, or security decision, so `random` would be adequate. It draws
@@ -228,6 +232,7 @@ class WebSkrapSession:
             WebSkrapError: If the session is closed.
         """
         self._ensure_open()
+        url = validate_url(url)
         started = time.perf_counter()
         page = await self.context.new_page()
         try:
@@ -444,7 +449,10 @@ class WebSkrapSession:
                     await self.browser.close()
             finally:
                 if self._temp_user_data_dir is not None:
-                    shutil.rmtree(self._temp_user_data_dir, ignore_errors=True)
+                    try:
+                        shutil.rmtree(self._temp_user_data_dir, ignore_errors=False)
+                    except OSError:
+                        logger.debug("could not remove temp profile %s", self._temp_user_data_dir)
                     self._temp_user_data_dir = None
                 self._closed = True
 
@@ -806,7 +814,10 @@ class WebSkrapClient:
                 with suppress(Exception):
                     await browser.close()
             if temp_user_data_dir is not None:
-                shutil.rmtree(temp_user_data_dir, ignore_errors=True)
+                try:
+                    await asyncio.to_thread(shutil.rmtree, temp_user_data_dir)
+                except OSError:
+                    logger.debug("could not remove temp profile %s", temp_user_data_dir)
             raise
         return WebSkrapSession(
             name=name,

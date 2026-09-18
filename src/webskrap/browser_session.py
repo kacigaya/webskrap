@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import json
+import logging
 import os
 import re
 import shutil
@@ -32,6 +33,9 @@ from playwright.async_api import Locator, Page, async_playwright
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import ElementState, LoadState, WaitUntil, text_window
 from webskrap.paths import secure_directory
+from webskrap.urls import validate_url
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -145,7 +149,7 @@ def sessions_root() -> Path:
     ``WEBSKRAP_BROWSER_DIR`` overrides the default ``~/.webskrap/browser``.
     """
     if override := os.environ.get("WEBSKRAP_BROWSER_DIR"):
-        return Path(override)
+        return Path(override).expanduser()
     return Path.home() / ".webskrap" / "browser"
 
 
@@ -252,6 +256,8 @@ def session_running(directory: Path, state: dict[str, Any] | None) -> bool:
 
 def is_session_dir(path: Path) -> bool:
     """True when ``path`` looks like a session directory this tool manages."""
+    if path.is_symlink():
+        return False
     return (
         path.is_dir()
         and SESSION_NAME_PATTERN.fullmatch(path.name) is not None
@@ -484,7 +490,10 @@ def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
             _terminate(directory, state["pid"])
         state_path(directory).unlink(missing_ok=True)
         if delete_data:
-            shutil.rmtree(directory, ignore_errors=True)
+            try:
+                shutil.rmtree(directory, ignore_errors=False)
+            except OSError:
+                logger.debug("could not remove session directory %s", directory)
     finally:
         operation_lock.release()
     return {"session": name, "deleted_data": delete_data}
@@ -625,6 +634,7 @@ async def page_state(page: Page) -> dict[str, Any]:
 
 async def goto(page: Page, url: str, wait_until: WaitUntil) -> dict[str, Any]:
     """Navigate ``page`` to ``url`` and return its status and state."""
+    url = validate_url(url)
     response = await page.goto(url, wait_until=wait_until)
     return {"status": response.status if response else None, **await page_state(page)}
 

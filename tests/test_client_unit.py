@@ -651,3 +651,23 @@ async def test_close_stops_driver_that_is_still_starting(
 
 async def _new_managed_session() -> _ManagedSession:
     return _ManagedSession()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("file:///etc/passwd", id="file"),
+        pytest.param("ftp://example.test/x", id="ftp"),
+        pytest.param("https://user:pass@example.test/", id="userinfo"),
+    ],
+)
+async def test_fetch_rejects_unfetchable_targets_without_a_page(url: str) -> None:
+    # Validation runs before new_page, so a session without a context proves
+    # no browser work starts for a rejected URL.
+    session = _session()
+
+    with pytest.raises(WebSkrapError) as caught:
+        await session.fetch(url)
+
+    assert caught.value.code is ErrorCode.USAGE

@@ -13,6 +13,7 @@ keeping one taxonomy for WebSkrap and Playwright failures alike.
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 
 
@@ -101,10 +102,13 @@ EXIT_CODES: dict[ErrorCode, int] = {
 }
 
 # Lowercased substrings that identify a failure whose raise site did not set a
-# code. Order is significant: the sandbox hint is appended to a launch failure
-# message, and a stale ref usually surfaces as a timeout on an `aria-ref=`
-# locator, so the more specific marker has to be tested first.
+# code. Order is significant: "is blocked" is tested first because a blocked
+# `--no-sandbox` launch flag would otherwise match the sandbox marker below,
+# and the actionable half is the rejection, not the sandbox. The sandbox hint
+# is appended to a launch failure message, and a stale ref usually surfaces as
+# a timeout on an `aria-ref=` locator, so those more specific markers come next.
 _MESSAGE_CODES: tuple[tuple[str, ErrorCode], ...] = (
+    ("is blocked", ErrorCode.USAGE),
     ("sandbox could not start", ErrorCode.SANDBOX),
     ("no usable sandbox", ErrorCode.SANDBOX),
     ("setuid sandbox", ErrorCode.SANDBOX),
@@ -176,14 +180,33 @@ def classify(exc: BaseException) -> ErrorCode:
     return ErrorCode.INTERNAL
 
 
+# Matches embedded credentials (scheme://user:pass@host) so error text handed
+# to models and terminals never carries them.
+_USERINFO_PATTERN = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s@]+@")
+
+
+def scrub_userinfo(text: str) -> str:
+    """Replace URL credentials in ``text`` with ``***``.
+
+    Args:
+        text: Message that may embed a ``user:pass@`` authority.
+
+    Returns:
+        The message with credentials replaced by ``***``.
+    """
+    return _USERINFO_PATTERN.sub(r"\g<scheme>***@", text)
+
+
 def first_line(exc: BaseException) -> str:
     """Return ``exc``'s first message line, or its type when it has none.
 
     Playwright errors carry a call log spanning dozens of lines. Only the first
     says what failed; the rest is noise in a tool result or a terminal.
+    Embedded URL credentials are scrubbed before returning.
     """
     lines = str(exc).strip().splitlines()
-    return lines[0].strip() if lines and lines[0].strip() else type(exc).__name__
+    first = lines[0].strip() if lines and lines[0].strip() else type(exc).__name__
+    return scrub_userinfo(first)
 
 
 def error_payload(exc: BaseException) -> dict[str, str | bool]:

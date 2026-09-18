@@ -46,7 +46,24 @@ into a shell, a template, a database query, or an LLM prompt without treating
 it as attacker-controlled.
 
 `browser_eval` and `webskrap browser eval` evaluate JavaScript in the page.
-Whatever they return crosses from the page into your program.
+Whatever they return crosses from the page into your program. Prefer
+snapshots, interaction, and waits over eval, and never evaluate text copied
+from a page. Over MCP, expressions are capped at 10,000 characters, logged
+server-side, and disabled entirely with `WEBSKRAP_ALLOW_EVAL=0`.
+
+### Fetch targets
+
+One-shot and persistent navigation accept `http`/`https` URLs (`data:` pages
+and `about:blank` carry no network request and stay allowed). Embedded
+`user:pass@` credentials are rejected everywhere so they never reach logs or
+state files.
+
+The MCP server additionally refuses hosts that resolve to non-public
+addresses (loopback, RFC1918, link-local, and friends), since its URLs arrive
+from a model that reads untrusted pages. Set `WEBSKRAP_ALLOW_PRIVATE_NET=1`
+to permit them. The Python API and CLI take URLs from the operator and skip
+the DNS check; point them at internal hosts deliberately, not with
+page-derived input.
 
 ### Chromium sandbox
 
@@ -60,9 +77,12 @@ enable unprivileged user namespaces, or run the browser as a non-root user
 with the sandbox intact. WebSkrap never drops the sandbox on its own, and
 never retries a failed launch without it.
 
-Note that one-shot `fetch` calls go through Playwright's own launcher, which
-defaults to `chromium_sandbox=False`. Pass `launch_args` or run under a
-hardened container if that matters for your use.
+One-shot `fetch`/`search` calls keep the sandbox by default, the same as
+persistent sessions. Opt out per call with `webskrap fetch --no-sandbox` /
+`webskrap search --no-sandbox` or `chromium_sandbox=False`, or per host with
+`WEBSKRAP_CHROMIUM_SANDBOX=0`. Sandbox-weakening flags are rejected when
+passed through `--launch-arg`: use the explicit switch so the choice stays
+visible.
 
 ### Persistent session state
 
@@ -93,10 +113,12 @@ and do not set it to a source tree, a config directory, or `$HOME`.
 Confinement is checked when the path is resolved, and the browser writes the
 file a moment later. On a host where another local account can write inside the
 output root, that gap is a race: a directory component could be replaced with a
-symlink in between. WebSkrap creates its own default root `0700` so no other
-account can plant anything there, which is as far as a local Python library can
-reasonably close it. A root you point at a world-writable directory is outside
-that guarantee.
+symlink in between. WebSkrap narrows it by creating intermediate directories
+`0700` itself, refusing to walk through symlinks, and re-resolving the
+destination immediately before returning it -- and it creates its own default
+root `0700` so no other account can plant anything there, which is as far as a
+local Python library can reasonably close it. A root you point at a
+world-writable directory is outside that guarantee.
 
 `stealth_fetch` applies the same trust-boundary rule to persistent browser
 profiles. Its `user_data_dir` is relative to `~/.webskrap/profiles` by default;
@@ -108,8 +130,11 @@ accept caller-chosen profile paths.
 ### Proxy credentials
 
 `ProxyConfig` holds proxy usernames and passwords in memory and passes them to
-Playwright. WebSkrap never writes them to disk, but they do appear in the
-model's `repr` and `model_dump`, so keep them out of logs and error reports.
+Playwright. WebSkrap never writes them to disk. Its `repr`/`str` redact them,
+error text scrubs embedded `user:pass@` authorities before it reaches a tool
+result or terminal, and shaped CLI/MCP fetch payloads carry an allowlist of
+response headers (content metadata, never `set-cookie` or credentials), so
+keep the raw `FetchResult` out of logs regardless.
 
 ### What is out of scope
 

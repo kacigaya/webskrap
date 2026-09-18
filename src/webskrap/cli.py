@@ -22,6 +22,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from webskrap.browser_cli import browser_app
+from webskrap.browser_session import sandbox_enabled
 from webskrap.cli_output import (
     OutputFormat,
     fail,
@@ -300,6 +301,13 @@ def fetch_command(
             help="Additional browser launch argument. Repeat for multiple args.",
         ),
     ] = None,
+    no_sandbox: Annotated[
+        bool,
+        typer.Option(
+            "--no-sandbox",
+            help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
+        ),
+    ] = False,
     webrtc_ip_handling_policy: Annotated[
         str | None,
         typer.Option(
@@ -337,6 +345,7 @@ def fetch_command(
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             launch_args=launch_args or [],
+            no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
         )
     )
@@ -367,6 +376,7 @@ async def _fetch(
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     launch_args: list[str],
+    no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
@@ -375,6 +385,7 @@ async def _fetch(
         driver="patchright",
         headless=True,
         channel=channel,
+        chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
         user_data_dir=user_data_dir,
         navigation_timeout_ms=timeout_ms,
         resource_policy=resource_policy,
@@ -519,6 +530,13 @@ def search_command(
             help="Additional browser launch argument. Repeat for multiple args.",
         ),
     ] = None,
+    no_sandbox: Annotated[
+        bool,
+        typer.Option(
+            "--no-sandbox",
+            help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
+        ),
+    ] = False,
     webrtc_ip_handling_policy: Annotated[
         str | None,
         typer.Option(
@@ -554,6 +572,7 @@ def search_command(
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             launch_args=launch_args or [],
+            no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
         )
     )
@@ -576,6 +595,7 @@ async def _search(
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     launch_args: list[str],
+    no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
@@ -583,6 +603,7 @@ async def _search(
         driver="patchright",
         headless=True,
         channel=channel,
+        chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
         user_data_dir=user_data_dir,
         navigation_timeout_ms=timeout_ms,
         resource_policy=resource_policy,

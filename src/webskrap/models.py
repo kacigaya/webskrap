@@ -73,8 +73,9 @@ class ProxyConfig(BaseModel):
     """Proxy settings for a session.
 
     ``username``/``password`` are held in memory and handed to Playwright at
-    context creation. They are never written to disk by WebSkrap, but they do
-    appear in this model's ``repr`` and ``model_dump``, so avoid logging it.
+    context creation. They are never written to disk by WebSkrap, and the
+    ``repr``/``str`` of this model redact them, so avoid logging even the
+    redacted form alongside the server URL where possible.
     """
 
     server: str
@@ -106,6 +107,26 @@ class ProxyConfig(BaseModel):
         if self.password:
             payload["password"] = self.password
         return payload
+
+    def __repr__(self) -> str:
+        """Return a repr with credentials redacted."""
+        return (
+            f"ProxyConfig(server={self.server!r}, bypass={self.bypass!r}, "
+            "username='***', password='***')"
+        )
+
+    def __str__(self) -> str:
+        """Return a string with credentials redacted."""
+        return self.__repr__()
+
+    def redacted(self) -> dict[str, str | None]:
+        """Return a credential-redacted mapping for logs and diagnostics."""
+        return {
+            "server": self.server,
+            "bypass": self.bypass,
+            "username": "***" if self.username else None,
+            "password": "***" if self.password else None,
+        }
 
 
 class BrowserProfile(BaseModel):
@@ -215,6 +236,42 @@ class BrowserProfile(BaseModel):
         return options
 
 
+#: Launch-flag prefixes a caller may not pass via ``launch_args``. These weaken
+#: renderer isolation, load outside code, or open a remote-debugging socket.
+#: The sandbox opt-out has its own explicit switch (``chromium_sandbox`` /
+#: ``--no-sandbox``); smuggling it through ``--launch-arg`` is rejected so the
+#: choice stays visible.
+BLOCKED_LAUNCH_ARGS: tuple[str, ...] = (
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-gpu-sandbox",
+    "--no-zygote",
+    "--load-extension",
+    "--load-component-extension",
+    "--unsafely-",
+    "--remote-debugging-",
+    "--remote-allow-origins",
+)
+
+#: Response headers kept in the shaped CLI/MCP fetch payload. Everything else
+#: -- notably ``set-cookie``, ``cookie``, ``authorization`` and ``proxy-*`` --
+#: is dropped so a model-facing payload does not carry session secrets.
+SHAPED_RESPONSE_HEADERS: frozenset[str] = frozenset(
+    {
+        "content-type",
+        "content-length",
+        "content-encoding",
+        "last-modified",
+        "etag",
+        "cache-control",
+        "expires",
+        "location",
+        "server",
+        "x-request-id",
+    }
+)
+
+
 class SessionConfig(BaseModel):
     """How a session's browser is launched and how its context behaves.
 
@@ -230,6 +287,11 @@ class SessionConfig(BaseModel):
     browser: Literal["chromium", "firefox", "webkit"] = "chromium"
     channel: str | None = None
     headless: bool = True
+    # Keep Chromium's OS sandbox for one-shot fetches, matching persistent
+    # sessions. False appends --no-sandbox; only use where it cannot start.
+    # The CLI and MCP server resolve WEBSKRAP_CHROMIUM_SANDBOX=0 into this
+    # field; the Python default is always sandboxed unless set explicitly.
+    chromium_sandbox: bool = True
     user_data_dir: Path | None = None
     storage_state: Path | dict[str, Any] | None = None
     proxy: ProxyConfig | None = None
@@ -288,12 +350,36 @@ class SessionConfig(BaseModel):
     # notice; set 0 for a single immediate check.
     decline_cookies_timeout_ms: float = Field(default=2_000, ge=0)
 
+    @field_validator("launch_args")
+    @classmethod
+    def validate_launch_args(_cls, value: list[str]) -> list[str]:
+        """Reject launch flags that weaken isolation or open new surfaces.
+
+        Raises:
+            ValueError: If any flag matches :data:`BLOCKED_LAUNCH_ARGS`.
+        """
+        for arg in value:
+            for blocked in BLOCKED_LAUNCH_ARGS:
+                if blocked.endswith("-"):
+                    matched = arg.startswith(blocked)
+                else:
+                    matched = arg == blocked or arg.startswith(f"{blocked}=")
+                if matched:
+                    msg = (
+                        f"launch argument '{arg}' is blocked: it weakens isolation, "
+                        "loads outside code, or opens remote debugging. Use the "
+                        "explicit chromium_sandbox switch instead."
+                    )
+                    raise ValueError(msg)
+        return value
+
     def launch_options(self) -> dict[str, Any]:
         """Return Playwright launch options, including assembled browser flags.
 
         Caller-supplied ``launch_args`` win: a flag already present there is
         not added again by the automation, screen, WebRTC or fingerprint
-        helpers.
+        helpers. Chromium keeps its OS sandbox unless ``chromium_sandbox`` is
+        False, in which case ``--no-sandbox`` is appended.
         """
         options: dict[str, Any] = {
             "headless": self.headless,
@@ -306,6 +392,7 @@ class SessionConfig(BaseModel):
         args = (
             self._automation_args()
             + self._screen_args()
+            + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
             + self._webrtc_ip_handling_args()
             + list(self.launch_args)
@@ -313,6 +400,14 @@ class SessionConfig(BaseModel):
         if args:
             options["args"] = args
         return options
+
+    def _sandbox_args(self) -> list[str]:
+        """Return the sandbox opt-out flag when sandboxing is disabled."""
+        if self.chromium_sandbox or self.browser != "chromium":
+            return []
+        if any(a == "--no-sandbox" or a.startswith("--no-sandbox=") for a in self.launch_args):
+            return []
+        return ["--no-sandbox"]
 
     def _automation_args(self) -> list[str]:
         # Standard Playwright Chrome exposes navigator.webdriver=true under
@@ -547,16 +642,23 @@ def shape_fetch_result(result: FetchResult, max_chars: int, offset: int = 0) -> 
     ``text_length``, ``text_offset`` and ``text_truncated`` report what was cut,
     and ``next_text_offset`` is what to pass back for the rest, so a clipped
     page can be read through rather than fetched again. ``links`` is empty
-    unless the fetch collected them. Cookies are left out.
+    unless the fetch collected them. Cookies are left out, and headers are
+    filtered to :data:`SHAPED_RESPONSE_HEADERS` so session secrets such as
+    ``set-cookie`` never reach a model-facing payload.
     """
     window = text_window(result.text or "", max_chars, offset)
+    shaped_headers = {
+        name: value
+        for name, value in result.headers.items()
+        if name.lower() in SHAPED_RESPONSE_HEADERS
+    }
     return {
         "url": result.url,
         "final_url": result.final_url,
         "status": result.status,
         "ok": result.ok,
         "title": result.title,
-        "headers": result.headers,
+        "headers": shaped_headers,
         "text": window.text,
         "text_length": window.length,
         "text_offset": window.offset,
