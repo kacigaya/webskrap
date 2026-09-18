@@ -127,19 +127,23 @@ def test_arity_rejection_is_tagged_at_the_raise_site() -> None:
 
 
 @pytest.mark.parametrize(
-    "message",
+    ("message", "expected"),
     [
-        pytest.param("proxy failed: https://user:s3cret@example.com/", id="https"),
-        pytest.param("auth at http://admin:pw@proxy.test:8080 refused", id="http-port"),
+        pytest.param(
+            "proxy failed: https://user:s3cret@example.com/",
+            "proxy failed: https://***@example.com/",
+            id="https",
+        ),
+        pytest.param(
+            "auth at http://admin:pw@proxy.test:8080 refused",
+            "auth at http://***@proxy.test:8080 refused",
+            id="http-port",
+        ),
+        pytest.param("no credentials here", "no credentials here", id="unchanged"),
     ],
 )
-def test_scrub_userinfo_removes_credentials(message: str) -> None:
-    scrubbed = scrub_userinfo(message)
-
-    assert "s3cret" not in scrubbed
-    assert "pw@" not in scrubbed
-    assert "***@" in scrubbed
-    assert "example.com" in scrubbed or "proxy.test" in scrubbed
+def test_scrub_userinfo_removes_credentials(message: str, expected: str) -> None:
+    assert scrub_userinfo(message) == expected
 
 
 def test_first_line_scrubs_credentials() -> None:
