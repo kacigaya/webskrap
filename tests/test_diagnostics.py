@@ -56,6 +56,8 @@ def test_diagnose_reports_unset_overrides_as_none(monkeypatch: Any) -> None:
     assert all(value is None for value in report["environment"].values())
     # Unset means sandboxed, which is what the resolved value must show.
     assert report["chromium_sandbox"] is True
+    assert report["chromium_sandbox_one_shot"] is True
+    assert report["sessions_root_symlink"] is False
 
 
 def test_diagnose_lists_sessions_even_when_the_browser_is_broken(

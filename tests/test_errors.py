@@ -13,6 +13,7 @@ from webskrap.errors import (
     error_payload,
     exit_code,
     first_line,
+    scrub_userinfo,
 )
 
 
@@ -123,3 +124,39 @@ def test_arity_rejection_is_tagged_at_the_raise_site() -> None:
         browser_session.element_arguments("fill", [])
 
     assert caught.value.code is ErrorCode.USAGE
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        pytest.param(
+            "proxy failed: https://user:s3cret@example.com/",
+            "proxy failed: https://***@example.com/",
+            id="https",
+        ),
+        pytest.param(
+            "auth at http://admin:pw@proxy.test:8080 refused",
+            "auth at http://***@proxy.test:8080 refused",
+            id="http-port",
+        ),
+        pytest.param("no credentials here", "no credentials here", id="unchanged"),
+    ],
+)
+def test_scrub_userinfo_removes_credentials(message: str, expected: str) -> None:
+    assert scrub_userinfo(message) == expected
+
+
+def test_first_line_scrubs_credentials() -> None:
+    error = WebSkrapError("proxy https://user:s3cret@example.com/ refused\nCall log:\n noise")
+
+    assert first_line(error) == "proxy https://***@example.com/ refused"
+
+
+def test_error_payload_scrubs_credentials() -> None:
+    payload = error_payload(WebSkrapError("proxy https://user:s3cret@example.com/ refused"))
+
+    assert "s3cret" not in payload["error"]
+
+
+def test_blocked_launch_argument_classifies_as_usage() -> None:
+    assert classify(WebSkrapError("launch argument '--no-sandbox' is blocked")) is ErrorCode.USAGE

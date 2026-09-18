@@ -668,3 +668,74 @@ def test_guide_documents_every_error_code() -> None:
         if code is ErrorCode.INTERNAL:
             continue
         assert f"`{code}`" in guide, code
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("file:///etc/passwd", id="file"),
+        pytest.param("ftp://example.test/x", id="ftp"),
+        pytest.param("https://user:pass@example.test/", id="userinfo"),
+        pytest.param("http://169.254.169.254/", id="link-local"),
+    ],
+)
+def test_fetch_rejects_untrusted_targets_before_launch(monkeypatch: Any, url: str) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.delenv("WEBSKRAP_ALLOW_PRIVATE_NET", raising=False)
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.fetch(url))
+
+    assert caught.value.code is ErrorCode.USAGE
+    assert _FakeClient.calls == []
+
+
+def test_stealth_fetch_rejects_private_targets_before_launch(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.delenv("WEBSKRAP_ALLOW_PRIVATE_NET", raising=False)
+
+    with pytest.raises(WebSkrapError, match="private or local"):
+        asyncio.run(mcp_server.stealth_fetch("http://127.0.0.1:8000/"))
+
+    assert _FakeClient.calls == []
+
+
+def test_private_opt_out_reaches_the_client(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.setenv("WEBSKRAP_ALLOW_PRIVATE_NET", "1")
+
+    asyncio.run(mcp_server.fetch("http://127.0.0.1:8000/"))
+
+    assert _FakeClient.calls[0]["url"] == "http://127.0.0.1:8000/"
+
+
+def test_browser_goto_rejects_unfetchable_targets(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_goto("file:///etc/passwd"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_open_rejects_unfetchable_urls(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_open("file:///etc/passwd"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_eval_rejects_oversize_expressions() -> None:
+    with pytest.raises(WebSkrapError, match="under 10000"):
+        asyncio.run(mcp_server.browser_eval("x" * 10_001))
+
+
+def test_browser_eval_env_gate_disables_the_tool(monkeypatch: Any) -> None:
+    monkeypatch.setenv("WEBSKRAP_ALLOW_EVAL", "0")
+
+    with pytest.raises(WebSkrapError, match="disabled") as caught:
+        asyncio.run(mcp_server.browser_eval("1 + 1"))
+
+    assert caught.value.code is ErrorCode.USAGE

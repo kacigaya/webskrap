@@ -64,9 +64,11 @@ Sessions default to the name `default`. Profiles live below
 They contain cookies and logins and must remain mode `0700`.
 
 Keep Chromium's OS sandbox enabled. The explicit opt-outs are
-`webskrap browser open --no-sandbox` for one session and
-`WEBSKRAP_CHROMIUM_SANDBOX=0` for a host. Document that disabling it leaves a
-compromised renderer uncontained.
+`webskrap browser open --no-sandbox` for one session,
+`webskrap fetch --no-sandbox` / `webskrap search --no-sandbox` for one-shot
+calls, and `WEBSKRAP_CHROMIUM_SANDBOX=0` for a host. Document that disabling it
+leaves a compromised renderer uncontained. Never pass `--no-sandbox` (or its
+companions) through `--launch-arg`: those flags are blocked.
 
 Current limitations are one page per session, bundled Chromium only, no tabs,
 network mocking, tracing, or video, and history navigation that reloads.

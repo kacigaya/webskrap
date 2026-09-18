@@ -487,3 +487,90 @@ def test_search_result_rejects_an_unknown_engine() -> None:
             status=200,
             ok=True,
         )
+
+
+def test_chromium_stays_sandboxed_by_default() -> None:
+    config = SessionConfig()
+
+    assert config.chromium_sandbox is True
+    assert "--no-sandbox" not in config.launch_options().get("args", [])
+
+
+def test_sandbox_opt_out_adds_exactly_one_flag() -> None:
+    args = SessionConfig(chromium_sandbox=False).launch_options()["args"]
+
+    assert args.count("--no-sandbox") == 1
+
+
+def test_sandbox_opt_out_is_chromium_only() -> None:
+    options = SessionConfig(
+        browser="firefox", headless=False, chromium_sandbox=False
+    ).launch_options()
+
+    assert "args" not in options
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        pytest.param("--no-sandbox", id="no-sandbox"),
+        pytest.param("--disable-setuid-sandbox", id="setuid"),
+        pytest.param("--load-extension=/tmp/evil", id="load-extension"),
+        pytest.param("--unsafely-treat-insecure-origin-as-secure=http://x", id="unsafely"),
+        pytest.param("--remote-debugging-port=9222", id="remote-debugging"),
+        pytest.param("--remote-allow-origins=*", id="allow-origins"),
+    ],
+)
+def test_dangerous_launch_args_are_blocked(flag: str) -> None:
+    with pytest.raises(ValidationError, match="is blocked"):
+        SessionConfig(launch_args=[flag])
+
+
+def test_benign_launch_args_still_pass() -> None:
+    config = SessionConfig(launch_args=["--window-size=800,600", "--no-sandboxed-feature"])
+
+    assert "--window-size=800,600" in config.launch_options()["args"]
+
+
+def test_proxy_repr_and_str_redact_credentials() -> None:
+    proxy = ProxyConfig(server="http://proxy.test", username="user", password="secret")
+
+    assert "secret" not in repr(proxy)
+    assert "'user'" not in repr(proxy)
+    assert "secret" not in str(proxy)
+    # The driver still gets the real values; only the display is redacted.
+    assert proxy.to_playwright()["password"] == "secret"
+
+
+def test_proxy_redacted_mapping_hides_credentials() -> None:
+    redacted = ProxyConfig(
+        server="http://proxy.test", username="user", password="secret"
+    ).redacted()
+
+    assert redacted["password"] == "***"
+    assert redacted["username"] == "***"
+    assert redacted["server"] == "http://proxy.test"
+
+
+def test_shape_fetch_result_filters_response_headers() -> None:
+    result = FetchResult(
+        url="https://example.test",
+        final_url="https://example.test",
+        status=200,
+        ok=True,
+        headers={
+            "content-type": "text/html",
+            "set-cookie": "session=abc",
+            "Set-Cookie": "other=1",
+            "authorization": "Bearer x",
+            "x-request-id": "42",
+        },
+        text="body",
+        title="t",
+        cookies=[],
+        timings={"elapsed_ms": 1.0},
+    )
+
+    payload = shape_fetch_result(result, 100)
+
+    assert payload["headers"] == {"content-type": "text/html", "x-request-id": "42"}

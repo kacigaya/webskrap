@@ -9,6 +9,30 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-18
+
+### Security
+
+- One-shot `fetch`/`search` calls now keep Chromium's OS sandbox by default,
+  matching persistent sessions. Opt out per call with `webskrap fetch
+  --no-sandbox`, `webskrap search --no-sandbox`, or
+  `SessionConfig(chromium_sandbox=False)`, or per host with
+  `WEBSKRAP_CHROMIUM_SANDBOX=0`. Sandbox-weakening flags (`--no-sandbox`,
+  `--disable-setuid-sandbox`, `--load-extension`, `--unsafely-*`,
+  `--remote-debugging-*`) are rejected when passed through `--launch-arg`.
+- Fetch and navigation targets must be `http`/`https` URLs without embedded
+  credentials (`data:` pages and `about:blank` stay allowed). The MCP server
+  additionally refuses hosts resolving to non-public addresses unless
+  `WEBSKRAP_ALLOW_PRIVATE_NET=1` is set.
+- MCP `browser_eval` caps expressions at 10,000 characters, logs them
+  server-side, and can be disabled with `WEBSKRAP_ALLOW_EVAL=0`.
+- Proxy credentials are redacted from `ProxyConfig` display output, embedded
+  URL credentials are scrubbed from error text, and shaped CLI/MCP fetch
+  payloads return an allowlist of response headers (no `set-cookie`).
+- MCP output and profile directories are created level-by-level `0700`,
+  symlinks along the way are rejected, and destinations are re-resolved
+  before use to narrow the resolve-to-write race.
+
 ## [2.2.0] - 2026-09-15
 
 ### Added

@@ -751,3 +751,56 @@ def test_schema_human_format_lists_commands() -> None:
     assert result.exit_code == 0, result.output
     assert "WebSkrap Commands" in result.output
     assert "browser open" in "".join(result.output.split("\n"))
+
+
+def test_fetch_stays_sandboxed_by_default(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    config = _FakeClient.calls[0]["config"]
+    assert config.chromium_sandbox is True
+    assert "--no-sandbox" not in config.launch_options().get("args", [])
+
+
+def test_fetch_no_sandbox_flag_opts_out(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(
+        cli.app, ["fetch", "https://example.test", "--format", "json", "--no-sandbox"]
+    )
+
+    assert result.exit_code == 0, result.output
+    config = _FakeClient.calls[0]["config"]
+    assert config.chromium_sandbox is False
+    assert "--no-sandbox" in config.launch_options()["args"]
+
+
+def test_fetch_no_sandbox_env_opts_out(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.setenv("WEBSKRAP_CHROMIUM_SANDBOX", "0")
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert _FakeClient.calls[0]["config"].chromium_sandbox is False
+
+
+def test_search_no_sandbox_flag_opts_out(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = runner.invoke(
+        cli.app, ["search", "example domain", "--format", "json", "--no-sandbox"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _FakeClient.calls[0]["config"].chromium_sandbox is False
+
+
+def test_schema_lists_no_sandbox_for_fetch_and_search() -> None:
+    schema = json.loads(runner.invoke(cli.app, ["schema"]).output)
+
+    for name in ("fetch", "search"):
+        command = next(item for item in schema["commands"] if item["name"] == name)
+        assert "no_sandbox" in {parameter["name"] for parameter in command["parameters"]}, name
