@@ -81,7 +81,20 @@ class VirtualDisplay:
             WebSkrapError: If the host is not Linux, Xvfb is not installed, or
                 the server exits or does not become ready in time.
         """
-        return await asyncio.to_thread(cls._start, width, height)
+        startup = asyncio.create_task(asyncio.to_thread(cls._start, width, height))
+        try:
+            return await asyncio.shield(startup)
+        except asyncio.CancelledError:
+            # Cancelling asyncio.to_thread does not stop its worker thread. Let
+            # startup finish, then stop the display it created so cancellation
+            # cannot orphan an Xvfb process and its cookie directory.
+            try:
+                virtual_display = await startup
+            except Exception:
+                virtual_display = None
+            else:
+                await asyncio.shield(virtual_display.stop())
+            raise
 
     @classmethod
     def _start(cls, width: int, height: int) -> VirtualDisplay:

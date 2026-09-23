@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import stat
 import struct
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -69,6 +71,35 @@ async def test_non_linux_is_a_launch_error(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(WebSkrapError, match="needs Linux"):
         await display.VirtualDisplay.start(800, 600)
+
+
+async def test_cancelled_start_stops_the_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    stopped: list[bool] = []
+
+    def start_blocking(_width: int, _height: int) -> display.VirtualDisplay:
+        started.set()
+        release.wait()
+
+        class _Display:
+            async def stop(self) -> None:
+                stopped.append(True)
+
+        return _Display()  # type: ignore[return-value]
+
+    monkeypatch.setattr(display.VirtualDisplay, "_start", staticmethod(start_blocking))
+    task = asyncio.create_task(display.VirtualDisplay.start(800, 600))
+    assert await asyncio.to_thread(started.wait, 5)
+    task.cancel()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert stopped == [True]
 
 
 def _xdpyinfo(executable: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
