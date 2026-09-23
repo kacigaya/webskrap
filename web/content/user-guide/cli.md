@@ -154,8 +154,13 @@ profile directory when browser continuity matters:
 webskrap fetch https://example.com \
   --channel chrome \
   --user-data-dir .webskrap/headless-profile \
-  --mask-headless-user-agent
+  --virtual-display
 ```
+
+`--virtual-display` runs Chrome headed on a private Xvfb display (Linux, `Xvfb`
+installed), so no `HeadlessChrome` token or empty client hints reach the site.
+`--mask-headless-user-agent` rewrites the token under headless mode instead,
+but Chromium then empties the high-entropy client hints.
 
 For fingerprint-statistics or WebRTC leak-test pages, apply profile
 locale/timezone/media metadata and block non-proxied WebRTC UDP candidates
@@ -164,7 +169,7 @@ without viewport, user-agent, or JavaScript patches:
 ```bash
 webskrap fetch https://amiunique.org/fr/fingerprint \
   --channel chrome \
-  --mask-headless-user-agent \
+  --virtual-display \
   --patchright-context-profile \
   --reduce-fingerprint-surface \
   --webrtc-ip-handling-policy disable_non_proxied_udp

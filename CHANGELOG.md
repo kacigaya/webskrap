@@ -9,6 +9,21 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `SessionConfig(virtual_display=True)`, `webskrap fetch/search
+  --virtual-display` and the MCP `virtual_display` parameter run a headless
+  session as headed Chromium on a private Xvfb display (Linux). The page sees
+  no `HeadlessChrome` token, full user-agent client hints, and real scrollbars,
+  with nothing overridden. Each session gets its own Xvfb, reachable only with
+  a random cookie, stopped when the session closes.
+
+### Fixed
+
+- Documented that `mask_headless_user_agent` empties the high-entropy client
+  hints (Chromium drops them when `--user-agent` is set); the docs had claimed
+  they were left intact. The option is ignored when `virtual_display` is set.
+
 ## [2.4.0] - 2026-09-23
 
 ### Fixed

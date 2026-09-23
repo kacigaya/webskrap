@@ -103,6 +103,7 @@ Patchright options:
   "patchright_context_profile": false,
   "reduce_fingerprint_surface": false,
   "mask_headless_user_agent": false,
+  "virtual_display": false,
   "webrtc_ip_handling_policy": null
 }
 ```
@@ -206,8 +207,10 @@ args = []
 `stealth_fetch` uses the Patchright driver and accepts the same controls as the
 [Stealth](/docs/user-guide/stealth) guide, including
 `channel`, `headless`, `user_data_dir`, `patchright_context_profile`,
-`reduce_fingerprint_surface`, `mask_headless_user_agent`, and
-`webrtc_ip_handling_policy`.
+`reduce_fingerprint_surface`, `mask_headless_user_agent`, `virtual_display`,
+and `webrtc_ip_handling_policy`. On Linux with Xvfb, prefer `virtual_display`
+over `mask_headless_user_agent`: it runs Chrome headed on a private display
+instead of rewriting the user agent, which empties the high-entropy client hints.
 
 For headless best-effort stealth from MCP, use real Chrome and opt in only to the
 native browser controls you need:
@@ -218,7 +221,7 @@ native browser controls you need:
   "channel": "chrome",
   "headless": true,
   "user_data_dir": "headless-profile",
-  "mask_headless_user_agent": true,
+  "virtual_display": true,
   "patchright_context_profile": true,
   "webrtc_ip_handling_policy": "disable_non_proxied_udp"
 }

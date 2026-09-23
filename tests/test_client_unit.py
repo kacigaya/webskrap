@@ -671,3 +671,96 @@ async def test_fetch_rejects_unfetchable_targets_without_a_page(url: str) -> Non
         await session.fetch(url)
 
     assert caught.value.code is ErrorCode.USAGE
+
+
+class _LaunchContext:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def set_default_timeout(self, _timeout: float) -> None:
+        pass
+
+    def set_default_navigation_timeout(self, _timeout: float) -> None:
+        pass
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _LaunchChromium:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.options: dict[str, object] = {}
+
+    async def launch_persistent_context(self, _dir: str, **options: object) -> _LaunchContext:
+        self.options = options
+        if self.fail:
+            msg = "browserType.launchPersistentContext: failed to launch"
+            raise RuntimeError(msg)
+        return _LaunchContext()
+
+
+class _FakeDisplay:
+    def __init__(self) -> None:
+        self.stopped = 0
+        self.env = {"DISPLAY": ":99", "XAUTHORITY": "/tmp/webskrap-display-x/Xauthority"}
+
+    async def stop(self) -> None:
+        self.stopped += 1
+
+
+def _virtual_display_client(
+    monkeypatch: pytest.MonkeyPatch, chromium: _LaunchChromium
+) -> tuple[WebSkrapClient, list[_FakeDisplay], list[tuple[int, int]]]:
+    displays: list[_FakeDisplay] = []
+    sizes: list[tuple[int, int]] = []
+
+    async def fake_start(width: int, height: int) -> _FakeDisplay:
+        sizes.append((width, height))
+        displays.append(_FakeDisplay())
+        return displays[-1]
+
+    async def no_probe(*_args: object) -> str:
+        raise AssertionError("the UA probe must not run under a virtual display")
+
+    monkeypatch.setattr("webskrap.client.VirtualDisplay.start", fake_start)
+    client = WebSkrapClient()
+    monkeypatch.setattr(client, "_headless_clean_user_agent", no_probe)
+    client._playwright = type("_PW", (), {"chromium": chromium})()
+    return client, displays, sizes
+
+
+@pytest.mark.asyncio
+async def test_virtual_display_session_runs_headed_on_the_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = _LaunchChromium()
+    client, displays, sizes = _virtual_display_client(monkeypatch, chromium)
+    config = SessionConfig(driver="patchright", virtual_display=True, mask_headless_user_agent=True)
+
+    session = await client._create_session("vd", config, get_profile("desktop-chrome"))
+
+    env = chromium.options["env"]
+    assert isinstance(env, dict)
+    assert env["DISPLAY"] == ":99"
+    assert env["XAUTHORITY"].endswith("Xauthority")
+    assert "PATH" in env  # the rest of the environment survives
+    assert chromium.options["headless"] is False
+    assert not any(str(a).startswith("--user-agent") for a in chromium.options["args"])
+    assert sizes == [(1920, 1080)]
+
+    await session.close()
+    assert displays[0].stopped == 1
+
+
+@pytest.mark.asyncio
+async def test_virtual_display_is_stopped_when_launch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, displays, _sizes = _virtual_display_client(monkeypatch, _LaunchChromium(fail=True))
+    config = SessionConfig(driver="patchright", virtual_display=True)
+
+    with pytest.raises(RuntimeError, match="failed to launch"):
+        await client._create_session("vd", config, get_profile("desktop-chrome"))
+
+    assert displays[0].stopped == 1

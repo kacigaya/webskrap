@@ -57,7 +57,7 @@ config = SessionConfig(
     driver="patchright",
     channel="chrome",
     headless=True,
-    mask_headless_user_agent=True,
+    virtual_display=True,
     patchright_context_profile=True,
     reduce_fingerprint_surface=True,
     webrtc_ip_handling_policy="disable_non_proxied_udp",
@@ -127,14 +127,18 @@ config = SessionConfig(
 )
 ```
 
-The other headless tell that survives patchright is the user agent: headless
+The other headless tell that survives patchright is headless mode itself:
 Chrome stamps `HeadlessChrome` into `navigator.userAgent` and the worker UA
-(including `SharedWorker`, which runs in its own process). Set
-`mask_headless_user_agent=True` to rewrite it to `Chrome`. WebSkrap probes the
-real UA once, then applies the cleaned value via the browser's own
-`--user-agent` override at launch. The setting is process wide, covering the page, every
-worker, and request headers, with native client hints left intact. It is off by
-default so headless stays honestly headless unless you opt in.
+(including `SharedWorker`, which runs in its own process), and Playwright only
+hides scrollbars and forces hover/pointer media types in headless mode.
+
+### Virtual display
+
+On Linux, set `virtual_display=True` to run the browser headed on a private
+Xvfb server instead of in headless mode. Nothing is overridden, so the page sees
+a normal headed Chrome: no `HeadlessChrome` token, the full set of user-agent
+client hints, real scrollbars, and an X screen sized by `headless_screen`
+(1920x1080 when that is `None`). The window stays invisible.
 
 ```python
 config = SessionConfig(
@@ -142,20 +146,39 @@ config = SessionConfig(
     channel="chrome",
     headless=True,
     headless_screen=Viewport(width=1366, height=768),
-    mask_headless_user_agent=True,
+    virtual_display=True,
 )
 ```
 
-With a simulated screen and a masked UA, a headless chromium run clears the live
-bot-detection suite (`tests/test_bot_detection.py`) that otherwise requires
-headed mode.
+WebSkrap starts one Xvfb per session and stops it when the session closes (a
+process killed with SIGKILL leaves its Xvfb running). The
+server listens on no TCP port and only accepts clients holding a random
+MIT-MAGIC-COOKIE stored in an owner-only file, so other local users cannot
+connect to it. It needs the `Xvfb` binary (Debian/Ubuntu: `apt install xvfb`);
+without it, or off Linux, the session fails to start with a `browser_launch`
+error. `virtual_display` only applies when `headless=True`.
+
+### Masking the user agent
+
+`mask_headless_user_agent=True` keeps headless mode and rewrites
+`HeadlessChrome` to `Chrome` instead. WebSkrap probes the real UA once, then
+applies the cleaned value with Chromium's `--user-agent` launch flag, which
+covers the page, every worker, and request headers. The cost is client hints:
+with a command-line UA override, Chromium reports only the low-entropy hints, so
+`navigator.userAgentData.getHighEntropyValues()` and the
+`Sec-CH-UA-Full-Version-List`, `-Arch`, `-Bitness` and `-Platform-Version`
+headers come back empty, which a real Chrome never does. Prefer
+`virtual_display` where Xvfb is available. The mask is ignored when
+`virtual_display` is set, and it is off by default so headless stays honestly
+headless unless you opt in.
 
 ## Practical guidance
 
 - Reuse persistent sessions when realistic continuity matters.
 - Keep locale, timezone, and languages coherent.
 - Prefer an installed browser channel such as `chrome` when testing headed behavior.
-- Treat headless stealth as best-effort; headed Patchright remains the strict mode.
+- Treat headless stealth as best-effort; headed Patchright, or `virtual_display`
+  on Linux, remains the strict mode.
 - Avoid randomizing every request; incoherent changes can look less realistic.
 
 ## Recipes
@@ -175,8 +198,7 @@ config = SessionConfig(
 )
 ```
 
-Headless best-effort mode with a coherent virtual screen and browser-level
-user-agent cleanup:
+Invisible headed browser on a private Xvfb display (Linux):
 
 ```python
 from pathlib import Path
@@ -189,7 +211,7 @@ config = SessionConfig(
     headless=True,
     user_data_dir=Path(".webskrap/headless-profile"),
     headless_screen=Viewport(width=1366, height=768),
-    mask_headless_user_agent=True,
+    virtual_display=True,
 )
 ```
 

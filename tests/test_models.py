@@ -574,3 +574,32 @@ def test_shape_fetch_result_filters_response_headers() -> None:
     payload = shape_fetch_result(result, 100)
 
     assert payload["headers"] == {"content-type": "text/html", "x-request-id": "42"}
+
+
+def test_virtual_display_launches_headed_with_window_but_no_headless_screen() -> None:
+    config = SessionConfig(driver="patchright", headless=True, virtual_display=True)
+
+    options = config.launch_options()
+
+    assert options["headless"] is False
+    assert "--window-size=1920,1080" in options["args"]
+    assert "--window-position=0,0" in options["args"]
+    # --screen-info only exists in headless mode; Xvfb supplies the screen.
+    assert not any(a.startswith("--screen-info") for a in options["args"])
+    assert config.uses_virtual_display()
+
+
+def test_virtual_display_screen_follows_headless_screen() -> None:
+    sized = SessionConfig(virtual_display=True, headless_screen=Viewport(width=1366, height=768))
+    unsized = SessionConfig(virtual_display=True, headless_screen=None)
+
+    assert sized.virtual_screen() == Viewport(width=1366, height=768)
+    assert unsized.virtual_screen() == Viewport(width=1920, height=1080)
+    assert not any(a.startswith("--window-size") for a in unsized.launch_options().get("args", []))
+
+
+def test_virtual_display_is_ignored_for_headed_runs() -> None:
+    config = SessionConfig(headless=False, virtual_display=True)
+
+    assert config.launch_options()["headless"] is False
+    assert not config.uses_virtual_display()

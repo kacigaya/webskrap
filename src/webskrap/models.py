@@ -313,12 +313,21 @@ class SessionConfig(BaseModel):
         default_factory=lambda: Viewport(width=1920, height=1080)
     )
     # Headless Chrome stamps "HeadlessChrome" into navigator.userAgent (and the
-    # worker UA), the one fingerprint tell that survives patchright. When True
-    # for a headless chromium run, WebSkrap probes the real UA and re-applies it
-    # with "HeadlessChrome" rewritten to "Chrome" via the browser's own UA
-    # override (covering workers and client hints) — not JavaScript spoofing.
-    # Off by default so headless stays honestly headless unless opted in.
+    # worker UA). When True for a headless chromium run, WebSkrap probes the
+    # real UA and re-applies it with "HeadlessChrome" rewritten to "Chrome" via
+    # the --user-agent launch flag. Chromium then reports only low-entropy
+    # client hints: getHighEntropyValues() and Sec-CH-UA-Full-Version-List,
+    # -Arch, -Bitness and -Platform-Version come back empty, which no real
+    # Chrome does. Prefer virtual_display, which needs no override. Ignored
+    # when virtual_display is set.
     mask_headless_user_agent: bool = False
+    # Run a headless session as a headed browser on a private Xvfb display
+    # (Linux, Xvfb installed) instead of in Chromium's headless mode. Nothing
+    # is overridden: no HeadlessChrome token, full client hints, real
+    # scrollbars and pointer media, and a real X screen sized by
+    # headless_screen (1920x1080 when that is None). Only applies when
+    # headless is True; the window stays invisible either way.
+    virtual_display: bool = False
     # Native Chromium rendering reduction. When enabled, canvas readback and
     # WebGL are disabled through browser flags. This avoids high-entropy
     # rendering fingerprints without JavaScript monkeypatching, but can break
@@ -382,7 +391,8 @@ class SessionConfig(BaseModel):
         False, in which case ``--no-sandbox`` is appended.
         """
         options: dict[str, Any] = {
-            "headless": self.headless,
+            # A virtual display runs the browser headed on an invisible screen.
+            "headless": self.headless and not self.virtual_display,
             "timeout": self.timeout_ms,
         }
         if self.channel:
@@ -421,6 +431,14 @@ class SessionConfig(BaseModel):
             return []
         return [flag]
 
+    def uses_virtual_display(self) -> bool:
+        """True when this session runs headed on a private Xvfb display."""
+        return self.virtual_display and self.headless
+
+    def virtual_screen(self) -> Viewport:
+        """Return the screen size a virtual display is started with."""
+        return self.headless_screen or Viewport(width=1920, height=1080)
+
     def _screen_args(self) -> list[str]:
         # Configure a virtual screen for headless chromium so the browser
         # reports real display metrics instead of headless defaults. Skips any
@@ -431,9 +449,11 @@ class SessionConfig(BaseModel):
         candidates = {
             "--window-size": f"--window-size={width},{height}",
             "--window-position": "--window-position=0,0",
-            # Chrome headless virtual-display flag: defines a screen at 0,0.
-            "--screen-info": f"--screen-info={{{width}x{height}}}",
         }
+        if not self.virtual_display:
+            # Headless-only flag defining a screen at 0,0. Under a virtual
+            # display the X server is the screen.
+            candidates["--screen-info"] = f"--screen-info={{{width}x{height}}}"
         return [
             arg
             for prefix, arg in candidates.items()

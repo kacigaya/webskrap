@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -229,3 +231,34 @@ async def test_links_are_skipped_when_javascript_is_disabled(test_server: str) -
 
     assert result.links == []
     assert result.links_total == 0
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux") or shutil.which("Xvfb") is None,
+    reason="needs Linux with Xvfb",
+)
+async def test_virtual_display_presents_a_headed_browser(test_server: str) -> None:
+    # Headed on Xvfb: no HeadlessChrome token anywhere and full client hints,
+    # which a --user-agent rewrite of headless Chrome cannot give.
+    config = SessionConfig(driver="patchright", channel="chromium", virtual_display=True)
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("virtual-display", config=config)
+        page = await session.context.new_page()
+        # userAgentData needs a secure context; a data: URL is not one.
+        await page.goto(f"{test_server}/links")
+        seen = await page.evaluate(
+            """async () => ({
+                ua: navigator.userAgent,
+                brands: navigator.userAgentData.brands.map((b) => b.brand),
+                hints: await navigator.userAgentData.getHighEntropyValues(
+                    ['architecture', 'bitness', 'uaFullVersion']),
+                screen: [screen.width, screen.height],
+            })"""
+        )
+
+    assert "HeadlessChrome" not in seen["ua"]
+    assert "HeadlessChrome" not in seen["brands"]
+    assert seen["hints"]["architecture"]
+    assert seen["hints"]["bitness"]
+    assert seen["hints"]["uaFullVersion"]
+    assert seen["screen"] == [1920, 1080]
