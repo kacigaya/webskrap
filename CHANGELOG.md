@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-23
+
 ### Added
 
 - `SessionConfig(virtual_display=True)`, `webskrap fetch/search
@@ -16,7 +18,7 @@ history, so they summarize each release rather than list every change.
   session as headed Chromium on a private Xvfb display (Linux). The page sees
   no `HeadlessChrome` token, full user-agent client hints, and real scrollbars,
   with nothing overridden. Each session gets its own Xvfb, reachable only with
-  a random cookie, stopped when the session closes.
+  a random cookie, stopped when the session closes or startup is cancelled.
 
 ### Fixed
 
@@ -451,7 +453,9 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/kacigaya/webskrap/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/kacigaya/webskrap/compare/v2.3.0...v2.4.0
 [2.4.0]: https://github.com/kacigaya/webskrap/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/kacigaya/webskrap/compare/v2.2.0...v2.3.0
 [1.0.2]: https://github.com/kacigaya/webskrap/compare/v1.0.1...v1.0.2
