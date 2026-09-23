@@ -31,7 +31,7 @@ jobs:
         # implementation and reads the `# nosec` markers Ruff ignores.
         run: uv run --extra dev bandit -c pyproject.toml -q -r src/
       - name: Audit dependencies
-        run: uv run --extra dev --with pip-audit==2.9.0 pip-audit
+        run: uv run --extra dev --with pip-audit==2.9.0 pip-audit --skip-editable
       - name: Prepare package output
         run: echo "PACKAGE_DIR=$(mktemp -d .package-dist.XXXXXX)" >> "$GITHUB_ENV"
       - name: Build
