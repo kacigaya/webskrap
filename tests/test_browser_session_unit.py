@@ -469,3 +469,59 @@ def test_sessions_root_expands_a_tilde_override(monkeypatch: pytest.MonkeyPatch)
 
     assert str(browser_session.sessions_root()).endswith("sessions")
     assert "~" not in str(browser_session.sessions_root())
+
+
+def test_launch_hides_automation_and_sets_a_virtual_screen(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A remote-debugging port alone sets navigator.webdriver, and headless
+    # Chrome otherwise reports an 800x600 screen with the window at 10,10.
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True)
+
+    command = commands[0]
+    assert "--disable-blink-features=AutomationControlled" in command
+    assert "--screen-info={1920x1080}" in command
+    assert "--window-size=1920,1080" in command
+    assert "--window-position=0,0" in command
+    assert command.count("--no-sandbox") == 0
+
+
+def test_headed_launch_keeps_the_real_display(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=False)
+
+    command = commands[0]
+    assert "--disable-blink-features=AutomationControlled" in command
+    assert not any(arg.startswith(("--screen-info", "--window-size")) for arg in command)
+    assert "--headless=new" not in command
+
+
+def test_launch_opt_out_adds_no_sandbox_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True, chromium_sandbox=False)
+
+    assert commands[0].count("--no-sandbox") == 1
+
+
+async def test_evaluate_runs_in_the_page_world() -> None:
+    # Patchright evaluates in an isolated world by default, which hides page
+    # globals from `browser eval`.
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class _Page:
+        async def evaluate(self, expression: str, **kwargs: Any) -> str:
+            calls.append((expression, kwargs))
+            return "ok"
+
+    result = await browser_session.evaluate(_Page(), "window.app")  # type: ignore[arg-type]
+
+    assert result == "ok"
+    assert calls == [("window.app", {"isolated_context": False})]

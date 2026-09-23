@@ -2,8 +2,11 @@
 
 ``open_session`` launches a detached Chromium that outlives the calling
 process; every action reconnects to it over CDP, acts on the current page, and
-disconnects. Snapshots use Playwright's AI aria snapshot, so elements carry
-``eN`` refs that interaction helpers accept alongside Playwright selectors.
+disconnects. The browser gets the same launch flags as a one-shot fetch, and
+actions attach through Patchright, which does not send the CDP
+``Runtime.enable`` command that detectors look for. Snapshots use
+Playwright's AI aria snapshot, so elements carry ``eN`` refs that interaction
+helpers accept alongside Playwright selectors.
 
 All failures raise :class:`~webskrap.errors.WebSkrapError` (or propagate
 Playwright errors); presentation layers translate them for their medium.
@@ -27,11 +30,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar
 
-from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import Locator, Page, async_playwright
+from patchright.async_api import Error as PlaywrightError
+from patchright.async_api import Locator, Page
+from patchright.async_api import async_playwright as patchright_playwright
+from playwright.async_api import async_playwright
 
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import ElementState, LoadState, WaitUntil, text_window
+from webskrap.models import ElementState, LoadState, SessionConfig, WaitUntil, text_window
 from webskrap.paths import secure_directory
 from webskrap.urls import validate_url
 
@@ -276,11 +281,6 @@ async def chromium_executable() -> str:
         path = playwright.chromium.executable_path
     if Path(path).exists():
         return path
-    try:
-        from patchright.async_api import async_playwright as patchright_playwright
-    except ImportError as exc:  # pragma: no cover - patchright ships with webskrap
-        msg = "Chromium is not installed. Run: webskrap install"
-        raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
     async with patchright_playwright() as playwright:
         path = playwright.chromium.executable_path
     if Path(path).exists():
@@ -303,6 +303,21 @@ def signal_group(pid: int, sig: signal.Signals) -> None:
     except PermissionError:
         with suppress(ProcessLookupError):
             os.kill(pid, sig)
+
+
+def stealth_launch_args(*, headless: bool, chromium_sandbox: bool) -> list[str]:
+    """Return the browser flags a one-shot fetch would get, for a detached launch.
+
+    Built from :class:`~webskrap.models.SessionConfig` so both paths share one
+    definition: ``--disable-blink-features=AutomationControlled`` (otherwise a
+    remote-debugging port sets ``navigator.webdriver``), the headless virtual
+    screen and window (otherwise 800x600 at 10,10), and ``--no-sandbox`` only
+    when the sandbox is off. ``driver="playwright"`` is deliberate: Patchright
+    injects the automation flag itself when it launches, but here WebSkrap
+    spawns the process, so the flag has to be on the command line.
+    """
+    config = SessionConfig(headless=headless, chromium_sandbox=chromium_sandbox)
+    return list(config.launch_options().get("args", []))
 
 
 def launch_browser(
@@ -343,9 +358,8 @@ def launch_browser(
         # and tracks restores internally, but that tracking is unavailable when
         # attaching over CDP, so trade bfcache for deterministic load events.
         "--disable-features=BackForwardCache",
+        *stealth_launch_args(headless=headless, chromium_sandbox=chromium_sandbox),
     ]
-    if not chromium_sandbox:
-        command.append("--no-sandbox")
     if headless:
         command.append("--headless=new")
     command.append("about:blank")
@@ -550,13 +564,18 @@ async def run_page_action(
     *,
     timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
 ) -> T:
-    """Connect to the session's browser, run ``action`` on the current page."""
+    """Connect to the session's browser, run ``action`` on the current page.
+
+    Attaches with Patchright rather than Playwright: Playwright enables the CDP
+    ``Runtime`` domain on connect, which pages detect through console
+    serialization side effects in the page and in workers.
+    """
     directory = session_dir(name)
     state = read_state(directory)
     if state is None:
         msg = f"session '{name}' is not open. Run: webskrap browser open"
         raise WebSkrapError(msg, code=ErrorCode.NO_SESSION)
-    async with async_playwright() as playwright:
+    async with patchright_playwright() as playwright:
         try:
             browser = await playwright.chromium.connect_over_cdp(
                 f"http://127.0.0.1:{state['port']}"
@@ -625,6 +644,16 @@ async def element_action(page: Page, action: str, target: str, values: list[str]
     arguments = element_arguments(action, values)
     locator = await resolve_locator(page, target)
     await getattr(locator, ELEMENT_ACTIONS[action][0])(*arguments)
+
+
+async def evaluate(page: Page, expression: str) -> Any:
+    """Evaluate ``expression`` in the page's own JavaScript world.
+
+    Patchright evaluates in an isolated world by default, which shares the DOM
+    but not page globals, so ``window.app`` would read as undefined. An
+    ``eval`` caller expects what the page's scripts see.
+    """
+    return await page.evaluate(expression, isolated_context=False)
 
 
 async def page_state(page: Page) -> dict[str, Any]:
