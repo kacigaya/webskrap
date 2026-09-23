@@ -204,6 +204,7 @@ async def stealth_fetch(
     patchright_context_profile: bool = False,
     reduce_fingerprint_surface: bool = False,
     mask_headless_user_agent: bool = False,
+    virtual_display: bool = False,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
     max_chars: int = 20_000,
@@ -230,6 +231,10 @@ async def stealth_fetch(
         patchright_context_profile: Apply locale/timezone/media profile metadata.
         reduce_fingerprint_surface: Disable WebGL and canvas readback via flags.
         mask_headless_user_agent: Rewrite the HeadlessChrome UA token to Chrome.
+            Empties high-entropy client hints; prefer virtual_display.
+        virtual_display: Run headed Chromium on a private Xvfb display
+            instead of headless (Linux with Xvfb). No HeadlessChrome token
+            and full client hints, without any override.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
@@ -254,6 +259,7 @@ async def stealth_fetch(
             patchright_context_profile=patchright_context_profile,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
+            virtual_display=virtual_display,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
         )
@@ -282,6 +288,7 @@ async def search(
     patchright_context_profile: bool = False,
     reduce_fingerprint_surface: bool = False,
     mask_headless_user_agent: bool = False,
+    virtual_display: bool = False,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
     decline_cookies: bool = True,
@@ -308,6 +315,10 @@ async def search(
         patchright_context_profile: Apply locale/timezone/media profile metadata.
         reduce_fingerprint_surface: Disable WebGL and canvas readback via flags.
         mask_headless_user_agent: Rewrite the HeadlessChrome UA token to Chrome.
+            Empties high-entropy client hints; prefer virtual_display.
+        virtual_display: Run headed Chromium on a private Xvfb display
+            instead of headless (Linux with Xvfb). No HeadlessChrome token
+            and full client hints, without any override.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
@@ -325,6 +336,7 @@ async def search(
             patchright_context_profile=patchright_context_profile,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
+            virtual_display=virtual_display,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
         )

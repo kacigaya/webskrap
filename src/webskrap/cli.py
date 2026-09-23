@@ -291,7 +291,17 @@ def fetch_command(
         bool,
         typer.Option(
             "--mask-headless-user-agent",
-            help="Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag.",
+            help=(
+                "Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag. "
+                "Empties high-entropy client hints; prefer --virtual-display."
+            ),
+        ),
+    ] = False,
+    virtual_display: Annotated[
+        bool,
+        typer.Option(
+            "--virtual-display",
+            help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
         ),
     ] = False,
     launch_args: Annotated[
@@ -344,6 +354,7 @@ def fetch_command(
             patchright_context_profile=patchright_context_profile,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
+            virtual_display=virtual_display,
             launch_args=launch_args or [],
             no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -375,6 +386,7 @@ async def _fetch(
     patchright_context_profile: bool,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
+    virtual_display: bool,
     launch_args: list[str],
     no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
@@ -394,6 +406,7 @@ async def _fetch(
         patchright_context_profile=patchright_context_profile,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
+        virtual_display=virtual_display,
         launch_args=launch_args,
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )
@@ -520,7 +533,17 @@ def search_command(
         bool,
         typer.Option(
             "--mask-headless-user-agent",
-            help="Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag.",
+            help=(
+                "Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag. "
+                "Empties high-entropy client hints; prefer --virtual-display."
+            ),
+        ),
+    ] = False,
+    virtual_display: Annotated[
+        bool,
+        typer.Option(
+            "--virtual-display",
+            help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
         ),
     ] = False,
     launch_args: Annotated[
@@ -571,6 +594,7 @@ def search_command(
             patchright_context_profile=patchright_context_profile,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
+            virtual_display=virtual_display,
             launch_args=launch_args or [],
             no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -594,6 +618,7 @@ async def _search(
     patchright_context_profile: bool,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
+    virtual_display: bool,
     launch_args: list[str],
     no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
@@ -612,6 +637,7 @@ async def _search(
         patchright_context_profile=patchright_context_profile,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
+        virtual_display=virtual_display,
         launch_args=launch_args,
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import tempfile
 import time
@@ -25,6 +26,7 @@ from playwright.async_api import Browser, BrowserContext, FloatRect, Page
 
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
+from webskrap.display import VirtualDisplay
 from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError
 from webskrap.models import (
     BrowserProfile,
@@ -165,11 +167,13 @@ class WebSkrapSession:
         profile: BrowserProfile,
         browser: Browser | None = None,
         temp_user_data_dir: str | None = None,
+        display: VirtualDisplay | None = None,
     ) -> None:
         """Adopt an already-open context; :meth:`WebSkrapClient.session` calls this.
 
         The session takes ownership: closing it closes the context, the browser
-        when one was passed, and any temporary profile directory.
+        when one was passed, any temporary profile directory, and the virtual
+        display the browser runs on.
         """
         self.name = name
         self.context = context
@@ -177,6 +181,7 @@ class WebSkrapSession:
         self.profile = profile
         self.browser = browser
         self._temp_user_data_dir = temp_user_data_dir
+        self._display = display
         self._closed = False
 
     async def __aenter__(self) -> WebSkrapSession:
@@ -435,7 +440,7 @@ class WebSkrapSession:
                 await page.keyboard.up(modifier)
 
     async def close(self) -> None:
-        """Close the context, its browser, and any temporary profile directory.
+        """Close the context, its browser, temp profile and virtual display.
 
         Idempotent; safe to call after a failed fetch.
         """
@@ -454,6 +459,9 @@ class WebSkrapSession:
                     except OSError:
                         logger.debug("could not remove temp profile %s", self._temp_user_data_dir)
                     self._temp_user_data_dir = None
+                if self._display is not None:
+                    await self._display.stop()
+                    self._display = None
                 self._closed = True
 
     def _ensure_open(self) -> None:
@@ -765,7 +773,12 @@ class WebSkrapClient:
         context_options = config.context_options(profile)
         launch_options = config.launch_options()
 
-        if config.mask_headless_user_agent and config.headless and config.browser == "chromium":
+        if (
+            config.mask_headless_user_agent
+            and config.headless
+            and not config.virtual_display
+            and config.browser == "chromium"
+        ):
             clean_ua = await self._headless_clean_user_agent(browser_type, config)
             if clean_ua:
                 # Apply the clean UA via the launch flag only. It covers the
@@ -789,7 +802,13 @@ class WebSkrapClient:
 
         browser = None
         context = None
+        display = None
         try:
+            if config.uses_virtual_display():
+                screen = config.virtual_screen()
+                display = await VirtualDisplay.start(screen.width, screen.height)
+                # Playwright replaces the browser environment when env is set.
+                launch_options["env"] = {**os.environ, **display.env}
             if user_data_dir is not None:
                 user_data_dir.mkdir(parents=True, exist_ok=True)
                 context = await browser_type.launch_persistent_context(
@@ -813,6 +832,8 @@ class WebSkrapClient:
             if browser is not None:
                 with suppress(Exception):
                     await browser.close()
+            if display is not None:
+                await display.stop()
             if temp_user_data_dir is not None:
                 try:
                     await asyncio.to_thread(shutil.rmtree, temp_user_data_dir)
@@ -826,6 +847,7 @@ class WebSkrapClient:
             profile=profile,
             browser=browser,
             temp_user_data_dir=temp_user_data_dir,
+            display=display,
         )
 
     async def _headless_clean_user_agent(

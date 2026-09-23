@@ -99,7 +99,7 @@ config = SessionConfig(
     headless=True,
     patchright_context_profile=True,
     reduce_fingerprint_surface=True,
-    mask_headless_user_agent=True,
+    virtual_display=True,
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )
 ```
