@@ -17,7 +17,7 @@ from typing import Annotated, Any, TypeVar
 from uuid import uuid4
 
 import typer
-from playwright.async_api import Page
+from patchright.async_api import Page
 from rich.console import Console
 from rich.table import Table
 
@@ -458,7 +458,7 @@ def eval_command(
     output_format = parse_output_format(format)
 
     async def action(page: Page) -> Any:
-        return await page.evaluate(expression)
+        return await browser_session.evaluate(page, expression)
 
     payload = browser_session.shape_eval_result(
         _run_page_command(session, action, output_format, timeout_ms=timeout_ms), max_chars

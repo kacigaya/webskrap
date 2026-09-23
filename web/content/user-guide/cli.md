@@ -187,6 +187,15 @@ implemented natively on Playwright for Python. `open` launches a detached
 Chromium that keeps running between commands; every other command reconnects
 to it over CDP, acts on the current page, and exits.
 
+The session uses the same stealth path as `webskrap fetch`: commands attach
+through Patchright, so no CDP `Runtime.enable` leak reaches the page or its
+workers, and the browser launches with
+`--disable-blink-features=AutomationControlled` (`navigator.webdriver` stays
+false) plus the 1920x1080 virtual screen used by headless fetches. Headless
+sessions still report `HeadlessChrome` in the user agent; pass `--headed` when
+a site checks it. `browser eval` runs in the page's own JavaScript world, so
+page globals are visible.
+
 ```bash
 webskrap browser open https://example.com
 webskrap browser snapshot

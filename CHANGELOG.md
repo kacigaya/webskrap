@@ -9,6 +9,17 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Persistent browser sessions (`webskrap browser`, MCP `browser_*`) no longer
+  expose automation. Actions attach through Patchright instead of Playwright,
+  so the CDP `Runtime.enable` leak no longer reaches pages or workers, and the
+  browser launches with `--disable-blink-features=AutomationControlled` and the
+  headless virtual screen, so `navigator.webdriver` is false and the
+  800x600 headless screen is gone. `browser eval` evaluates in the page's own
+  world so page globals stay visible. Sessions already running keep their old
+  launch flags until closed and reopened.
+
 ## [2.3.0] - 2026-09-18
 
 ### Security

@@ -126,7 +126,8 @@ The `browser_*` tools drive the same persistent sessions as
 [`webskrap browser`](/docs/user-guide/cli#interactive-browser-sessions) in the
 CLI: `browser_open` launches a detached headless Chromium that keeps running
 between tool calls (and between MCP server restarts), and every other tool
-reconnects to it over CDP. Sessions are named (`session`, default `default`)
+reconnects to it over CDP through Patchright, with the same automation and
+virtual-screen launch flags as `stealth_fetch`. Sessions are named (`session`, default `default`)
 and store their profile under `~/.webskrap/browser/<name>/`
 (root overridable with `WEBSKRAP_BROWSER_DIR`), so cookies and logins persist.
 

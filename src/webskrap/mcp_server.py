@@ -17,7 +17,7 @@ from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
 
-from playwright.async_api import Page
+from patchright.async_api import Page
 
 from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError
@@ -661,7 +661,9 @@ async def browser_eval(
             raise WebSkrapError(msg, code=ErrorCode.USAGE)
     logger.info("browser_eval session=%s len=%d", session, len(expression))
     logger.debug("browser_eval session=%s expression=%s", session, expression)
-    result = await _browser_action(session, lambda page: page.evaluate(expression), timeout_ms)
+    result = await _browser_action(
+        session, lambda page: browser_session.evaluate(page, expression), timeout_ms
+    )
     return browser_session.shape_eval_result(result, max_chars)
 
 
