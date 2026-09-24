@@ -405,6 +405,11 @@ class SessionConfig(BaseModel):
             "headless": self.headless and not self.virtual_display,
             "timeout": self.timeout_ms,
         }
+        if self.browser == "chromium":
+            # Playwright and Patchright append --no-sandbox themselves unless
+            # this is explicitly True, so leaving it out silently unsandboxed
+            # every one-shot launch.
+            options["chromium_sandbox"] = self.chromium_sandbox
         channel = self.channel
         if channel is None and self.browser == "chromium" and options["headless"]:
             # With no channel, Playwright runs headless Chromium on the old
@@ -458,7 +463,12 @@ class SessionConfig(BaseModel):
         return [f"--accept-lang={','.join(profile.navigator_languages)}"]
 
     def _sandbox_args(self) -> list[str]:
-        """Return the sandbox opt-out flag when sandboxing is disabled."""
+        """Return the sandbox opt-out flag when sandboxing is disabled.
+
+        Playwright adds the same flag from ``chromium_sandbox``; this copy is
+        for launches WebSkrap spawns itself (see
+        :func:`webskrap.browser_session.stealth_launch_args`).
+        """
         if self.chromium_sandbox or self.browser != "chromium":
             return []
         if any(a == "--no-sandbox" or a.startswith("--no-sandbox=") for a in self.launch_args):

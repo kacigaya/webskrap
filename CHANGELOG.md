@@ -9,6 +9,20 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Security
+
+- One-shot `fetch`/`search` sessions now actually keep Chromium's OS sandbox.
+  Since 2.3.0 they only stopped *adding* `--no-sandbox`, but never passed
+  `chromium_sandbox=True` to Playwright, which then appended `--no-sandbox`
+  itself, so every one-shot launch ran unsandboxed. `doctor` now probes with
+  the same setting fetches use. Hosts that cannot sandbox (unprivileged user
+  namespaces off, root in a container) now fail with a `sandbox` error instead
+  of silently running without isolation; opt out explicitly with
+  `--no-sandbox`, `SessionConfig(chromium_sandbox=False)`, or
+  `WEBSKRAP_CHROMIUM_SANDBOX=0`. Such failures are no longer reported as
+  `browser_launch` with an install hint, and the CLI no longer retries them on
+  another channel.
+
 ## [2.6.0] - 2026-09-24
 
 ### Fixed

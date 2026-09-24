@@ -72,7 +72,7 @@ async def diagnose() -> dict[str, Any]:
     and adds the surrounding facts. ``ok`` reflects the launch alone, so a
     report can be ``ok`` while listing sessions that are not running.
     """
-    probe = await browser_doctor()
+    probe = await browser_doctor(chromium_sandbox=browser_session.sandbox_enabled(None))
     timezone = host_timezone()
     warnings: list[str] = []
     if timezone in UTC_ZONES:

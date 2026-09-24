@@ -27,7 +27,7 @@ from playwright.async_api import Browser, BrowserContext, FloatRect, Page
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.display import VirtualDisplay
-from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError
+from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError, is_sandbox_failure
 from webskrap.models import (
     BrowserProfile,
     FetchResult,
@@ -96,12 +96,15 @@ def _async_playwright(driver: str):
 async def browser_doctor(
     driver: str = "patchright",
     channels: tuple[str | None, ...] = ("chrome", "chromium"),
+    *,
+    chromium_sandbox: bool = True,
 ) -> dict[str, object]:
     """Report the first Chromium channel that launches with ``driver``.
 
     Also reports the bundled Chromium binary the driver would use, since a
     caller diagnosing a failed launch otherwise has to guess where the browser
-    was looked for.
+    was looked for. ``chromium_sandbox`` should match what fetches will use,
+    or a host that cannot sandbox reports ready while every fetch fails.
     """
     failure: Exception | None = None
     executable_path: str | None = None
@@ -112,7 +115,9 @@ async def browser_doctor(
         try:
             playwright = await _async_playwright(driver).start()
             executable_path = playwright.chromium.executable_path
-            browser = await playwright.chromium.launch(channel=channel, headless=True)
+            browser = await playwright.chromium.launch(
+                channel=channel, headless=True, chromium_sandbox=chromium_sandbox
+            )
             launched = True
         except Exception as exc:  # noqa: BLE001 - report launch/import failures
             failure = exc
@@ -138,7 +143,11 @@ async def browser_doctor(
         "driver": driver,
         "channel": None,
         "executable_path": executable_path,
-        "hint": RECOVERY_HINTS[ErrorCode.BROWSER_LAUNCH],
+        "hint": RECOVERY_HINTS[
+            ErrorCode.SANDBOX
+            if failure is not None and is_sandbox_failure(failure)
+            else ErrorCode.BROWSER_LAUNCH
+        ],
     }
 
 

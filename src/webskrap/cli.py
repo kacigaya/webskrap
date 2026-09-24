@@ -32,7 +32,7 @@ from webskrap.cli_output import (
 )
 from webskrap.client import WebSkrapClient
 from webskrap.diagnostics import diagnose
-from webskrap.errors import ErrorCode, WebSkrapError, first_line
+from webskrap.errors import ErrorCode, WebSkrapError, first_line, is_sandbox_failure
 from webskrap.models import (
     FetchResult,
     ResourcePolicy,
@@ -693,6 +693,11 @@ def _is_launch_failure(exc: Exception) -> bool:
 
 def _fail_launch(exc: Exception, output_format: OutputFormat) -> NoReturn:
     """Report an unlaunchable browser the way `doctor` does, not as a traceback."""
+    if is_sandbox_failure(exc):
+        # Playwright's first line only says the browser closed; the cause is
+        # in the browser log below it.
+        message = "Browser did not launch: Chromium's OS sandbox could not start"
+        fail(WebSkrapError(message, code=ErrorCode.SANDBOX), output_format)
     message = f"Browser did not launch: {first_line(exc)}"
     fail(WebSkrapError(message, code=ErrorCode.BROWSER_LAUNCH), output_format)
 
@@ -724,7 +729,8 @@ async def _with_channel_fallback(
     except Exception as exc:
         if not _is_launch_failure(exc):
             raise
-        if config.channel in (None, "chromium"):
+        # Another channel cannot fix a host that cannot sandbox.
+        if config.channel in (None, "chromium") or is_sandbox_failure(exc):
             _fail_launch(exc, output_format)
         stderr_console.print(
             f"[yellow]channel '{config.channel}' did not launch; retrying with chromium[/yellow]"

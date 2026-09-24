@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from webskrap import diagnostics
+from webskrap import browser_session, diagnostics
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 
 
 def _stub_probe(monkeypatch: Any, **overrides: Any) -> None:
-    async def fake_doctor() -> dict[str, Any]:
+    async def fake_doctor(**_kwargs: Any) -> dict[str, Any]:
         return {
             "ok": True,
             "message": "ready",
@@ -81,7 +81,12 @@ def test_package_version_returns_none_for_an_absent_distribution() -> None:
 
 
 @pytest.mark.browser
-def test_diagnose_probes_a_real_browser() -> None:
+def test_diagnose_probes_a_real_browser(monkeypatch: Any, sandbox_supported: bool) -> None:
+    # The probe launches with the same sandbox setting fetches use, so a host
+    # that cannot sandbox needs the documented opt-out to report ready.
+    if not sandbox_supported:
+        monkeypatch.setenv(browser_session.SANDBOX_ENV, "0")
+
     report = asyncio.run(diagnostics.diagnose())
 
     assert report["ok"] is True
@@ -109,3 +114,24 @@ def test_local_host_timezone_has_no_warning(monkeypatch: Any) -> None:
 
     assert report["host_timezone"] == "Europe/Paris"
     assert report["warnings"] == []
+
+
+@pytest.mark.parametrize(("env", "expected"), [(None, True), ("0", False)])
+def test_doctor_probes_with_the_one_shot_sandbox_setting(
+    monkeypatch: Any, env: str | None, expected: bool
+) -> None:
+    seen: list[bool] = []
+
+    async def fake_doctor(*, chromium_sandbox: bool) -> dict[str, Any]:
+        seen.append(chromium_sandbox)
+        return {"ok": True, "message": "ready"}
+
+    monkeypatch.setattr(diagnostics, "browser_doctor", fake_doctor)
+    if env is None:
+        monkeypatch.delenv(browser_session.SANDBOX_ENV, raising=False)
+    else:
+        monkeypatch.setenv(browser_session.SANDBOX_ENV, env)
+
+    asyncio.run(diagnostics.diagnose())
+
+    assert seen == [expected]

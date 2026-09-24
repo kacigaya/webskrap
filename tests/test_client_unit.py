@@ -11,6 +11,7 @@ from webskrap.client import (
     WebSkrapSession,
     _bezier_path,
     _resource_route_handler,
+    browser_doctor,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
@@ -799,3 +800,37 @@ async def test_unknown_profile_timezone_is_a_usage_error(monkeypatch: pytest.Mon
         await client._create_session("tz", config, profile)
 
     assert excinfo.value.code is ErrorCode.USAGE
+
+
+@pytest.mark.asyncio
+async def test_doctor_hints_at_the_sandbox_when_that_is_what_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launches: list[dict[str, object]] = []
+
+    class _Chromium:
+        executable_path = "/browsers/chromium"
+
+        async def launch(self, **options: object) -> None:
+            launches.append(options)
+            raise RuntimeError(
+                "BrowserType.launch: closed\nBrowser logs:\nChromium sandboxing failed!"
+            )
+
+    class _PW:
+        chromium = _Chromium()
+
+        async def stop(self) -> None:
+            pass
+
+    class _Starter:
+        async def start(self) -> _PW:
+            return _PW()
+
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Starter())
+
+    report = await browser_doctor(chromium_sandbox=True)
+
+    assert report["ok"] is False
+    assert all(options["chromium_sandbox"] is True for options in launches)
+    assert "--no-sandbox" in str(report["hint"])

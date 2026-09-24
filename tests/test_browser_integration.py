@@ -114,8 +114,10 @@ def test_server() -> str:
 
 
 @pytest.mark.asyncio
-async def test_fetch_local_page(test_server: str) -> None:
-    async with WebSkrapClient() as client:
+async def test_fetch_local_page(test_server: str, sandbox_supported: bool) -> None:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(test_server)
 
     assert result.status == 200
@@ -125,9 +127,11 @@ async def test_fetch_local_page(test_server: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_declines_cmp_cookie_notice(test_server: str) -> None:
-    config = SessionConfig(decline_cookies=True)
-    async with WebSkrapClient() as client:
+async def test_declines_cmp_cookie_notice(test_server: str, sandbox_supported: bool) -> None:
+    config = SessionConfig(chromium_sandbox=sandbox_supported, decline_cookies=True)
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(f"{test_server}/cmp-banner", config=config, text_only=True)
 
     assert result.cookie_notice_declined == "cmp"
@@ -136,9 +140,11 @@ async def test_declines_cmp_cookie_notice(test_server: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_declines_late_text_cookie_notice(test_server: str) -> None:
-    config = SessionConfig(decline_cookies=True)
-    async with WebSkrapClient() as client:
+async def test_declines_late_text_cookie_notice(test_server: str, sandbox_supported: bool) -> None:
+    config = SessionConfig(chromium_sandbox=sandbox_supported, decline_cookies=True)
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(
             f"{test_server}/late-text-banner",
             config=config,
@@ -152,11 +158,13 @@ async def test_declines_late_text_cookie_notice(test_server: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_decline_cookies_can_be_disabled(test_server: str) -> None:
-    async with WebSkrapClient() as client:
+async def test_decline_cookies_can_be_disabled(test_server: str, sandbox_supported: bool) -> None:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(
             f"{test_server}/cmp-banner",
-            config=SessionConfig(decline_cookies=False),
+            config=SessionConfig(chromium_sandbox=sandbox_supported, decline_cookies=False),
             text_only=True,
         )
 
@@ -165,13 +173,18 @@ async def test_decline_cookies_can_be_disabled(test_server: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persistent_session_reuses_cookies(test_server: str, tmp_path: Path) -> None:
+async def test_persistent_session_reuses_cookies(
+    test_server: str, tmp_path: Path, sandbox_supported: bool
+) -> None:
     config = SessionConfig(
+        chromium_sandbox=sandbox_supported,
         user_data_dir=tmp_path / "profile",
         resource_policy=ResourcePolicy.LITE,
     )
 
-    async with WebSkrapClient() as client:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         session = await client.session("local", config=config)
         await session.fetch(f"{test_server}/set-cookie")
         result = await session.fetch(f"{test_server}/echo-cookie")
@@ -180,18 +193,24 @@ async def test_persistent_session_reuses_cookies(test_server: str, tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_per_call_patchright_config_starts_patchright() -> None:
-    config = SessionConfig(driver="patchright", channel=None, decline_cookies=False)
+async def test_per_call_patchright_config_starts_patchright(sandbox_supported: bool) -> None:
+    config = SessionConfig(
+        chromium_sandbox=sandbox_supported, driver="patchright", channel=None, decline_cookies=False
+    )
 
-    async with WebSkrapClient() as client:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         session = await client.session("patchright", config=config)
 
     assert type(session.context).__module__.startswith("patchright.")
 
 
 @pytest.mark.asyncio
-async def test_links_are_off_by_default(test_server: str) -> None:
-    async with WebSkrapClient() as client:
+async def test_links_are_off_by_default(test_server: str, sandbox_supported: bool) -> None:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(f"{test_server}/links")
 
     assert result.links == []
@@ -199,8 +218,12 @@ async def test_links_are_off_by_default(test_server: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_links_are_resolved_deduplicated_and_normalized(test_server: str) -> None:
-    async with WebSkrapClient() as client:
+async def test_links_are_resolved_deduplicated_and_normalized(
+    test_server: str, sandbox_supported: bool
+) -> None:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(f"{test_server}/links", include_links=True)
 
     assert result.links_total == 3
@@ -214,8 +237,12 @@ async def test_links_are_resolved_deduplicated_and_normalized(test_server: str) 
 
 
 @pytest.mark.asyncio
-async def test_links_are_capped_but_still_counted(test_server: str) -> None:
-    async with WebSkrapClient() as client:
+async def test_links_are_capped_but_still_counted(
+    test_server: str, sandbox_supported: bool
+) -> None:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(f"{test_server}/links", include_links=True, max_links=2)
 
     assert len(result.links) == 2
@@ -223,10 +250,14 @@ async def test_links_are_capped_but_still_counted(test_server: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_links_are_skipped_when_javascript_is_disabled(test_server: str) -> None:
-    config = SessionConfig(java_script_enabled=False)
+async def test_links_are_skipped_when_javascript_is_disabled(
+    test_server: str, sandbox_supported: bool
+) -> None:
+    config = SessionConfig(chromium_sandbox=sandbox_supported, java_script_enabled=False)
 
-    async with WebSkrapClient() as client:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
         result = await client.fetch(f"{test_server}/links", config=config, include_links=True)
 
     assert result.links == []
@@ -237,10 +268,17 @@ async def test_links_are_skipped_when_javascript_is_disabled(test_server: str) -
     not sys.platform.startswith("linux") or shutil.which("Xvfb") is None,
     reason="needs Linux with Xvfb",
 )
-async def test_virtual_display_presents_a_headed_browser(test_server: str) -> None:
+async def test_virtual_display_presents_a_headed_browser(
+    test_server: str, sandbox_supported: bool
+) -> None:
     # Headed on Xvfb: no HeadlessChrome token anywhere and full client hints,
     # which a --user-agent rewrite of headless Chrome cannot give.
-    config = SessionConfig(driver="patchright", channel="chromium", virtual_display=True)
+    config = SessionConfig(
+        chromium_sandbox=sandbox_supported,
+        driver="patchright",
+        channel="chromium",
+        virtual_display=True,
+    )
     async with WebSkrapClient(default_config=config) as client:
         session = await client.session("virtual-display", config=config)
         page = await session.context.new_page()

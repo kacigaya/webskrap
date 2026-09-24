@@ -13,6 +13,7 @@ from webskrap.errors import (
     error_payload,
     exit_code,
     first_line,
+    is_sandbox_failure,
     scrub_userinfo,
 )
 
@@ -160,3 +161,29 @@ def test_error_payload_scrubs_credentials() -> None:
 
 def test_blocked_launch_argument_classifies_as_usage() -> None:
     assert classify(WebSkrapError("launch argument '--no-sandbox' is blocked")) is ErrorCode.USAGE
+
+
+# What Playwright raises when a sandboxed launch fails: the first line only says
+# the browser closed, and the cause sits in the browser log below it.
+PLAYWRIGHT_SANDBOX_FAILURE = (
+    "BrowserType.launch: Target page, context or browser has been closed\n"
+    "Browser logs:\nChromium sandboxing failed!\n"
+    "  - (alternative): Launch Chromium without sandbox using 'chromiumSandbox: false' option"
+)
+
+
+def test_playwright_sandbox_failure_is_classified_as_sandbox() -> None:
+    error = RuntimeError(PLAYWRIGHT_SANDBOX_FAILURE)
+
+    assert is_sandbox_failure(error)
+    assert classify(error) is ErrorCode.SANDBOX
+
+
+def test_opt_out_flag_in_a_logged_command_line_is_not_a_sandbox_failure() -> None:
+    # Any failed launch logs its argv, which carries --no-sandbox when the
+    # caller opted out; that alone must not read as a sandbox problem.
+    error = RuntimeError(
+        "BrowserType.launch: Executable doesn't exist\n<launching> chrome --no-sandbox"
+    )
+
+    assert not is_sandbox_failure(error)
