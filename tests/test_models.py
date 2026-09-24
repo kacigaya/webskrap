@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from webskrap import (
     BrowserProfile,
     FetchResult,
+    GpuBackend,
     ProxyConfig,
     ResourcePolicy,
     SearchEngine,
@@ -730,3 +731,45 @@ def test_sandbox_setting_reaches_playwright() -> None:
 
 def test_sandbox_option_is_chromium_only() -> None:
     assert "chromium_sandbox" not in SessionConfig(browser="firefox").launch_options()
+
+
+def _gl_args(config: SessionConfig) -> list[str]:
+    return [
+        a
+        for a in config.launch_options().get("args", [])
+        if a.startswith(("--use-gl", "--use-angle", "--ignore-gpu", "--enable-unsafe-swift"))
+    ]
+
+
+def test_gpu_auto_leaves_headless_webgl_to_chromium() -> None:
+    assert SessionConfig().gpu is GpuBackend.AUTO
+    assert _gl_args(SessionConfig(headless=True)) == []
+    assert _gl_args(SessionConfig(headless=False)) == []
+
+
+def test_gpu_auto_adds_no_swiftshader_under_a_virtual_display() -> None:
+    # Headed Chrome has had no SwiftShader fallback since Chrome 139; a
+    # GPU-less desktop shows no WebGL, and forcing SwiftShader reads as a bot.
+    assert _gl_args(SessionConfig(driver="patchright", virtual_display=True)) == []
+
+
+@pytest.mark.parametrize("virtual_display", [False, True])
+def test_gpu_mesa_renders_through_lavapipe(virtual_display: bool) -> None:
+    config = SessionConfig(driver="patchright", gpu="mesa", virtual_display=virtual_display)
+
+    assert _gl_args(config) == ["--use-gl=angle", "--use-angle=vulkan", "--ignore-gpu-blocklist"]
+
+
+def test_caller_gl_flags_win_over_gpu() -> None:
+    config = SessionConfig(gpu="mesa", launch_args=["--use-angle=swiftshader"])
+
+    assert _gl_args(config) == ["--use-angle=swiftshader"]
+
+
+def test_gpu_is_chromium_only() -> None:
+    assert _gl_args(SessionConfig(browser="firefox", gpu="mesa")) == []
+
+
+def test_gpu_rejects_unknown_backends() -> None:
+    with pytest.raises(ValidationError):
+        SessionConfig(gpu="nvidia")  # type: ignore[arg-type]

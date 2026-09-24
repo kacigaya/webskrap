@@ -23,7 +23,7 @@ from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
-from webskrap.models import SessionConfig, shape_fetch_result, shape_search_result
+from webskrap.models import GpuBackend, SessionConfig, shape_fetch_result, shape_search_result
 from webskrap.parsing import (
     parse_element_state,
     parse_engine,
@@ -205,6 +205,7 @@ async def stealth_fetch(
     reduce_fingerprint_surface: bool = False,
     mask_headless_user_agent: bool = False,
     virtual_display: bool = False,
+    gpu: GpuBackend = GpuBackend.AUTO,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
     max_chars: int = 20_000,
@@ -235,6 +236,9 @@ async def stealth_fetch(
         virtual_display: Run headed Chromium on a private Xvfb display
             instead of headless (Linux with Xvfb). No HeadlessChrome token
             and full client hints, without any override.
+        gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
+            without a GPU, a known headless tell); "mesa" uses Mesa's
+            lavapipe (Linux with mesa-vulkan-drivers).
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
@@ -260,6 +264,7 @@ async def stealth_fetch(
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
+            gpu=gpu,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
         )
@@ -289,6 +294,7 @@ async def search(
     reduce_fingerprint_surface: bool = False,
     mask_headless_user_agent: bool = False,
     virtual_display: bool = False,
+    gpu: GpuBackend = GpuBackend.AUTO,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
     decline_cookies: bool = True,
@@ -319,6 +325,9 @@ async def search(
         virtual_display: Run headed Chromium on a private Xvfb display
             instead of headless (Linux with Xvfb). No HeadlessChrome token
             and full client hints, without any override.
+        gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
+            without a GPU, a known headless tell); "mesa" uses Mesa's
+            lavapipe (Linux with mesa-vulkan-drivers).
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
@@ -337,6 +346,7 @@ async def search(
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
+            gpu=gpu,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
         )

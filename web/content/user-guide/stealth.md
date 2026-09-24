@@ -100,7 +100,9 @@ Set `reduce_fingerprint_surface=True` to ask Chromium to disable WebGL and
 canvas readback with native flags (`--disable-webgl` and
 `--disable-reading-from-canvas`). This reduces rendering entropy on
 fingerprint-statistics pages, but pages that require WebGL or canvas export may
-not work correctly.
+not work correctly, and a browser with neither is itself rare: fingerprinting
+audits report it as blocking. To hide the SwiftShader renderer without losing
+WebGL, use `gpu="mesa"` (see [WebGL renderer](#webgl-renderer)).
 
 ## Headless patchright
 
@@ -187,6 +189,39 @@ headers come back empty, which a real Chrome never does. Prefer
 `virtual_display` where Xvfb is available. The mask is ignored when
 `virtual_display` is set, and it is off by default so headless stays honestly
 headless unless you opt in.
+
+### WebGL renderer
+
+Without a usable GPU, headless Chrome renders WebGL with SwiftShader, and
+pages can read that through `WEBGL_debug_renderer_info`:
+`ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device ...), SwiftShader driver)`.
+Chrome 139 removed the automatic SwiftShader fallback from regular Chrome, so a
+real browser no longer reports it; detectors treat it as automation.
+
+On Linux, `gpu="mesa"` renders through Mesa's software Vulkan driver
+(lavapipe) instead, via Chromium's own flags (`--use-gl=angle
+--use-angle=vulkan --ignore-gpu-blocklist`):
+`ANGLE (Mesa, Vulkan ... (llvmpipe ...), llvmpipe)`. That string is uncommon,
+because stock Chrome blocklists software drivers, but it is not specific to
+automation. It needs the lavapipe driver (Debian/Ubuntu:
+`apt install mesa-vulkan-drivers`); without it the session fails to start with a
+`browser_launch` error, and `webskrap doctor` reports whether it is installed.
+Keep the default `gpu="auto"` on a machine with a real GPU.
+
+```python
+config = SessionConfig(
+    driver="patchright",
+    channel="chrome",
+    headless=True,
+    gpu="mesa",
+)
+```
+
+Under `virtual_display`, headed Chrome with no usable GPU has no WebGL at all,
+as a real GPU-less desktop does, and `gpu="auto"` leaves it that way; pass
+`gpu="mesa"` when pages need WebGL. WebGPU is left alone: its adapter stays
+`null`, which is what Chrome reports on machines without a supported GPU.
+Launch flags you pass yourself (`--use-gl`, `--use-angle`) take precedence.
 
 ## Practical guidance
 
