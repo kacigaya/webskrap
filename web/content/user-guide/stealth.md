@@ -64,9 +64,25 @@ config = SessionConfig(
 )
 ```
 
-This applies `locale`, `timezone_id`, `color_scheme`, `reduced_motion`, and any
-caller-provided `extra_http_headers`. It keeps `no_viewport=True`, so screen and
-window metrics still come from the browser or from `headless_screen`.
+This applies `locale`, `timezone_id`, `navigator_languages`, `color_scheme`,
+`reduced_motion`, and any caller-provided `extra_http_headers`. It keeps
+`no_viewport=True`, so screen and window metrics still come from the browser or
+from `headless_screen`.
+
+On Linux the timezone and languages are set the way a real machine
+sets them, not overridden over CDP. The browser starts with `TZ` set to the
+profile's `timezone_id`, `LC_ALL`/`LANG`/`LANGUAGE` derived from its locale and
+languages, and Chromium's `--accept-lang` flag carrying `navigator_languages`.
+So `navigator.languages` holds the whole list (`["fr-FR", "fr", "en-US", "en"]`,
+not just `["fr-FR"]`), Chromium writes the `Accept-Language` q-values itself, and
+`Intl` uses the profile locale. An unknown `timezone_id` is rejected before
+launch, because Chromium would report `Etc/Unknown`. A `--accept-lang` passed
+in `launch_args` wins. macOS and Windows take the locale from system settings
+instead, so there the profile is still applied through CDP overrides.
+
+Pick a `timezone_id` and languages that match your exit IP. A server left on
+UTC is the most common reason a clean browser still reads as a datacenter;
+`webskrap doctor` warns when the host timezone is UTC.
 
 Set `webrtc_ip_handling_policy="disable_non_proxied_udp"` when leak-test pages
 should not see local or direct public WebRTC ICE candidates. WebSkrap applies

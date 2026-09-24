@@ -724,13 +724,13 @@ async def _with_channel_fallback(
     except Exception as exc:
         if not _is_launch_failure(exc):
             raise
-        if config.channel is None:
+        if config.channel in (None, "chromium"):
             _fail_launch(exc, output_format)
         stderr_console.print(
             f"[yellow]channel '{config.channel}' did not launch; retrying with chromium[/yellow]"
         )
         try:
-            return await run(config.model_copy(update={"channel": None}))
+            return await run(config.model_copy(update={"channel": "chromium"}))
         except Exception as retry_exc:
             if not _is_launch_failure(retry_exc):
                 raise
@@ -821,6 +821,10 @@ def _print_doctor_details(result: dict[str, Any]) -> None:
     if (sessions := result.get("sessions")) is not None:
         running = sum(1 for entry in sessions if entry["running"])
         console.print(f"[bold]Sessions:[/bold] {len(sessions)} ({running} running)")
+    if timezone := result.get("host_timezone"):
+        console.print(f"[bold]Host timezone:[/bold] {timezone}")
+    for warning in result.get("warnings") or []:
+        console.print(f"[yellow]warning:[/yellow] {warning}")
 
 
 def _json_safe(value: Any) -> Any:

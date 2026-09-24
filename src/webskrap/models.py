@@ -8,9 +8,12 @@ launch and context options, which is where their per-field comments matter.
 
 from __future__ import annotations
 
+import os
+import sys
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -382,25 +385,44 @@ class SessionConfig(BaseModel):
                     raise ValueError(msg)
         return value
 
-    def launch_options(self) -> dict[str, Any]:
+    def launch_options(self, profile: BrowserProfile | None = None) -> dict[str, Any]:
         """Return Playwright launch options, including assembled browser flags.
 
         Caller-supplied ``launch_args`` win: a flag already present there is
-        not added again by the automation, screen, WebRTC or fingerprint
-        helpers. Chromium keeps its OS sandbox unless ``chromium_sandbox`` is
-        False, in which case ``--no-sandbox`` is appended.
+        not added again by the automation, screen, WebRTC, fingerprint or
+        language helpers. Chromium keeps its OS sandbox unless
+        ``chromium_sandbox`` is False, in which case ``--no-sandbox`` is
+        appended. Given a ``profile`` that :meth:`uses_native_profile`, its
+        timezone and languages are applied here, through the browser's
+        environment and ``--accept-lang``, rather than in the context.
+
+        Raises:
+            ValueError: If a natively applied profile names an unknown
+                timezone; Chromium would report ``Etc/Unknown`` instead.
         """
         options: dict[str, Any] = {
             # A virtual display runs the browser headed on an invisible screen.
             "headless": self.headless and not self.virtual_display,
             "timeout": self.timeout_ms,
         }
-        if self.channel:
-            options["channel"] = self.channel
+        channel = self.channel
+        if channel is None and self.browser == "chromium" and options["headless"]:
+            # With no channel, Playwright runs headless Chromium on the old
+            # headless shell, which differs from Chrome in ways pages read:
+            # "HeadlessChrome" in Sec-CH-UA even with the user agent masked, no
+            # Accept-Language header, an invalid navigator.language under a
+            # POSIX locale, no PDF plugins, no window.chrome. "chromium" is the
+            # full browser in new headless mode. Pass
+            # channel="chromium-headless-shell" to opt back in.
+            channel = "chromium"
+        if channel:
+            options["channel"] = channel
         if self.slow_mo_ms is not None:
             options["slow_mo"] = self.slow_mo_ms
+        native_profile = profile if profile is not None and self.uses_native_profile() else None
         args = (
             self._automation_args()
+            + self._accept_lang_args(native_profile)
             + self._screen_args()
             + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
@@ -409,7 +431,31 @@ class SessionConfig(BaseModel):
         )
         if args:
             options["args"] = args
+        if native_profile is not None:
+            options["env"] = native_profile_env(native_profile)
         return options
+
+    def uses_native_profile(self) -> bool:
+        """True when the profile's timezone and languages are set at launch.
+
+        That is the Patchright context profile on Linux, where Chromium reads
+        ``TZ`` and the locale variables. There, nothing is overridden over CDP:
+        ``navigator.languages`` keeps the profile's whole list and Chromium
+        builds the ``Accept-Language`` q-values itself. macOS and Windows take
+        the locale from system settings instead, so they keep the CDP
+        overrides.
+        """
+        return (
+            self.driver == "patchright"
+            and self.patchright_context_profile
+            and self.browser == "chromium"
+            and sys.platform.startswith("linux")
+        )
+
+    def _accept_lang_args(self, profile: BrowserProfile | None) -> list[str]:
+        if profile is None or any(a.startswith("--accept-lang") for a in self.launch_args):
+            return []
+        return [f"--accept-lang={','.join(profile.navigator_languages)}"]
 
     def _sandbox_args(self) -> list[str]:
         """Return the sandbox opt-out flag when sandboxing is disabled."""
@@ -509,12 +555,13 @@ class SessionConfig(BaseModel):
             if self.patchright_context_profile:
                 options.update(
                     {
-                        "locale": profile.locale,
-                        "timezone_id": profile.timezone_id,
                         "color_scheme": profile.color_scheme,
                         "reduced_motion": profile.reduced_motion,
                     }
                 )
+                if not self.uses_native_profile():
+                    # On Linux these are set at launch instead.
+                    options.update({"locale": profile.locale, "timezone_id": profile.timezone_id})
                 if profile.extra_http_headers:
                     options["extra_http_headers"] = dict(profile.extra_http_headers)
         else:
@@ -531,6 +578,34 @@ class SessionConfig(BaseModel):
         if self.storage_state is not None and self.user_data_dir is None:
             options["storage_state"] = self.storage_state
         return options
+
+
+def native_profile_env(profile: BrowserProfile) -> dict[str, str]:
+    """Return the browser environment that makes ``profile``'s locale native.
+
+    ``TZ`` sets the timezone Chromium reports. ``LC_ALL``, ``LANG`` and
+    ``LANGUAGE`` set its application locale, which is the default ``Intl``
+    locale; ``LC_ALL`` is set too because a host value would otherwise win.
+    The locale need not be installed on the host. The rest of the
+    environment is inherited, since Playwright replaces it when ``env`` is set.
+
+    Raises:
+        ValueError: If ``profile.timezone_id`` is not a known IANA timezone.
+    """
+    try:
+        ZoneInfo(profile.timezone_id)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        msg = f"unknown timezone '{profile.timezone_id}': use an IANA name like Europe/Paris"
+        raise ValueError(msg) from exc
+    posix_locale = f"{profile.locale.replace('-', '_')}.UTF-8"
+    languages = [language.replace("-", "_") for language in profile.navigator_languages]
+    return {
+        **os.environ,
+        "TZ": profile.timezone_id,
+        "LC_ALL": posix_locale,
+        "LANG": posix_locale,
+        "LANGUAGE": ":".join(languages),
+    }
 
 
 class Link(BaseModel):

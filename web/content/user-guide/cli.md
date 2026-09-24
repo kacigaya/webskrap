@@ -25,7 +25,8 @@ webskrap doctor --format json
 ```
 
 The CLI `fetch` command uses headless Patchright stealth mode, so `doctor`
-checks that Patchright can launch headless Chrome.
+checks that Patchright can launch headless Chrome. It also reports the host
+timezone and warns when it is UTC, which pages read as a server.
 
 ## List profiles
 
@@ -138,7 +139,8 @@ cost on pages that have none. Use `0` for a single immediate check.
 
 `--channel` defaults to `chrome`, which does not exist on every platform (Linux
 ARM64 has no Chrome build). When the channel cannot launch, `fetch` prints a
-notice on stderr and retries with bundled chromium, so piped stdout stays clean.
+notice on stderr and retries with bundled chromium (the full browser in new
+headless mode, not Playwright's headless shell), so piped stdout stays clean.
 If nothing launches you get a one-line error and `Run: webskrap install`, not a
 Playwright traceback.
 

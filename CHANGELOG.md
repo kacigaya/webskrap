@@ -9,6 +9,27 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Headless Chromium runs with no `channel` now use the full browser in new
+  headless mode (`channel="chromium"`) instead of Playwright's headless shell,
+  which sent `HeadlessChrome` in `Sec-CH-UA` even with the user agent masked,
+  omitted `Accept-Language`, and exposed no PDF plugins or `window.chrome`.
+  `channel="chromium-headless-shell"` opts back in. The `fetch`/`search`
+  fallback and `doctor` now try `chromium` instead of the shell.
+  This needs the full Chromium download, which `webskrap install` fetches;
+  an install made with `playwright install --only-shell` must re-run it.
+- With `patchright_context_profile` on Linux, the profile's timezone
+  and languages are applied natively (`TZ`, `LC_ALL`/`LANG`/`LANGUAGE`,
+  `--accept-lang`) instead of through CDP overrides, so `navigator.languages`
+  carries the whole profile list and `Accept-Language` gets Chromium's own
+  q-values. Unknown timezones are rejected before launch instead of surfacing
+  as `Etc/Unknown`.
+
+### Added
+
+- `doctor` reports `host_timezone` and a warning when it is UTC.
+
 ## [2.5.0] - 2026-09-23
 
 ### Added

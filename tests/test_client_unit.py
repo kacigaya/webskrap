@@ -764,3 +764,38 @@ async def test_virtual_display_is_stopped_when_launch_fails(
         await client._create_session("vd", config, get_profile("desktop-chrome"))
 
     assert displays[0].stopped == 1
+
+
+@pytest.mark.asyncio
+async def test_virtual_display_keeps_the_native_profile_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("sys.platform", "linux")
+    chromium = _LaunchChromium()
+    client, _displays, _sizes = _virtual_display_client(monkeypatch, chromium)
+    config = SessionConfig(
+        driver="patchright", virtual_display=True, patchright_context_profile=True
+    )
+
+    session = await client._create_session("vd", config, get_profile("desktop-chrome"))
+    await session.close()
+
+    env = chromium.options["env"]
+    assert isinstance(env, dict)
+    assert env["DISPLAY"] == ":99"
+    assert env["TZ"] == "Europe/Paris"
+    assert env["LANG"] == "en_US.UTF-8"
+
+
+@pytest.mark.asyncio
+async def test_unknown_profile_timezone_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.platform", "linux")
+    client = WebSkrapClient()
+    client._playwright = type("_PW", (), {"chromium": _LaunchChromium()})()
+    config = SessionConfig(driver="patchright", patchright_context_profile=True)
+    profile = get_profile("desktop-chrome").model_copy(update={"timezone_id": "Mars/Olympus"})
+
+    with pytest.raises(WebSkrapError, match="unknown timezone") as excinfo:
+        await client._create_session("tz", config, profile)
+
+    assert excinfo.value.code is ErrorCode.USAGE

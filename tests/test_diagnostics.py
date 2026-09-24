@@ -87,3 +87,25 @@ def test_diagnose_probes_a_real_browser() -> None:
     assert report["ok"] is True
     assert report["channel"] in ("chrome", "chromium")
     assert Path(str(report["executable_path"])).exists()
+
+
+@pytest.mark.parametrize("zone", ["UTC", ":Etc/UTC", "Etc/Universal"])
+def test_utc_host_timezone_is_a_warning(monkeypatch: Any, zone: str) -> None:
+    _stub_probe(monkeypatch)
+    monkeypatch.setenv("TZ", zone)
+
+    report = asyncio.run(diagnostics.diagnose())
+
+    assert report["host_timezone"] == zone.lstrip(":")
+    assert len(report["warnings"]) == 1
+    assert "exit IP" in report["warnings"][0]
+
+
+def test_local_host_timezone_has_no_warning(monkeypatch: Any) -> None:
+    _stub_probe(monkeypatch)
+    monkeypatch.setenv("TZ", "Europe/Paris")
+
+    report = asyncio.run(diagnostics.diagnose())
+
+    assert report["host_timezone"] == "Europe/Paris"
+    assert report["warnings"] == []
