@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-09-24
+
 ### Fixed
 
 - Headless Chromium runs with no `channel` now use the full browser in new
@@ -474,7 +476,9 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/kacigaya/webskrap/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/kacigaya/webskrap/compare/v2.4.0...v2.5.0
 [2.5.0]: https://github.com/kacigaya/webskrap/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/kacigaya/webskrap/compare/v2.3.0...v2.4.0
 [2.4.0]: https://github.com/kacigaya/webskrap/compare/v2.3.0...v2.4.0
