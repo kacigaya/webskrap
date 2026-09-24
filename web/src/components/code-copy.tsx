@@ -6,15 +6,19 @@ const COPY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
 const CHECK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
 
 // Docs HTML is server-rendered (dangerouslySetInnerHTML), so attach copy
-// buttons to each <pre> on the client after mount.
+// buttons after mount. Keep them outside the scrolling <pre>.
 export function CodeCopy() {
   useEffect(() => {
     const pres = document.querySelectorAll<HTMLPreElement>("article pre");
     pres.forEach((pre) => {
       if (pre.dataset.copyReady) return;
       pre.dataset.copyReady = "1";
-      pre.classList.add("relative");
       const text = pre.innerText;
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "relative";
+      pre.before(wrapper);
+      wrapper.appendChild(pre);
 
       const btn = document.createElement("button");
       btn.type = "button";
@@ -35,7 +39,7 @@ export function CodeCopy() {
           btn.setAttribute("aria-label", "Copy failed");
         }
       });
-      pre.appendChild(btn);
+      wrapper.appendChild(btn);
     });
   }, []);
 
