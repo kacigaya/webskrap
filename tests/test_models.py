@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import get_args
+import sys
+from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
@@ -75,7 +76,10 @@ def test_patchright_context_omits_profile_by_default() -> None:
     assert "extra_http_headers" not in options
 
 
-def test_patchright_context_profile_applies_native_context_metadata() -> None:
+def test_patchright_context_profile_applies_native_context_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
     profile = BrowserProfile(
         name="test",
         user_agent="Custom/1.0",
@@ -94,8 +98,10 @@ def test_patchright_context_profile_applies_native_context_metadata() -> None:
 
     assert options["no_viewport"] is True
     assert "focus_control" not in options
-    assert options["locale"] == "en-US"
-    assert options["timezone_id"] == "Europe/Paris"
+    # Locale and timezone go in at launch on Linux; see
+    # test_context_profile_sets_timezone_and_languages_at_launch.
+    assert "locale" not in options
+    assert "timezone_id" not in options
     assert options["color_scheme"] == "dark"
     assert options["reduced_motion"] == "reduce"
     assert options["extra_http_headers"] == {"X-Test": "1"}
@@ -603,3 +609,110 @@ def test_virtual_display_is_ignored_for_headed_runs() -> None:
 
     assert config.launch_options()["headless"] is False
     assert not config.uses_virtual_display()
+
+
+def test_headless_chromium_without_a_channel_uses_new_headless() -> None:
+    # No channel would mean Playwright's headless shell, which leaks
+    # "HeadlessChrome" in Sec-CH-UA and sends no Accept-Language.
+    assert SessionConfig(headless=True).launch_options()["channel"] == "chromium"
+    assert SessionConfig(driver="patchright").launch_options()["channel"] == "chromium"
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        pytest.param(SessionConfig(headless=False), None, id="headed"),
+        pytest.param(SessionConfig(virtual_display=True), None, id="virtual-display-is-headed"),
+        pytest.param(SessionConfig(browser="firefox"), None, id="firefox"),
+        pytest.param(SessionConfig(channel="chrome"), "chrome", id="explicit"),
+        pytest.param(
+            SessionConfig(channel="chromium-headless-shell"),
+            "chromium-headless-shell",
+            id="explicit-shell-opt-in",
+        ),
+    ],
+)
+def test_channel_is_only_filled_in_for_headless_chromium(
+    config: SessionConfig, expected: str | None
+) -> None:
+    assert config.launch_options().get("channel") == expected
+
+
+def _native_config(**overrides: Any) -> SessionConfig:
+    return SessionConfig(driver="patchright", patchright_context_profile=True, **overrides)
+
+
+def _fr_profile() -> BrowserProfile:
+    return BrowserProfile(
+        name="fr",
+        locale="fr-FR",
+        timezone_id="Europe/Paris",
+        navigator_languages=["fr-FR", "fr", "en-US", "en"],
+        color_scheme="dark",
+    )
+
+
+def test_context_profile_sets_timezone_and_languages_at_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("LC_ALL", "C.UTF-8")
+    config = _native_config()
+    profile = _fr_profile()
+
+    options = config.launch_options(profile)
+    context = config.context_options(profile)
+
+    assert "--accept-lang=fr-FR,fr,en-US,en" in options["args"]
+    env = options["env"]
+    assert env["TZ"] == "Europe/Paris"
+    # LC_ALL is replaced too: a host value would otherwise pin Intl's locale.
+    assert env["LC_ALL"] == env["LANG"] == "fr_FR.UTF-8"
+    assert env["LANGUAGE"] == "fr_FR:fr:en_US:en"
+    assert "PATH" in env
+    # Nothing left to override over CDP; media preferences still apply there.
+    assert "locale" not in context
+    assert "timezone_id" not in context
+    assert context["color_scheme"] == "dark"
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin"])
+def test_context_profile_keeps_cdp_overrides_off_linux(
+    monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
+    config = _native_config()
+    profile = _fr_profile()
+
+    options = config.launch_options(profile)
+    context = config.context_options(profile)
+
+    assert "env" not in options
+    assert not any(a.startswith("--accept-lang") for a in options["args"])
+    assert context["locale"] == "fr-FR"
+    assert context["timezone_id"] == "Europe/Paris"
+
+
+def test_native_profile_needs_the_context_profile_switch() -> None:
+    options = SessionConfig(driver="patchright").launch_options(_fr_profile())
+
+    assert "env" not in options
+    assert not any(a.startswith("--accept-lang") for a in options.get("args", []))
+
+
+def test_caller_accept_lang_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    config = _native_config(launch_args=["--accept-lang=de-DE"])
+
+    args = config.launch_options(_fr_profile())["args"]
+
+    assert [a for a in args if a.startswith("--accept-lang")] == ["--accept-lang=de-DE"]
+
+
+def test_unknown_timezone_is_rejected_before_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Chromium would silently report "Etc/Unknown".
+    monkeypatch.setattr(sys, "platform", "linux")
+    profile = _fr_profile().model_copy(update={"timezone_id": "Not/AZone"})
+
+    with pytest.raises(ValueError, match="unknown timezone 'Not/AZone'"):
+        _native_config().launch_options(profile)

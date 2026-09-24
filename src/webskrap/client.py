@@ -95,7 +95,7 @@ def _async_playwright(driver: str):
 
 async def browser_doctor(
     driver: str = "patchright",
-    channels: tuple[str | None, ...] = ("chrome", None),
+    channels: tuple[str | None, ...] = ("chrome", "chromium"),
 ) -> dict[str, object]:
     """Report the first Chromium channel that launches with ``driver``.
 
@@ -771,7 +771,10 @@ class WebSkrapClient:
 
         browser_type = getattr(self._playwright, config.browser)
         context_options = config.context_options(profile)
-        launch_options = config.launch_options()
+        try:
+            launch_options = config.launch_options(profile)
+        except ValueError as exc:
+            raise WebSkrapError(str(exc), code=ErrorCode.USAGE) from exc
 
         if (
             config.mask_headless_user_agent
@@ -808,7 +811,7 @@ class WebSkrapClient:
                 screen = config.virtual_screen()
                 display = await VirtualDisplay.start(screen.width, screen.height)
                 # Playwright replaces the browser environment when env is set.
-                launch_options["env"] = {**os.environ, **display.env}
+                launch_options["env"] = {**launch_options.get("env", os.environ), **display.env}
             if user_data_dir is not None:
                 user_data_dir.mkdir(parents=True, exist_ok=True)
                 context = await browser_type.launch_persistent_context(

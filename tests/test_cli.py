@@ -168,12 +168,12 @@ def test_fetch_falls_back_to_chromium_when_channel_is_missing(monkeypatch: Any) 
     # The notice goes to stderr so piped stdout stays clean.
     assert result.output.endswith("<html>abcdef</html>")
     assert "retrying with chromium" in result.output
-    assert _LaunchFailingClient.attempts == ["chrome", None]
+    assert _LaunchFailingClient.attempts == ["chrome", "chromium"]
 
 
 def test_fetch_reports_launch_failure_without_a_traceback(monkeypatch: Any) -> None:
     _FakeClient.calls = []
-    _LaunchFailingClient.fail_channels = ("chrome", None)
+    _LaunchFailingClient.fail_channels = ("chrome", "chromium")
     monkeypatch.setattr(cli, "WebSkrapClient", _LaunchFailingClient)
 
     result = runner.invoke(cli.app, ["fetch", "https://example.test"])
@@ -679,7 +679,7 @@ def test_search_falls_back_to_chromium_when_channel_is_missing(monkeypatch: Any)
 
     assert result.exit_code == 0, result.output
     assert "retrying with chromium" in result.output
-    assert _LaunchFailingClient.attempts == ["chrome", None]
+    assert _LaunchFailingClient.attempts == ["chrome", "chromium"]
 
 
 def test_search_blocked_failure_is_a_parseable_envelope(monkeypatch: Any) -> None:
