@@ -507,7 +507,7 @@ def test_browser_eval_bounds_a_large_result(persistent_session_env: Path) -> Non
 
 
 def test_doctor_reports_configuration(monkeypatch: Any, tmp_path: Path) -> None:
-    async def fake_doctor() -> dict[str, Any]:
+    async def fake_doctor(**_kwargs: Any) -> dict[str, Any]:
         return {"ok": True, "message": "ready", "channel": "chrome"}
 
     monkeypatch.setattr(diagnostics, "browser_doctor", fake_doctor)

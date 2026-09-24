@@ -69,8 +69,9 @@ RECOVERY_HINTS: dict[ErrorCode, str] = {
     ),
     ErrorCode.SANDBOX: (
         "Chromium's OS sandbox could not start. Enable unprivileged user namespaces, or accept "
-        "weaker renderer isolation with `webskrap browser open --no-sandbox` "
-        "(WEBSKRAP_CHROMIUM_SANDBOX=0 for the MCP server)."
+        "weaker renderer isolation with --no-sandbox (`webskrap fetch`, `search`, "
+        "`browser open`), SessionConfig(chromium_sandbox=False), or "
+        "WEBSKRAP_CHROMIUM_SANDBOX=0 (MCP server)."
     ),
     ErrorCode.PATH_REJECTED: (
         "Paths are confined to a root. Pass a relative path, or move the root with "
@@ -110,6 +111,7 @@ EXIT_CODES: dict[ErrorCode, int] = {
 _MESSAGE_CODES: tuple[tuple[str, ErrorCode], ...] = (
     ("is blocked", ErrorCode.USAGE),
     ("sandbox could not start", ErrorCode.SANDBOX),
+    ("sandboxing failed", ErrorCode.SANDBOX),
     ("no usable sandbox", ErrorCode.SANDBOX),
     ("setuid sandbox", ErrorCode.SANDBOX),
     ("--no-sandbox", ErrorCode.SANDBOX),
@@ -178,6 +180,22 @@ def classify(exc: BaseException) -> ErrorCode:
         if marker in message:
             return code
     return ErrorCode.INTERNAL
+
+
+#: Text Chromium or Playwright print when the OS sandbox cannot start. Narrower
+#: than the ``--no-sandbox`` classification marker, which also matches any
+#: failed launch whose logged command line carries the opt-out flag.
+SANDBOX_FAILURE_MARKERS: tuple[str, ...] = (
+    "sandboxing failed",
+    "no usable sandbox",
+    "sandbox could not start",
+)
+
+
+def is_sandbox_failure(exc: BaseException) -> bool:
+    """True when ``exc`` says Chromium's OS sandbox could not start."""
+    text = str(exc).lower()
+    return any(marker in text for marker in SANDBOX_FAILURE_MARKERS)
 
 
 # Matches embedded credentials (scheme://user:pass@host) so error text handed

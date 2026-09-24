@@ -716,3 +716,17 @@ def test_unknown_timezone_is_rejected_before_launch(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(ValueError, match="unknown timezone 'Not/AZone'"):
         _native_config().launch_options(profile)
+
+
+def test_sandbox_setting_reaches_playwright() -> None:
+    # Playwright appends --no-sandbox unless chromium_sandbox is True, so the
+    # option itself has to be passed, not only the absence of the flag.
+    assert SessionConfig().launch_options()["chromium_sandbox"] is True
+    assert SessionConfig(driver="patchright").launch_options()["chromium_sandbox"] is True
+    opted_out = SessionConfig(chromium_sandbox=False).launch_options()
+    assert opted_out["chromium_sandbox"] is False
+    assert "--no-sandbox" in opted_out["args"]
+
+
+def test_sandbox_option_is_chromium_only() -> None:
+    assert "chromium_sandbox" not in SessionConfig(browser="firefox").launch_options()

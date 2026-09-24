@@ -804,3 +804,27 @@ def test_schema_lists_no_sandbox_for_fetch_and_search() -> None:
     for name in ("fetch", "search"):
         command = next(item for item in schema["commands"] if item["name"] == name)
         assert "no_sandbox" in {parameter["name"] for parameter in command["parameters"]}, name
+
+
+class _SandboxFailingClient(_LaunchFailingClient):
+    def _launch(self, config: Any) -> None:
+        self.attempts.append(config.channel)
+        raise RuntimeError(
+            "BrowserType.launch_persistent_context: Target page, context or browser has been "
+            "closed\nBrowser logs:\nChromium sandboxing failed!"
+        )
+
+
+def test_fetch_reports_a_sandbox_failure_without_retrying(monkeypatch: Any) -> None:
+    _FakeClient.calls = []
+    _SandboxFailingClient.attempts = []
+    monkeypatch.setattr(cli, "WebSkrapClient", _SandboxFailingClient)
+
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--format", "json"])
+
+    assert result.exit_code == EXIT_CODES[ErrorCode.SANDBOX]
+    payload = json.loads(result.output)
+    assert payload["code"] == "sandbox"
+    assert "--no-sandbox" in payload["hint"]
+    # Another channel cannot start a sandbox this host does not support.
+    assert _SandboxFailingClient.attempts == ["chrome"]
