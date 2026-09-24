@@ -9,6 +9,16 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `SessionConfig(gpu="mesa")`, `webskrap fetch/search --gpu mesa` and the MCP
+  `gpu` parameter render WebGL through Mesa's software Vulkan driver
+  (lavapipe) instead of SwiftShader, whose renderer string real Chrome stopped
+  reporting in Chrome 139 and detectors read as automation. Linux only, needs
+  `mesa-vulkan-drivers`; a missing driver fails the session before launch.
+  `gpu="auto"` (the default) keeps Chromium's choice. `doctor` reports
+  `mesa_gpu_available`.
+
 ### Security
 
 - One-shot `fetch`/`search` sessions now actually keep Chromium's OS sandbox.

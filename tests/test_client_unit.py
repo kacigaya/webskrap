@@ -12,6 +12,7 @@ from webskrap.client import (
     _bezier_path,
     _resource_route_handler,
     browser_doctor,
+    lavapipe_available,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
@@ -834,3 +835,41 @@ async def test_doctor_hints_at_the_sandbox_when_that_is_what_failed(
     assert report["ok"] is False
     assert all(options["chromium_sandbox"] is True for options in launches)
     assert "--no-sandbox" in str(report["hint"])
+
+
+def test_lavapipe_is_found_by_its_vulkan_icd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.delenv("VK_DRIVER_FILES", raising=False)
+    monkeypatch.delenv("VK_ICD_FILENAMES", raising=False)
+    icd_dir = tmp_path / "icd.d"
+    icd_dir.mkdir()
+    monkeypatch.setattr("webskrap.client.VULKAN_ICD_DIRS", (tmp_path / "missing", icd_dir))
+
+    assert not lavapipe_available()
+    (icd_dir / "lvp_icd.aarch64.json").write_text("{}")
+    assert lavapipe_available()
+
+
+def test_lavapipe_is_never_available_off_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("sys.platform", "darwin")
+
+    assert not lavapipe_available()
+
+
+@pytest.mark.asyncio
+async def test_mesa_gpu_without_lavapipe_fails_before_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chromium = _LaunchChromium()
+    client, displays, _sizes = _virtual_display_client(monkeypatch, chromium)
+    monkeypatch.setattr("webskrap.client.lavapipe_available", lambda: False)
+    config = SessionConfig(driver="patchright", gpu="mesa", virtual_display=True)
+
+    with pytest.raises(WebSkrapError, match="mesa-vulkan-drivers") as excinfo:
+        await client._create_session("gpu", config, get_profile("desktop-chrome"))
+
+    assert excinfo.value.code is ErrorCode.BROWSER_LAUNCH
+    assert chromium.options == {}  # the browser was never launched
+    assert displays == []  # nor the display

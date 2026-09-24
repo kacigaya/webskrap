@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from webskrap import browser_session
-from webskrap.client import browser_doctor
+from webskrap.client import browser_doctor, lavapipe_available
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV, mcp_profile_root, output_root
 
 #: Environment variables that change where WebSkrap reads and writes, or how it
@@ -106,5 +106,7 @@ async def diagnose() -> dict[str, Any]:
         "sessions_root_symlink": browser_session.sessions_root().is_symlink(),
         "sessions": browser_session.list_sessions(),
         "host_timezone": timezone,
+        # Whether gpu="mesa" can start here.
+        "mesa_gpu_available": lavapipe_available(),
         "warnings": warnings,
     }

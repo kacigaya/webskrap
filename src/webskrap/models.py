@@ -48,6 +48,13 @@ class ResourcePolicy(StrEnum):
     DOCUMENTS = "documents"
 
 
+class GpuBackend(StrEnum):
+    """Which GL implementation WebGL renders with; see :attr:`SessionConfig.gpu`."""
+
+    AUTO = "auto"
+    MESA = "mesa"
+
+
 class SearchEngine(StrEnum):
     """Which search engine's results page a search loads.
 
@@ -331,10 +338,24 @@ class SessionConfig(BaseModel):
     # headless_screen (1920x1080 when that is None). Only applies when
     # headless is True; the window stays invisible either way.
     virtual_display: bool = False
+    # Which GL implementation WebGL renders with (chromium only).
+    # "auto" leaves it to Chromium: a real GPU where one is usable. Without
+    # one, headless Chrome still falls back to SwiftShader, whose renderer
+    # string ("SwiftShader Device") real Chrome stopped reporting when
+    # Chrome 139 removed the automatic fallback, so it now reads as
+    # automation. Headed Chrome (including virtual_display) instead has no
+    # WebGL, as a real GPU-less desktop does. "mesa" renders through Mesa's
+    # software Vulkan driver (lavapipe), reporting "llvmpipe": uncommon,
+    # since stock Chrome blocklists software drivers, but not specific to
+    # automation. It needs Linux with the lavapipe Vulkan ICD (Debian/Ubuntu:
+    # mesa-vulkan-drivers). Keep "auto" on a machine with a real GPU.
+    gpu: GpuBackend = GpuBackend.AUTO
     # Native Chromium rendering reduction. When enabled, canvas readback and
     # WebGL are disabled through browser flags. This avoids high-entropy
     # rendering fingerprints without JavaScript monkeypatching, but can break
-    # pages that require canvas exports or WebGL.
+    # pages that require canvas exports or WebGL, and a browser with neither
+    # is itself rare: fingerprinting audits report it as blocking. To hide
+    # SwiftShader without losing WebGL, use gpu="mesa" instead.
     reduce_fingerprint_surface: bool = False
     # Chromium WebRTC IP handling policy. Use "disable_non_proxied_udp" to
     # prevent non-proxied UDP ICE candidates, which avoids WebRTC exposing local
@@ -431,6 +452,7 @@ class SessionConfig(BaseModel):
             + self._screen_args()
             + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
+            + self._gpu_args()
             + self._webrtc_ip_handling_args()
             + list(self.launch_args)
         )
@@ -532,6 +554,18 @@ class SessionConfig(BaseModel):
             for prefix, arg in candidates.items()
             if not any(a == prefix or a.startswith(f"{prefix}=") for a in self.launch_args)
         ]
+
+    def _gpu_args(self) -> list[str]:
+        # A caller choosing their own GL implementation keeps it.
+        if self.browser != "chromium" or any(
+            a.startswith(("--use-gl", "--use-angle")) for a in self.launch_args
+        ):
+            return []
+        if self.gpu is GpuBackend.MESA:
+            # --ignore-gpu-blocklist: Chromium blocklists software Vulkan
+            # drivers and would otherwise leave WebGL unavailable.
+            return ["--use-gl=angle", "--use-angle=vulkan", "--ignore-gpu-blocklist"]
+        return []
 
     def _reduced_fingerprint_surface_args(self) -> list[str]:
         if self.browser != "chromium" or not self.reduce_fingerprint_surface:

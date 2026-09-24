@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
+from webskrap.client import lavapipe_available
 
 pytestmark = pytest.mark.browser
 
@@ -300,3 +301,25 @@ async def test_virtual_display_presents_a_headed_browser(
     assert seen["hints"]["bitness"]
     assert seen["hints"]["uaFullVersion"]
     assert seen["screen"] == [1920, 1080]
+
+
+@pytest.mark.skipif(not lavapipe_available(), reason="needs Mesa's lavapipe Vulkan driver")
+async def test_mesa_gpu_replaces_swiftshader(test_server: str, sandbox_supported: bool) -> None:
+    config = SessionConfig(
+        chromium_sandbox=sandbox_supported, driver="patchright", channel="chromium", gpu="mesa"
+    )
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("mesa-gpu", config=config)
+        page = await session.context.new_page()
+        await page.goto(f"{test_server}/links")
+        renderer = await page.evaluate(
+            """() => {
+                const gl = document.createElement('canvas').getContext('webgl');
+                const info = gl && gl.getExtension('WEBGL_debug_renderer_info');
+                return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
+            }"""
+        )
+
+    assert renderer is not None
+    assert "llvmpipe" in renderer
+    assert "SwiftShader" not in renderer

@@ -35,6 +35,7 @@ from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, WebSkrapError, first_line, is_sandbox_failure
 from webskrap.models import (
     FetchResult,
+    GpuBackend,
     ResourcePolicy,
     SearchEngine,
     SearchResult,
@@ -304,6 +305,16 @@ def fetch_command(
             help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
         ),
     ] = False,
+    gpu: Annotated[
+        GpuBackend,
+        typer.Option(
+            "--gpu",
+            help=(
+                "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
+                "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
+            ),
+        ),
+    ] = GpuBackend.AUTO,
     launch_args: Annotated[
         list[str] | None,
         typer.Option(
@@ -355,6 +366,7 @@ def fetch_command(
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
+            gpu=gpu,
             launch_args=launch_args or [],
             no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -387,6 +399,7 @@ async def _fetch(
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     virtual_display: bool,
+    gpu: GpuBackend,
     launch_args: list[str],
     no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
@@ -407,6 +420,7 @@ async def _fetch(
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
+        gpu=gpu,
         launch_args=launch_args,
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )
@@ -546,6 +560,16 @@ def search_command(
             help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
         ),
     ] = False,
+    gpu: Annotated[
+        GpuBackend,
+        typer.Option(
+            "--gpu",
+            help=(
+                "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
+                "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
+            ),
+        ),
+    ] = GpuBackend.AUTO,
     launch_args: Annotated[
         list[str] | None,
         typer.Option(
@@ -595,6 +619,7 @@ def search_command(
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
+            gpu=gpu,
             launch_args=launch_args or [],
             no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -619,6 +644,7 @@ async def _search(
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     virtual_display: bool,
+    gpu: GpuBackend,
     launch_args: list[str],
     no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
@@ -638,6 +664,7 @@ async def _search(
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
+        gpu=gpu,
         launch_args=launch_args,
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )
@@ -829,6 +856,10 @@ def _print_doctor_details(result: dict[str, Any]) -> None:
         console.print(f"[bold]Sessions:[/bold] {len(sessions)} ({running} running)")
     if timezone := result.get("host_timezone"):
         console.print(f"[bold]Host timezone:[/bold] {timezone}")
+    if (mesa := result.get("mesa_gpu_available")) is not None:
+        console.print(
+            f"[bold]Mesa GPU (gpu=mesa):[/bold] {'available' if mesa else 'not installed'}"
+        )
     for warning in result.get("warnings") or []:
         console.print(f"[yellow]warning:[/yellow] {warning}")
 

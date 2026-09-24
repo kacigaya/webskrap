@@ -104,6 +104,7 @@ Patchright options:
   "reduce_fingerprint_surface": false,
   "mask_headless_user_agent": false,
   "virtual_display": false,
+  "gpu": "auto",
   "webrtc_ip_handling_policy": null
 }
 ```
@@ -208,7 +209,7 @@ args = []
 [Stealth](/docs/user-guide/stealth) guide, including
 `channel`, `headless`, `user_data_dir`, `patchright_context_profile`,
 `reduce_fingerprint_surface`, `mask_headless_user_agent`, `virtual_display`,
-and `webrtc_ip_handling_policy`. On Linux with Xvfb, prefer `virtual_display`
+`gpu`, and `webrtc_ip_handling_policy`. On Linux with Xvfb, prefer `virtual_display`
 over `mask_headless_user_agent`: it runs Chrome headed on a private display
 instead of rewriting the user agent, which empties the high-entropy client hints.
 

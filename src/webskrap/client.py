@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import shutil
+import sys
 import tempfile
 import time
 from collections.abc import Mapping
@@ -31,6 +32,7 @@ from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError, is_sandbox
 from webskrap.models import (
     BrowserProfile,
     FetchResult,
+    GpuBackend,
     Link,
     ResourcePolicy,
     SearchEngine,
@@ -816,6 +818,8 @@ class WebSkrapClient:
         context = None
         display = None
         try:
+            if config.gpu is GpuBackend.MESA and config.browser == "chromium":
+                _require_lavapipe()
             if config.uses_virtual_display():
                 screen = config.virtual_screen()
                 display = await VirtualDisplay.start(screen.width, screen.height)
@@ -885,6 +889,37 @@ class WebSkrapClient:
         if not isinstance(ua, str) or "HeadlessChrome" not in ua:
             return None
         return ua.replace("HeadlessChrome", "Chrome")
+
+
+#: Where the Vulkan loader looks for driver manifests on Linux.
+VULKAN_ICD_DIRS = (
+    Path("/usr/share/vulkan/icd.d"),
+    Path("/usr/local/share/vulkan/icd.d"),
+    Path("/etc/vulkan/icd.d"),
+)
+
+
+def lavapipe_available() -> bool:
+    """True when Mesa's software Vulkan driver (lavapipe) is installed."""
+    if not sys.platform.startswith("linux"):
+        return False
+    if os.environ.get("VK_DRIVER_FILES") or os.environ.get("VK_ICD_FILENAMES"):
+        # An explicit driver list is the caller's choice; trust it.
+        return True
+    return any(
+        any(directory.glob("lvp_icd*.json")) for directory in VULKAN_ICD_DIRS if directory.is_dir()
+    )
+
+
+def _require_lavapipe() -> None:
+    # Without the driver Chromium does not fall back: WebGL just disappears,
+    # which is not what a caller asking for Mesa wanted.
+    if not lavapipe_available():
+        msg = (
+            "gpu='mesa' needs Linux with Mesa's lavapipe Vulkan driver. "
+            "Install it (Debian/Ubuntu: apt install mesa-vulkan-drivers)"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
 
 def _resource_route_handler(policy: ResourcePolicy):
