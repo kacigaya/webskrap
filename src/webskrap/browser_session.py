@@ -326,7 +326,7 @@ def stealth_launch_args(
     Built from :class:`~webskrap.models.SessionConfig` so both paths share one
     definition: ``--disable-blink-features=AutomationControlled`` (otherwise a
     remote-debugging port sets ``navigator.webdriver``), the headless virtual
-    screen and window (otherwise 800x600 at 10,10), ``--no-sandbox`` only
+    screen and smaller window (otherwise 800x600 at 10,10), ``--no-sandbox`` only
     when the sandbox is off, and the WebRTC policy, which defaults to
     ``disable_non_proxied_udp`` behind a proxy. ``driver="playwright"`` is
     deliberate: Patchright injects the automation flag itself when it

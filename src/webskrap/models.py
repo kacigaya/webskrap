@@ -317,8 +317,8 @@ class SessionConfig(BaseModel):
     # Simulated screen for headless chromium. Headless Chrome has no physical
     # display, so screen/window metrics (screen.width, outerWidth, ...) leak as
     # headless tells. A virtual screen of this size is configured at launch via
-    # browser flags (not JS spoofing), giving coherent metrics. Set to None to
-    # disable.
+    # browser flags (not JS spoofing). The window leaves 80 px at the right
+    # and bottom of this screen. Set to None to disable.
     headless_screen: Viewport | None = Field(
         default_factory=lambda: Viewport(width=1920, height=1080)
     )
@@ -527,8 +527,11 @@ class SessionConfig(BaseModel):
         if not (self.headless and self.browser == "chromium" and self.headless_screen):
             return []
         width, height = self.headless_screen.width, self.headless_screen.height
+        # Leave space at the right and bottom, as a normal desktop window
+        # does. The screen itself keeps its full configured dimensions.
+        window_width, window_height = max(1, width - 80), max(1, height - 80)
         candidates = {
-            "--window-size": f"--window-size={width},{height}",
+            "--window-size": f"--window-size={window_width},{window_height}",
             "--window-position": "--window-position=0,0",
         }
         if not self.virtual_display:

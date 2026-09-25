@@ -147,7 +147,7 @@ def test_headless_chromium_gets_simulated_screen() -> None:
 
     args = config.launch_options()["args"]
 
-    assert "--window-size=1920,1080" in args
+    assert "--window-size=1840,1000" in args
     assert "--window-position=0,0" in args
     assert "--screen-info={1920x1080}" in args
 
@@ -157,7 +157,7 @@ def test_headless_screen_size_is_configurable() -> None:
 
     args = config.launch_options()["args"]
 
-    assert "--window-size=1366,768" in args
+    assert "--window-size=1286,688" in args
     assert "--screen-info={1366x768}" in args
 
 
@@ -181,7 +181,7 @@ def test_user_launch_args_override_simulated_screen() -> None:
     args = config.launch_options()["args"]
 
     assert "--window-size=800,600" in args
-    assert "--window-size=1920,1080" not in args
+    assert "--window-size=1840,1000" not in args
     # untouched flags still applied
     assert "--screen-info={1920x1080}" in args
 
@@ -589,7 +589,7 @@ def test_virtual_display_launches_headed_with_window_but_no_headless_screen() ->
     options = config.launch_options()
 
     assert options["headless"] is False
-    assert "--window-size=1920,1080" in options["args"]
+    assert "--window-size=1840,1000" in options["args"]
     assert "--window-position=0,0" in options["args"]
     # --screen-info only exists in headless mode; Xvfb supplies the screen.
     assert not any(a.startswith("--screen-info") for a in options["args"])
