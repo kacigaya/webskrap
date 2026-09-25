@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from typer.testing import CliRunner
@@ -280,6 +281,7 @@ def test_browser_session_lifecycle(persistent_session_env: Path) -> None:
                 "pid": sessions[0]["pid"],
                 "port": sessions[0]["port"],
                 "chromium_sandbox": sessions[0]["chromium_sandbox"],
+                "proxy_server": None,
             }
         ]
     finally:
@@ -448,3 +450,89 @@ def test_browser_json_failure_before_connecting_is_also_an_envelope(tmp_path: Pa
 
     assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
     assert json.loads(result.output)["code"] == "usage"
+
+
+def _capture_open(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {
+            "session": name,
+            "pid": 1,
+            "port": 2,
+            "reused": False,
+            "chromium_sandbox": True,
+            "proxy_server": kwargs.get("proxy_server"),
+            "webrtc_ip_handling_policy": kwargs.get("webrtc_ip_handling_policy")
+            or ("disable_non_proxied_udp" if kwargs.get("proxy_server") else None),
+        }
+
+    monkeypatch.setattr(browser_session, "open_session", fake_open)
+    return calls
+
+
+def test_open_passes_the_proxy_and_webrtc_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = _capture_open(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "browser",
+            "open",
+            "--proxy",
+            "socks5://proxy.test:1080",
+            "--webrtc-ip-handling-policy",
+            "default_public_interface_only",
+            "--format",
+            "json",
+        ],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0]["proxy_server"] == "socks5://proxy.test:1080"
+    assert calls[0]["webrtc_ip_handling_policy"] == "default_public_interface_only"
+    assert json.loads(result.output)["proxy_server"] == "socks5://proxy.test:1080"
+
+
+def test_open_names_the_proxy_in_human_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _capture_open(monkeypatch)
+
+    result = runner.invoke(
+        cli.app, ["browser", "open", "--proxy", "http://proxy.test:8080"], env=_env(tmp_path)
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Proxy: http://proxy.test:8080" in result.output
+
+
+def test_open_rejects_an_unknown_webrtc_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = _capture_open(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        ["browser", "open", "--webrtc-ip-handling-policy", "leaky"],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert calls == []
+
+
+def test_open_reports_a_credentialed_proxy_as_usage(tmp_path: Path) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["browser", "open", "--proxy", "http://user:pw@proxy.test:8080", "--format", "json"],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
+    assert "cannot authenticate" in result.output
+    assert "pw@" not in result.output

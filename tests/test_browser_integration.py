@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 import sys
 import threading
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
+from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient, browser_session
 from webskrap.client import lavapipe_available
 
 pytestmark = pytest.mark.browser
@@ -323,3 +324,40 @@ async def test_mesa_gpu_replaces_swiftshader(test_server: str, sandbox_supported
     assert renderer is not None
     assert "llvmpipe" in renderer
     assert "SwiftShader" not in renderer
+
+
+_ICE_CANDIDATE_TYPES = """async () => {
+    const pc = new RTCPeerConnection();
+    const types = [];
+    pc.onicecandidate = (e) => { if (e.candidate) types.push(e.candidate.type); };
+    pc.createDataChannel('probe');
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    pc.close();
+    return types;
+}"""
+
+
+@pytest.mark.parametrize(
+    ("policy", "expect_candidates"),
+    [(None, True), ("disable_non_proxied_udp", False)],
+)
+def test_persistent_session_applies_the_webrtc_policy(
+    persistent_session_env: Path, policy: str | None, expect_candidates: bool
+) -> None:
+    # No ICE servers: host candidates are gathered locally, so this needs no
+    # network. The policy has to reach the detached browser's command line.
+    name = "webrtc-policy"
+
+    async def exercise() -> list[str]:
+        await browser_session.open_session(name, webrtc_ip_handling_policy=policy)
+        return await browser_session.run_page_action(
+            name, lambda page: browser_session.evaluate(page, _ICE_CANDIDATE_TYPES)
+        )
+
+    try:
+        types = asyncio.run(exercise())
+    finally:
+        browser_session.close_session(name, delete_data=True)
+
+    assert bool(types) is expect_candidates

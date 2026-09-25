@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from webskrap import diagnostics, mcp_server
+from webskrap import browser_session, diagnostics, mcp_server
 from webskrap.client import WebSkrapError
 from webskrap.errors import RECOVERY_HINTS, ErrorCode
 from webskrap.models import FetchResult, Link, SearchEngine, SearchHit, SearchResult
@@ -739,3 +740,29 @@ def test_browser_eval_env_gate_disables_the_tool(monkeypatch: Any) -> None:
         asyncio.run(mcp_server.browser_eval("1 + 1"))
 
     assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"session": name, "reused": False, "proxy_server": None}
+
+    monkeypatch.setattr(browser_session, "open_session", fake_open)
+
+    asyncio.run(mcp_server.browser_open(webrtc_ip_handling_policy="disable_non_proxied_udp"))
+
+    assert calls == [{"headless": True, "webrtc_ip_handling_policy": "disable_non_proxied_udp"}]
+
+
+def test_browser_open_rejects_an_unknown_webrtc_policy() -> None:
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_open(webrtc_ip_handling_policy="leaky"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_open_takes_no_proxy_from_the_model() -> None:
+    # Page text can steer a model; a model-chosen proxy could reroute traffic.
+    assert "proxy" not in " ".join(inspect.signature(mcp_server.browser_open).parameters)

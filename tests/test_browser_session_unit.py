@@ -219,8 +219,26 @@ def test_list_sessions_reports_sandbox_state(
             "pid": None,
             "port": None,
             "chromium_sandbox": None,
+            "proxy_server": None,
         }
     ]
+
+
+def test_list_sessions_reports_the_running_proxy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+    directory = tmp_path / "proxied"
+    directory.mkdir()
+    browser_session.write_state(
+        directory,
+        {"pid": 7, "port": 1, "chromium_sandbox": True, "proxy_server": "http://proxy.test:8080"},
+    )
+    monkeypatch.setattr(browser_session, "session_running", lambda _d, state: state is not None)
+
+    [entry] = browser_session.list_sessions()
+
+    assert entry["proxy_server"] == "http://proxy.test:8080"
 
 
 @pytest.mark.parametrize("name", [".", "..", "../evil"])
@@ -525,3 +543,167 @@ async def test_evaluate_runs_in_the_page_world() -> None:
 
     assert result == "ok"
     assert calls == [("window.app", {"isolated_context": False})]
+
+
+def test_launch_routes_through_the_proxy_and_blocks_webrtc_leaks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True, proxy_server="socks5://proxy.test:1080")
+
+    command = commands[0]
+    assert "--proxy-server=socks5://proxy.test:1080" in command
+    assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in command
+    assert "--force-webrtc-ip-handling-policy" in command
+
+
+def test_launch_without_proxy_leaves_webrtc_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True)
+
+    assert not any(a.startswith(("--proxy-server", "--webrtc")) for a in commands[0])
+
+
+def test_launch_explicit_webrtc_policy_wins(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(
+        tmp_path,
+        headless=True,
+        proxy_server="http://proxy.test:8080",
+        webrtc_ip_handling_policy="default_public_interface_only",
+    )
+
+    assert "--webrtc-ip-handling-policy=default_public_interface_only" in commands[0]
+
+
+@pytest.mark.parametrize(
+    ("server", "message"),
+    [
+        pytest.param("proxy.test:8080", "must start with", id="no-scheme"),
+        pytest.param("ftp://proxy.test", "must start with", id="bad-scheme"),
+        pytest.param("http://user:secret@proxy.test:8080", "cannot authenticate", id="credentials"),
+        pytest.param("socks5://user@proxy.test:1080", "cannot authenticate", id="username-only"),
+    ],
+)
+def test_persistent_proxy_is_validated(server: str, message: str) -> None:
+    with pytest.raises(WebSkrapError, match=message) as excinfo:
+        browser_session.persistent_proxy_server(server)
+
+    assert excinfo.value.code is ErrorCode.USAGE
+    # A refused credential never reaches the error text.
+    assert "secret" not in str(excinfo.value)
+
+
+def test_persistent_proxy_accepts_paths_with_at_signs_outside_the_authority() -> None:
+    server = "http://proxy.test:8080/p@th"
+
+    assert browser_session.persistent_proxy_server(server) == server
+
+
+def _stub_session_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[dict[str, Any]]:
+    """Make open_session "launch" instantly, recording each launch's options."""
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "browser"))
+    launches: list[dict[str, Any]] = []
+
+    async def fake_executable() -> str:
+        return "/bin/chromium"
+
+    def fake_launch(_directory: Path, **kwargs: Any) -> tuple[int, int]:
+        launches.append(kwargs)
+        return (1234, 5678)
+
+    monkeypatch.setattr(browser_session, "chromium_executable", fake_executable)
+    monkeypatch.setattr(browser_session, "launch_browser", fake_launch)
+    monkeypatch.setattr(
+        browser_session, "session_running", lambda _directory, state: state is not None
+    )
+    return launches
+
+
+def test_open_records_the_proxy_and_its_webrtc_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+
+    opened = asyncio.run(
+        browser_session.open_session("proxied", proxy_server="socks5://proxy.test:1080")
+    )
+
+    assert launches[0]["proxy_server"] == "socks5://proxy.test:1080"
+    assert opened["proxy_server"] == "socks5://proxy.test:1080"
+    assert opened["webrtc_ip_handling_policy"] == "disable_non_proxied_udp"
+
+
+def test_open_without_proxy_records_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _stub_session_launch(monkeypatch, tmp_path)
+
+    opened = asyncio.run(browser_session.open_session("direct"))
+
+    assert opened["proxy_server"] is None
+    assert opened["webrtc_ip_handling_policy"] is None
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "label"),
+    [
+        pytest.param({}, {"proxy_server": "http://proxy.test:8080"}, "proxy", id="adds-proxy"),
+        pytest.param(
+            {"proxy_server": "http://a.test:8080"},
+            {"proxy_server": "http://b.test:8080"},
+            "proxy",
+            id="changes-proxy",
+        ),
+        pytest.param(
+            {"proxy_server": "http://a.test:8080"},
+            {"webrtc_ip_handling_policy": "default"},
+            "WebRTC policy",
+            id="changes-webrtc",
+        ),
+    ],
+)
+def test_reopen_refuses_a_different_network_setup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    first: dict[str, Any],
+    second: dict[str, Any],
+    label: str,
+) -> None:
+    # Reusing the running browser would send traffic outside the requested proxy.
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    asyncio.run(browser_session.open_session("net", **first))
+
+    with pytest.raises(WebSkrapError, match=f"different {label}") as excinfo:
+        asyncio.run(browser_session.open_session("net", **second))
+
+    assert excinfo.value.code is ErrorCode.USAGE
+    assert len(launches) == 1
+
+
+def test_reopen_without_naming_the_proxy_reuses_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_session_launch(monkeypatch, tmp_path)
+    asyncio.run(browser_session.open_session("net", proxy_server="http://proxy.test:8080"))
+
+    reopened = asyncio.run(browser_session.open_session("net"))
+
+    assert reopened["reused"] is True
+    assert reopened["proxy_server"] == "http://proxy.test:8080"
+
+
+def test_open_rejects_a_credentialed_proxy_before_launching(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+
+    with pytest.raises(WebSkrapError, match="cannot authenticate"):
+        asyncio.run(browser_session.open_session("net", proxy_server="http://u:p@proxy.test:8080"))
+
+    assert launches == []

@@ -36,7 +36,15 @@ from patchright.async_api import async_playwright as patchright_playwright
 from playwright.async_api import async_playwright
 
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import ElementState, LoadState, SessionConfig, WaitUntil, text_window
+from webskrap.models import (
+    ElementState,
+    LoadState,
+    ProxyConfig,
+    SessionConfig,
+    WaitUntil,
+    WebRtcIPHandlingPolicy,
+    text_window,
+)
 from webskrap.paths import secure_directory
 from webskrap.urls import validate_url
 
@@ -305,19 +313,68 @@ def signal_group(pid: int, sig: signal.Signals) -> None:
             os.kill(pid, sig)
 
 
-def stealth_launch_args(*, headless: bool, chromium_sandbox: bool) -> list[str]:
+def stealth_launch_args(
+    *,
+    headless: bool,
+    chromium_sandbox: bool,
+    proxy_server: str | None = None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
+) -> list[str]:
     """Return the browser flags a one-shot fetch would get, for a detached launch.
 
     Built from :class:`~webskrap.models.SessionConfig` so both paths share one
     definition: ``--disable-blink-features=AutomationControlled`` (otherwise a
     remote-debugging port sets ``navigator.webdriver``), the headless virtual
-    screen and window (otherwise 800x600 at 10,10), and ``--no-sandbox`` only
-    when the sandbox is off. ``driver="playwright"`` is deliberate: Patchright
-    injects the automation flag itself when it launches, but here WebSkrap
-    spawns the process, so the flag has to be on the command line.
+    screen and window (otherwise 800x600 at 10,10), ``--no-sandbox`` only
+    when the sandbox is off, and the WebRTC policy, which defaults to
+    ``disable_non_proxied_udp`` behind a proxy. ``driver="playwright"`` is
+    deliberate: Patchright injects the automation flag itself when it
+    launches, but here WebSkrap spawns the process, so the flag has to be on
+    the command line. The proxy itself is a Playwright context option there,
+    so it is added as ``--proxy-server`` here.
+
+    Raises:
+        WebSkrapError: If ``proxy_server`` is not a proxy URL WebSkrap accepts
+            or embeds credentials (see :func:`persistent_proxy_server`).
     """
-    config = SessionConfig(headless=headless, chromium_sandbox=chromium_sandbox)
-    return list(config.launch_options().get("args", []))
+    proxy = ProxyConfig(server=persistent_proxy_server(proxy_server)) if proxy_server else None
+    config = SessionConfig(
+        headless=headless,
+        chromium_sandbox=chromium_sandbox,
+        proxy=proxy,
+        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+    )
+    args = list(config.launch_options().get("args", []))
+    if proxy is not None:
+        args.append(f"--proxy-server={proxy.server}")
+    return args
+
+
+def persistent_proxy_server(server: str) -> str:
+    """Validate a proxy URL for a persistent session and return it.
+
+    Credentials are refused: Chromium ignores them in ``--proxy-server``, and
+    a session whose every action attaches over CDP briefly and disconnects
+    has nobody listening when the proxy asks for authentication. Use an
+    unauthenticated or IP-allowlisted proxy, or a one-shot fetch, whose
+    ``ProxyConfig`` handles credentials.
+
+    Raises:
+        WebSkrapError: If ``server`` has no http/https/socks4/socks5 scheme or
+            embeds credentials (``usage``).
+    """
+    try:
+        ProxyConfig(server=server)
+    except ValueError as exc:
+        msg = "proxy server must start with http://, https://, socks4://, or socks5://"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE) from exc
+    if "@" in server.split("://", 1)[1].split("/", 1)[0]:
+        msg = (
+            "persistent sessions cannot authenticate to a proxy: pass a proxy URL "
+            "without user:password@"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    return server
 
 
 def launch_browser(
@@ -326,6 +383,8 @@ def launch_browser(
     executable: str,
     headless: bool,
     chromium_sandbox: bool = True,
+    proxy_server: str | None = None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
 ) -> tuple[int, int]:
     """Start a detached Chromium and return its (pid, CDP port).
 
@@ -337,6 +396,9 @@ def launch_browser(
             ``--no-sandbox``, which lets a compromised renderer processing a
             hostile page reach the rest of the machine. Only do that where the
             sandbox genuinely cannot start.
+        proxy_server: Unauthenticated proxy URL for all browser traffic.
+        webrtc_ip_handling_policy: Chromium WebRTC ICE policy; defaults to
+            ``disable_non_proxied_udp`` when ``proxy_server`` is set.
 
     Raises:
         WebSkrapError: If the browser exits during startup or never reports a
@@ -358,7 +420,12 @@ def launch_browser(
         # and tracks restores internally, but that tracking is unavailable when
         # attaching over CDP, so trade bfcache for deterministic load events.
         "--disable-features=BackForwardCache",
-        *stealth_launch_args(headless=headless, chromium_sandbox=chromium_sandbox),
+        *stealth_launch_args(
+            headless=headless,
+            chromium_sandbox=chromium_sandbox,
+            proxy_server=proxy_server,
+            webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+        ),
     ]
     if headless:
         command.append("--headless=new")
@@ -429,6 +496,8 @@ async def open_session(
     *,
     headless: bool = True,
     chromium_sandbox: bool | None = None,
+    proxy_server: str | None = None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
@@ -441,13 +510,25 @@ async def open_session(
         chromium_sandbox: Keep Chromium's OS sandbox. None consults
             ``WEBSKRAP_CHROMIUM_SANDBOX`` and otherwise sandboxes. See
             :func:`sandbox_enabled` and :func:`launch_browser`.
+        proxy_server: Unauthenticated proxy URL for all of the session's
+            traffic; see :func:`persistent_proxy_server`.
+        webrtc_ip_handling_policy: Chromium WebRTC ICE policy. Defaults to
+            ``disable_non_proxied_udp`` when ``proxy_server`` is set.
 
     Returns:
-        ``{"session", "pid", "port", "reused", "chromium_sandbox"}``.
+        ``{"session", "pid", "port", "reused", "chromium_sandbox",
+        "proxy_server", "webrtc_ip_handling_policy"}``. The last two are what
+        the running browser was launched with.
 
     Raises:
-        WebSkrapError: If the name is invalid or the browser fails to start.
+        WebSkrapError: If the name or proxy is invalid, the browser fails to
+            start, or a running session was launched with a different proxy
+            or WebRTC policy than requested (``usage``). Launch flags cannot
+            change on a running browser, and silently reusing it would send
+            traffic outside the requested proxy.
     """
+    if proxy_server is not None:
+        persistent_proxy_server(proxy_server)
     operation_lock = await _acquire_session_operation_lock(name)
     try:
         # Unconditional, so a session directory created by an older version (or
@@ -456,6 +537,8 @@ async def open_session(
         existing = read_state(directory)
         state = existing if session_running(directory, existing) else None
         reused = state is not None
+        if state is not None:
+            _require_same_network(name, state, proxy_server, webrtc_ip_handling_policy)
 
         if state is None:
             executable = await chromium_executable()
@@ -465,6 +548,8 @@ async def open_session(
                 executable=executable,
                 headless=headless,
                 chromium_sandbox=sandboxed,
+                proxy_server=proxy_server,
+                webrtc_ip_handling_policy=webrtc_ip_handling_policy,
             )
             state = {
                 "pid": pid,
@@ -473,6 +558,13 @@ async def open_session(
                 # Recorded so `browser list` can show which running sessions gave
                 # up renderer isolation; a reused session keeps its launch value.
                 "chromium_sandbox": sandboxed,
+                # Recorded so a later open can refuse to reuse this browser for
+                # a different proxy. Never holds credentials; those are refused.
+                "proxy_server": proxy_server,
+                "webrtc_ip_handling_policy": SessionConfig(
+                    proxy=ProxyConfig(server=proxy_server) if proxy_server else None,
+                    webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+                ).effective_webrtc_ip_handling_policy(),
                 "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
             }
             try:
@@ -489,9 +581,44 @@ async def open_session(
             "port": state["port"],
             "reused": reused,
             "chromium_sandbox": bool(state.get("chromium_sandbox", False)),
+            "proxy_server": state.get("proxy_server"),
+            "webrtc_ip_handling_policy": state.get("webrtc_ip_handling_policy"),
         }
     finally:
         await asyncio.to_thread(operation_lock.release)
+
+
+def _require_same_network(
+    name: str,
+    state: dict[str, Any],
+    proxy_server: str | None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None,
+) -> None:
+    """Refuse to reuse a running session for a different proxy or WebRTC policy.
+
+    Only settings the caller asked for are compared: reopening a proxied
+    session without naming the proxy reuses it, and its traffic still goes
+    through that proxy.
+    """
+    mismatched = [
+        label
+        for label, requested, running in (
+            ("proxy", proxy_server, state.get("proxy_server")),
+            (
+                "WebRTC policy",
+                webrtc_ip_handling_policy,
+                state.get("webrtc_ip_handling_policy"),
+            ),
+        )
+        if requested is not None and requested != running
+    ]
+    if mismatched:
+        msg = (
+            f"session '{name}' is already running with a different "
+            f"{' and '.join(mismatched)}. Run: webskrap browser close --session {name}, "
+            "then open it again"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
 
 
 def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
@@ -534,10 +661,11 @@ def list_session_names() -> list[str]:
 def list_sessions() -> list[dict[str, Any]]:
     """Return one entry per session.
 
-    Each is ``{"session", "running", "pid", "port", "chromium_sandbox"}``. The
-    last three are None for a session that is not running; ``chromium_sandbox``
-    reports how the running browser was launched, so an operator can see which
-    sessions gave up renderer isolation.
+    Each is ``{"session", "running", "pid", "port", "chromium_sandbox",
+    "proxy_server"}``. The last four are None for a session that is not
+    running. ``chromium_sandbox`` and ``proxy_server`` report how the running
+    browser was launched, so an operator can see which sessions gave up
+    renderer isolation and where each one's traffic goes.
     """
     sessions = []
     for name in list_session_names():
@@ -553,6 +681,7 @@ def list_sessions() -> list[dict[str, Any]]:
                 "chromium_sandbox": (
                     bool(state.get("chromium_sandbox", False)) if running and state else None
                 ),
+                "proxy_server": state.get("proxy_server") if running and state else None,
             }
         )
     return sessions

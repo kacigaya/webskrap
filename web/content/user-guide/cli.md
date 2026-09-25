@@ -258,6 +258,24 @@ the difference between a compromised renderer and a compromised machine.
 WebSkrap never drops the sandbox on its own, and never retries a failed launch
 without it.
 
+To route a session through a proxy, pass it when the browser starts:
+
+```bash
+webskrap browser open --proxy socks5://proxy.example:1080
+webskrap browser open --proxy http://proxy.example:8080 \
+  --webrtc-ip-handling-policy default_public_interface_only
+```
+
+With `--proxy`, WebRTC defaults to `disable_non_proxied_udp`, so pages see
+neither the host's LAN address nor its direct public address in ICE candidates;
+`--webrtc-ip-handling-policy` overrides it, with or without a proxy. The proxy
+URL must not carry credentials: a persistent session has nobody attached to
+answer the proxy's authentication challenge. Both settings are fixed at launch.
+Reopening a running session with a different proxy or policy fails with a
+`usage` error instead of reusing a browser that bypasses the proxy; reopening
+it without `--proxy` reuses it as it is. `webskrap browser list` shows each
+running session's proxy.
+
 Deliberate limitations versus the official Playwright CLI: one page per
 session (no tab commands), bundled Chromium only, and no commands for network
 mocking, tracing, or video. `back` and `forward` always reload the page,

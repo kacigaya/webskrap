@@ -133,6 +133,14 @@ virtual-screen launch flags as `stealth_fetch`. Sessions are named (`session`, d
 and store their profile under `~/.webskrap/browser/<name>/`
 (root overridable with `WEBSKRAP_BROWSER_DIR`), so cookies and logins persist.
 
+`browser_open` accepts `webrtc_ip_handling_policy` (for example
+`disable_non_proxied_udp`) to keep the host's addresses out of WebRTC
+candidates. A proxy is deliberately not a tool argument, like the sandbox
+switch: page text can steer a model, and a model-chosen proxy could reroute all
+of a session's traffic. Open a proxied session from the CLI with
+`webskrap browser open --proxy URL`; the browser tools then reuse it, and
+`browser_open` reports its `proxy_server`.
+
 A typical flow:
 
 1. `browser_open` with an optional `url`.
