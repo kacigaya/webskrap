@@ -13,6 +13,7 @@ storage state, or proxy credentials.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import shutil
@@ -122,7 +123,7 @@ async def diagnose() -> dict[str, Any]:
         },
         "platform": f"{platform.system()} {platform.machine()}",
         "cpu_architecture": platform.machine(),
-        "font_count": font_count(),
+        "font_count": await asyncio.to_thread(font_count),
         "paths": {
             "sessions_root": str(browser_session.sessions_root()),
             "output_root": str(output_root()),
