@@ -93,6 +93,7 @@ def test_package_version_returns_none_for_an_absent_distribution() -> None:
 
 def test_font_count_deduplicates_primary_families(monkeypatch: Any) -> None:
     monkeypatch.setattr(diagnostics.shutil, "which", lambda _command: "/usr/bin/fc-list")
+
     def fake_run(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
             args=["fc-list"],
