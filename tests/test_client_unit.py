@@ -68,9 +68,13 @@ class _Keyboard:
 
 
 class _Locator:
-    def __init__(self, box: dict[str, float] | None = None, count: int = 1) -> None:
+    def __init__(
+        self, box: dict[str, float] | None = None, count: int = 1, *, receives_click: bool = True
+    ) -> None:
         self.box = box or {"x": 10, "y": 20, "width": 100, "height": 40}
         self.element_count = count
+        self.receives_click = receives_click
+        self.hit_tests: list[object] = []
         self.waits: list[dict[str, object]] = []
         self.scrolled: list[dict[str, object]] = []
 
@@ -85,6 +89,10 @@ class _Locator:
 
     async def count(self) -> int:
         return self.element_count
+
+    async def evaluate(self, _script: str, arg: object) -> bool:
+        self.hit_tests.append(arg)
+        return self.receives_click
 
 
 class _Page:
@@ -1004,3 +1012,26 @@ async def test_human_type_on_a_closed_session_fails() -> None:
 
     with pytest.raises(WebSkrapError, match="is closed"):
         await session.human_type(_Page(), "input", "x")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_human_click_refuses_a_covered_element() -> None:
+    locator = _Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}, receives_click=False)
+    page = _Page(locator)
+
+    with pytest.raises(WebSkrapError, match="covers the click point"):
+        await _session().human_click(page, "#go")  # type: ignore[arg-type]
+
+    # Checked before any pointer event, so the page saw nothing.
+    assert page.mouse.moves == []
+    assert page.mouse.clicks == []
+
+
+@pytest.mark.asyncio
+async def test_human_click_hit_tests_the_exact_click_point() -> None:
+    locator = _Locator(box={"x": 10, "y": 200, "width": 100, "height": 30})
+    page = _Page(locator)
+
+    await _session().human_click(page, "#go", position={"x": 7, "y": 5})  # type: ignore[arg-type]
+
+    assert locator.hit_tests == [[7, 5]]

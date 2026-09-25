@@ -18,12 +18,10 @@ class _Element:
     async def is_visible(self) -> bool:
         return self.visible
 
-    async def click(self, *, trial: bool = False, **_options: object) -> None:
-        if not self.clickable:
-            raise RuntimeError("element is covered")
-        # Consent only trial-clicks through Playwright; the real click is the
-        # humanized one, stubbed below.
-        assert trial is True
+    async def click(self, **_options: object) -> None:
+        # Even a trial click is visible to the page (a scroll, a mousemove
+        # and a click event); consent must only click through webskrap.human.
+        raise AssertionError("consent clicked through Playwright")
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +29,8 @@ def _record_human_clicks(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, 
     clicks: list[tuple[object, object]] = []
 
     async def fake_click(page: object, element: _Element, **_options: object) -> None:
+        if not element.clickable:
+            raise RuntimeError("another element covers the click point")
         clicks.append((page, element))
         element.clicked = True
 

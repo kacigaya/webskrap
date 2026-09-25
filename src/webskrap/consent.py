@@ -257,10 +257,8 @@ async def _decline_in_frame(page: Any, frame: Any, deadline: float) -> str | Non
                 # The banner is usually the first thing clicked on a page, and
                 # the page's own bot script sees every mouse event, so a
                 # teleported 2 ms click here is the one that gets scored. The
-                # trial click keeps Playwright's actionability check (visible,
-                # stable, not covered) without clicking; the humanized click
-                # then moves the page's mouse, which reaches into frames.
-                await element.click(trial=True, timeout=click_timeout)
+                # humanized click moves the page's mouse, which reaches into
+                # frames, and refuses a covered element.
                 await humanize.click(
                     page, element, description="cookie notice reject control", timeout=click_timeout
                 )

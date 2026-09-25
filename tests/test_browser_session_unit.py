@@ -742,8 +742,8 @@ def test_click_actions_use_the_human_path(
 
     asyncio.run(browser_session.element_action(_action_page(locator), action, "#go", []))
 
-    # Playwright only checks actionability; the click itself is humanized.
-    assert locator.calls == [("click", (), {"trial": True})]
+    # No Playwright click at all, not even a trial one: the page would see it.
+    assert locator.calls == []
     assert human_clicks == [{"description": "#go", **extra}]
 
 

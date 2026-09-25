@@ -59,7 +59,10 @@ async def click(
 
     Raises:
         WebSkrapError: If ``strict`` was requested and the locator matches
-            more than one element, or the element has no visible bounding box.
+            more than one element, the element has no visible bounding box,
+            or another element covers the click point (checked silently with
+            ``elementFromPoint``, never with a trial click, which the page
+            would see as a mousemove and a click).
     """
     timeout = click_options.get("timeout")
     await locator.wait_for(state="visible", timeout=timeout)
@@ -75,6 +78,9 @@ async def click(
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
 
     x, y = click_point(box, click_options.get("position"))
+    if not await _receives_point(locator, x - box["x"], y - box["y"]):
+        msg = f"another element covers the click point of: {description}"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
     if click_options.get("trial"):
         return
 
@@ -177,6 +183,24 @@ async def scroll_into_view(
             await page.wait_for_timeout(uniform(16, 45))
         await page.wait_for_timeout(uniform(60, 160))
     await locator.scroll_into_view_if_needed(timeout=timeout)
+
+
+# Hit test at the click point, in the element's own frame and shadow root.
+# `getBoundingClientRect` is frame-relative, so the offset measured from the
+# top-level box carries over. Evaluating dispatches no events, unlike
+# Playwright's trial click, which scrolls and sends a mousemove and a click.
+_HIT_TEST = """(el, [dx, dy]) => {
+    const rect = el.getBoundingClientRect();
+    const root = el.getRootNode();
+    const scope = typeof root.elementFromPoint === 'function' ? root : document;
+    const hit = scope.elementFromPoint(rect.left + dx, rect.top + dy);
+    return !!hit && (hit === el || el.contains(hit));
+}"""
+
+
+async def _receives_point(locator: AnyLocator, dx: float, dy: float) -> bool:
+    """True when ``locator``'s element is what a click ``dx, dy`` into its box hits."""
+    return bool(await locator.evaluate(_HIT_TEST, [dx, dy]))
 
 
 def click_point(

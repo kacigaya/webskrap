@@ -777,16 +777,14 @@ HUMAN_CLICK_ACTIONS: dict[str, dict[str, int]] = {"click": {}, "dblclick": {"cli
 async def element_action(page: Page, action: str, target: str, values: list[str]) -> None:
     """Run an :data:`ELEMENT_ACTIONS` interaction against ``target``.
 
-    Clicks go along a human cursor path with a human button hold (see
-    :func:`webskrap.human.click`), after a trial click that keeps
-    Playwright's actionability check (visible, stable, not covered). ``type``
+    Clicks go along a human cursor path with a human button hold, refusing a
+    covered element (see :func:`webskrap.human.click`). ``type``
     clicks into the field and types with human keystroke timing (see
     :func:`webskrap.human.type_text`); ``fill`` still sets the value at once.
     """
     arguments = element_arguments(action, values)
     locator = await resolve_locator(page, target)
     if action in HUMAN_CLICK_ACTIONS:
-        await locator.click(trial=True)
         await humanize.click(page, locator, description=target, **HUMAN_CLICK_ACTIONS[action])
         return
     if action == "type":
