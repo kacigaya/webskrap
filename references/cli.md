@@ -45,7 +45,10 @@ first attempt.
 `webskrap browser open` launches detached Chromium. Later commands reconnect
 over CDP through Patchright, act on its current page, and exit. The browser
 gets the same automation and headless-screen flags as `fetch`; `--headed`
-also drops the `HeadlessChrome` user-agent token.
+also drops the `HeadlessChrome` user-agent token. `--proxy URL` (no
+credentials) routes the session through a proxy and defaults WebRTC to
+`disable_non_proxied_udp`; `--webrtc-ip-handling-policy` overrides it. Both are
+fixed at launch, and reopening with different values is refused.
 
 ```bash
 webskrap browser open https://example.com
