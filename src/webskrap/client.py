@@ -137,6 +137,8 @@ async def browser_doctor(
                 }.get(channel_name, channel_name),
                 "executable_path": executable_path,
             }
+        if failure is not None and is_sandbox_failure(failure):
+            break
     return {
         "ok": False,
         "message": f"{driver.title()} Chromium did not launch: {failure}",

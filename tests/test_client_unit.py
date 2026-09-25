@@ -854,7 +854,7 @@ async def test_doctor_hints_at_the_sandbox_when_that_is_what_failed(
     assert report["ok"] is False
     assert report["browser_identity"] is None
     assert all(options["chromium_sandbox"] is True for options in launches)
-    assert [options["channel"] for options in launches] == ["chrome", "msedge", "chromium"]
+    assert [options["channel"] for options in launches] == ["chrome"]
     assert "--no-sandbox" in str(report["hint"])
 
 
