@@ -773,3 +773,33 @@ def test_gpu_is_chromium_only() -> None:
 def test_gpu_rejects_unknown_backends() -> None:
     with pytest.raises(ValidationError):
         SessionConfig(gpu="nvidia")  # type: ignore[arg-type]
+
+
+def _webrtc_args(config: SessionConfig) -> list[str]:
+    return [a for a in config.launch_options().get("args", []) if "webrtc" in a]
+
+
+def test_proxy_disables_non_proxied_udp_by_default() -> None:
+    # Unset behind a proxy, ICE would still reveal the host's own addresses.
+    config = SessionConfig(proxy=ProxyConfig(server="socks5://proxy.test:1080"))
+
+    assert config.effective_webrtc_ip_handling_policy() == "disable_non_proxied_udp"
+    assert _webrtc_args(config) == [
+        "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--force-webrtc-ip-handling-policy",
+    ]
+    # The field keeps what the caller passed.
+    assert config.webrtc_ip_handling_policy is None
+
+
+def test_explicit_webrtc_policy_wins_behind_a_proxy() -> None:
+    config = SessionConfig(
+        proxy=ProxyConfig(server="http://proxy.test:8080"), webrtc_ip_handling_policy="default"
+    )
+
+    assert _webrtc_args(config)[0] == "--webrtc-ip-handling-policy=default"
+
+
+def test_no_proxy_leaves_webrtc_to_chromium() -> None:
+    assert SessionConfig().effective_webrtc_ip_handling_policy() is None
+    assert _webrtc_args(SessionConfig()) == []

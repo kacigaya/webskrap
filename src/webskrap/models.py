@@ -360,7 +360,10 @@ class SessionConfig(BaseModel):
     # Chromium WebRTC IP handling policy. Use "disable_non_proxied_udp" to
     # prevent non-proxied UDP ICE candidates, which avoids WebRTC exposing local
     # or direct public IP candidates on leak-test pages without patching the
-    # RTCPeerConnection API.
+    # RTCPeerConnection API. None means "disable_non_proxied_udp" when a proxy
+    # is set (otherwise WebRTC would reveal the real address behind it) and
+    # Chromium's default otherwise; pass "default" to keep Chromium's default
+    # behind a proxy.
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None
     # Patchright is strongest when it exposes the browser's native surfaces, so
     # profile settings are ignored by default. This opt-in applies only browser
@@ -538,15 +541,28 @@ class SessionConfig(BaseModel):
             if not any(a.startswith(prefix) for a in self.launch_args)
         ]
 
+    def effective_webrtc_ip_handling_policy(self) -> WebRtcIPHandlingPolicy | None:
+        """Return the WebRTC policy the browser gets, filling in the proxy default.
+
+        An explicit :attr:`webrtc_ip_handling_policy` always wins. Left unset
+        behind a proxy, ICE would still gather the host's LAN addresses and
+        its direct public address over UDP, which is the leak a proxy is meant
+        to prevent, so non-proxied UDP is disabled.
+        """
+        if self.webrtc_ip_handling_policy is not None:
+            return self.webrtc_ip_handling_policy
+        if self.proxy is not None:
+            return "disable_non_proxied_udp"
+        return None
+
     def _webrtc_ip_handling_args(self) -> list[str]:
         # Chromium requires the policy value and an explicit force flag for the
         # process-level WebRTC IP handling override to apply in Chrome.
-        if self.browser != "chromium" or self.webrtc_ip_handling_policy is None:
+        policy = self.effective_webrtc_ip_handling_policy()
+        if self.browser != "chromium" or policy is None:
             return []
         candidates = {
-            "--webrtc-ip-handling-policy": (
-                f"--webrtc-ip-handling-policy={self.webrtc_ip_handling_policy}"
-            ),
+            "--webrtc-ip-handling-policy": f"--webrtc-ip-handling-policy={policy}",
             "--force-webrtc-ip-handling-policy": "--force-webrtc-ip-handling-policy",
         }
         return [
