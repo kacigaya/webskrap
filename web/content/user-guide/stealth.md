@@ -141,6 +141,12 @@ config = SessionConfig(
 WebSkrap intentionally keeps headless browser surfaces native instead of spoofing
 them with JavaScript. Broad fingerprint patches often become tampering signals.
 
+Canvas, audio, and WebGL fingerprints are not randomized between requests.
+They stay stable for the same browser, profile, and rendering environment;
+changing the browser version, GPU backend, fonts, or host can change them.
+`reduce_fingerprint_surface=True` disables canvas readback and WebGL instead
+of making their values rotate.
+
 Headless Chrome has no physical display, so screen and window metrics
 (`screen.width`, `window.outerWidth`, ...) otherwise leak as headless tells,
 defaulting to an 800x600 screen with zero outer dimensions. For chromium headless

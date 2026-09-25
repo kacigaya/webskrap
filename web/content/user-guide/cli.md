@@ -138,14 +138,18 @@ cost on pages that have none. Use `0` for a single immediate check.
 ## Browser channels
 
 `--channel` defaults to `chrome`, which does not exist on every platform (Linux
-ARM64 has no Chrome build). When the channel cannot launch, `fetch` prints a
-notice on stderr and retries with bundled chromium (the full browser in new
-headless mode, not Playwright's headless shell), so piped stdout stays clean.
+ARM64 has no Chrome build). When the channel cannot launch, `fetch` and
+`search` print a notice on stderr and try installed Edge, then bundled Chromium
+(the full browser in new headless mode, not Playwright's headless shell), so
+piped stdout stays clean. Sandbox failures stop without trying another channel.
 If nothing launches you get a one-line error and `Run: webskrap install`, not a
 Playwright traceback.
 
-`webskrap doctor` reports the best channel that launches and names it in
-`channel`, so `chrome` being unavailable is no longer a failed check.
+`webskrap doctor` follows the same Chrome, Edge, Chromium order. JSON output
+names the working `channel` and `browser_identity`, the host
+`cpu_architecture`, and `font_count`, the number of distinct Fontconfig
+families. `font_count` is `null` where `fc-list` is unavailable. Human output
+shows these values too.
 
 ## Headless Patchright controls
 

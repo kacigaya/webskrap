@@ -89,6 +89,10 @@ profile = BrowserProfile(
 )
 ```
 
+WebSkrap leaves `Accept` to the browser, which chooses it for each request.
+Set `extra_http_headers={"Accept": "application/json"}` only when a site needs
+an explicit override.
+
 ## Mobile profile
 
 Use the built-in mobile profile when viewport, touch, and mobile user-agent
