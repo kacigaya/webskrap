@@ -190,14 +190,14 @@ const DETECTION_ROWS: {
 ];
 
 const RESOURCE_ROUTING = [
-  { policy: "DOCUMENTS", time: "140.87", vs: "0.43x", best: true },
-  { policy: "LITE", time: "260.49", vs: "0.80x", best: false },
-  { policy: "ALL", time: "325.58", vs: "1.0x", best: false },
+  { policy: "LITE", time: "405.61", vs: "0.68x" },
+  { policy: "DOCUMENTS", time: "413.90", vs: "0.70x" },
+  { policy: "ALL", time: "594.56", vs: "1.00x" },
 ];
 
 const SESSION_REUSE = [
-  { mode: "Warm session reuse", time: "180.62", vs: "1.0x", best: true },
-  { mode: "Cold launch per fetch", time: "315.28", vs: "1.75x", best: false },
+  { mode: "Warm session reuse", time: "464.11", vs: "1.00x", best: true },
+  { mode: "Cold launch per fetch", time: "849.87", vs: "1.83x", best: false },
 ];
 
 export default function BenchmarksPage() {
@@ -206,9 +206,8 @@ export default function BenchmarksPage() {
       <header className="flex flex-col gap-4">
         <h1 className="text-balance font-heading text-4xl font-bold tracking-tight">Benchmarks</h1>
         <p className="max-w-2xl text-pretty text-muted-foreground">
-          Stealth comparison against other anti-detect stacks, plus performance benchmarks
-          for what WebSkrap actually does: resource routing, session reuse, and concurrent
-          fetching.
+          A dated stealth comparison and local performance measurements for resource
+          routing, session reuse, and concurrent fetching.
         </p>
       </header>
 
@@ -217,19 +216,19 @@ export default function BenchmarksPage() {
         <div className="flex flex-col gap-1">
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Comparison</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            CloakBrowser values are copied from its{" "}
+            This is a June 26, 2026 snapshot. CloakBrowser values came from its{" "}
             <a
               href="https://github.com/CloakHQ/CloakBrowser/blob/main/README.md"
               className="text-primary underline"
             >
               upstream README
             </a>
-            . WebSkrap values are a snapshot from the local live report generated on
-            2026-06-26 with{" "}
+            ; WebSkrap values came from a separate live report generated with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
               python scripts/live_stealth_report.py --no-open --report-only
             </code>
-            .
+            . The projects were not tested side by side. Detection sites and browser
+            versions change, so these results do not predict a current score.
           </p>
         </div>
 
@@ -324,7 +323,7 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameDescription>
-              Latest WebSkrap live summary: 24 passed, 2 failed, 1 skipped. Headed: 17
+              June 26 WebSkrap live summary: 24 passed, 2 failed, 1 skipped. Headed: 17
               passed, 1 failed. Headless: 7 passed, 1 failed, 1 skipped. The two failures
               were Sannysoft headed/headless networkidle timeouts; the headless skip was
               reCAPTCHA v3 not returning a score from Google&apos;s public demo.
@@ -338,11 +337,14 @@ export default function BenchmarksPage() {
         <div className="flex flex-col gap-1">
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Performance</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Run against a local HTTP server serving a synthetic page with many delayed
-            sub-resources. No external sites are contacted, so results are deterministic.
-            This snapshot was generated on 2026-07-30 on a single ARM64 machine. Run
-            it yourself with{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">python benchmarks.py</code>.
+            Measured on 2026-09-25 against a local HTTP server with delayed assets. No
+            external sites were contacted. The host was ARM64, running Python 3.14.7,
+            Playwright 1.63.0, and Chrome for Testing 153.0.8010.12. Its Chromium
+            sandbox was unavailable, so this run used{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
+              WEBSKRAP_CHROMIUM_SANDBOX=0 python benchmarks.py
+            </code>
+            . Timings vary with hardware, browser version, and host load.
           </p>
         </div>
 
@@ -367,7 +369,7 @@ export default function BenchmarksPage() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{row.time}</TableCell>
                   <TableCell className="text-right">
-                    <Badge variant={row.best ? "success" : "secondary"}>{row.vs}</Badge>
+                    <Badge variant="secondary">{row.vs}</Badge>
                   </TableCell>
                 </TableRow>
               ))}
@@ -375,8 +377,9 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              Blocking images, fonts, and media (LITE) cuts load time ~20%; also dropping
-              stylesheets (DOCUMENTS) reaches ~57%.
+              In this run, LITE took 32% less time than ALL and DOCUMENTS took 30% less.
+              A second resource-only run put DOCUMENTS ahead of LITE, so their ordering
+              is not stable on this host.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -408,8 +411,7 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              Reusing a persistent session avoids per-fetch browser/context startup, roughly
-              1.75x faster than launching cold each time.
+              Cold launch took 1.83 times as long as warm session reuse in this run.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -421,15 +423,19 @@ export default function BenchmarksPage() {
           </FrameHeader>
           <Frame className="bg-transparent p-0">
             <FrameHeader className="flex-row items-baseline gap-3">
-              <span className="font-heading text-4xl font-bold tabular-nums">~151 ms</span>
-              <FrameDescription>average per page</FrameDescription>
+              <span className="shrink-0 whitespace-nowrap font-heading text-3xl font-bold tabular-nums sm:text-4xl">218.89 ms</span>
+              <FrameDescription>batch time divided by 8 pages</FrameDescription>
             </FrameHeader>
+            <FrameDescription>
+              Average batch time was 1,751.10 ms. The per-page figure is a
+              throughput equivalent, not the latency of an individual page.
+            </FrameDescription>
           </Frame>
         </Frame>
       </section>
 
       <p className="text-sm text-muted-foreground">
-        Benchmarks average 20+ navigations after warm-up. See{" "}
+        Each result averages 20 measured runs after two warm-up runs. See{" "}
         <a
           href="https://github.com/kacigaya/webskrap/blob/main/benchmarks.py"
           className="text-primary underline"

@@ -11,9 +11,11 @@ All benchmarks run against a local HTTP server that serves a synthetic page
 referencing many sub-resources (images, stylesheets, media). Each sub-resource
 is answered after a small fixed delay to model real-world network cost, so the
 effect of blocking resources is observable and repeatable. No external sites are
-contacted, so results are deterministic and carry no terms-of-service concerns.
+contacted. Timings vary with the host and browser version.
 
 Run:  python benchmarks.py
+If Chromium cannot use its OS sandbox on this host:
+      WEBSKRAP_CHROMIUM_SANDBOX=0 python benchmarks.py
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from statistics import mean
 
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
+from webskrap.browser_session import sandbox_enabled
 
 # --- tunables -------------------------------------------------------------
 
@@ -128,7 +131,12 @@ def benchmark(func):
 
 
 def _config(policy: ResourcePolicy) -> SessionConfig:
-    return SessionConfig(headless=True, resource_policy=policy, decline_cookies=False)
+    return SessionConfig(
+        headless=True,
+        chromium_sandbox=sandbox_enabled(None),
+        resource_policy=policy,
+        decline_cookies=False,
+    )
 
 
 @benchmark
