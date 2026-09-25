@@ -91,6 +91,7 @@ async def diagnose() -> dict[str, Any]:
             "python": platform.python_version(),
         },
         "platform": f"{platform.system()} {platform.machine()}",
+        "cpu_architecture": platform.machine(),
         "paths": {
             "sessions_root": str(browser_session.sessions_root()),
             "output_root": str(output_root()),

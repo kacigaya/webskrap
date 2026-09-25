@@ -859,6 +859,8 @@ def _print_doctor_details(result: dict[str, Any]) -> None:
     """Print the surrounding facts, skipping any a caller stubbed out."""
     if identity := result.get("browser_identity"):
         console.print(f"[bold]Browser:[/bold] {identity}")
+    if architecture := result.get("cpu_architecture"):
+        console.print(f"[bold]CPU architecture:[/bold] {architecture}")
     if versions := result.get("versions"):
         installed = ", ".join(f"{name} {value or 'missing'}" for name, value in versions.items())
         console.print(f"[bold]Versions:[/bold] {installed}")

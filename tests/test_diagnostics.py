@@ -37,6 +37,7 @@ def test_diagnose_keeps_the_launch_probe_and_adds_context(monkeypatch: Any, tmp_
     assert report["executable_path"] == "/browsers/chrome"
     assert report["versions"]["webskrap"]
     assert report["versions"]["python"]
+    assert report["cpu_architecture"] == diagnostics.platform.machine()
     assert report["paths"] == {
         "sessions_root": str(tmp_path / "sessions"),
         "output_root": str(tmp_path / "out"),

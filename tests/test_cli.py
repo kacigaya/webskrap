@@ -298,7 +298,12 @@ def test_doctor_json_success(monkeypatch: Any) -> None:
 
 def test_doctor_human_shows_browser_identity(monkeypatch: Any) -> None:
     async def fake_doctor() -> dict[str, object]:
-        return {"ok": True, "message": "ready", "browser_identity": "Edge"}
+        return {
+            "ok": True,
+            "message": "ready",
+            "browser_identity": "Edge",
+            "cpu_architecture": "aarch64",
+        }
 
     monkeypatch.setattr(cli, "_doctor", fake_doctor)
 
@@ -306,6 +311,7 @@ def test_doctor_human_shows_browser_identity(monkeypatch: Any) -> None:
 
     assert result.exit_code == 0, result.output
     assert "Browser: Edge" in result.output
+    assert "CPU architecture: aarch64" in result.output
 
 
 def test_doctor_json_failure(monkeypatch: Any) -> None:
