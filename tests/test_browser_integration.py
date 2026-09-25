@@ -369,7 +369,7 @@ def test_persistent_session_applies_the_webrtc_policy(
 _BEHAVIOR_PAGE = (
     "data:text/html,<title>behavior</title>"
     "<input id=q style='position:absolute;top:2600px'>"
-    "<button id=go style='position:absolute;top:2400px'>Go</button>"
+    "<button id=go style='position:absolute;top:2400px;left:400px'>Go</button>"
     "<div style='height:4000px'></div>"
     "<script>window.__events=[];"
     "for(const t of ['wheel','mousemove','mousedown','mouseup','click','keydown','keyup'])"
