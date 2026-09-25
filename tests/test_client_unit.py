@@ -852,8 +852,48 @@ async def test_doctor_hints_at_the_sandbox_when_that_is_what_failed(
     report = await browser_doctor(chromium_sandbox=True)
 
     assert report["ok"] is False
+    assert report["browser_identity"] is None
     assert all(options["chromium_sandbox"] is True for options in launches)
+    assert [options["channel"] for options in launches] == ["chrome"]
     assert "--no-sandbox" in str(report["hint"])
+
+
+@pytest.mark.asyncio
+async def test_doctor_tries_edge_before_bundled_chromium(monkeypatch: pytest.MonkeyPatch) -> None:
+    channels: list[str | None] = []
+
+    class _Browser:
+        async def close(self) -> None:
+            pass
+
+    class _Chromium:
+        executable_path = "/browsers/chromium"
+
+        async def launch(self, **options: object) -> _Browser:
+            channel = options["channel"]
+            channels.append(channel if isinstance(channel, str) else None)
+            if channel == "chrome":
+                raise RuntimeError("Chrome not installed")
+            return _Browser()
+
+    class _PW:
+        chromium = _Chromium()
+
+        async def stop(self) -> None:
+            pass
+
+    class _Starter:
+        async def start(self) -> _PW:
+            return _PW()
+
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Starter())
+
+    report = await browser_doctor()
+
+    assert report["ok"] is True
+    assert report["channel"] == "msedge"
+    assert report["browser_identity"] == "Edge"
+    assert channels == ["chrome", "msedge"]
 
 
 def test_lavapipe_is_found_by_its_vulkan_icd(

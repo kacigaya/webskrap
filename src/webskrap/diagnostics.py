@@ -13,8 +13,11 @@ storage state, or proxy credentials.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
+import shutil
+import subprocess  # nosec B404  # noqa: S404 - fixed fc-list argv, never a shell
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -65,6 +68,34 @@ def package_version(name: str) -> str | None:
         return None
 
 
+def font_count() -> int | None:
+    """Count distinct primary Fontconfig families, or return None if unavailable."""
+    executable = shutil.which("fc-list")
+    if executable is None:
+        return None
+    try:
+        result = subprocess.run(  # nosec B603  # noqa: S603
+            [str(Path(executable).resolve()), "--format=%{family}\n"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return len(
+        {
+            line.split(",", 1)[0].strip().casefold()
+            for line in result.stdout.splitlines()
+            if line.strip()
+        }
+    )
+
+
 async def diagnose() -> dict[str, Any]:
     """Return the full readiness report.
 
@@ -91,6 +122,8 @@ async def diagnose() -> dict[str, Any]:
             "python": platform.python_version(),
         },
         "platform": f"{platform.system()} {platform.machine()}",
+        "cpu_architecture": platform.machine(),
+        "font_count": await asyncio.to_thread(font_count),
         "paths": {
             "sessions_root": str(browser_session.sessions_root()),
             "output_root": str(output_root()),

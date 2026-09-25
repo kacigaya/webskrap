@@ -90,7 +90,7 @@ def _async_playwright(driver: str):
 
 async def browser_doctor(
     driver: str = "patchright",
-    channels: tuple[str | None, ...] = ("chrome", "chromium"),
+    channels: tuple[str | None, ...] = ("chrome", "msedge", "chromium"),
     *,
     chromium_sandbox: bool = True,
 ) -> dict[str, object]:
@@ -130,13 +130,21 @@ async def browser_doctor(
                 "message": f"{driver.title()} headless {channel_name} is ready.",
                 "driver": driver,
                 "channel": channel_name,
+                "browser_identity": {
+                    "chrome": "Chrome",
+                    "msedge": "Edge",
+                    "chromium": "Chromium",
+                }.get(channel_name, channel_name),
                 "executable_path": executable_path,
             }
+        if failure is not None and is_sandbox_failure(failure):
+            break
     return {
         "ok": False,
         "message": f"{driver.title()} Chromium did not launch: {failure}",
         "driver": driver,
         "channel": None,
+        "browser_identity": None,
         "executable_path": executable_path,
         "hint": RECOVERY_HINTS[
             ErrorCode.SANDBOX

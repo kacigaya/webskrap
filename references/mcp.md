@@ -12,8 +12,9 @@ boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
 - `search` finds URLs for a query on Bing (default) or DuckDuckGo, with the
   same stealth controls as `stealth_fetch`. Google is not offered. Follow up
   with `stealth_fetch` on the hits worth reading.
-- `doctor` reports readiness, versions, paths, environment overrides,
-  persistent sessions, and the host timezone, with a warning when it is UTC.
+- `doctor` reports readiness, browser identity, CPU architecture, Fontconfig
+  family count, versions, paths, environment overrides, persistent sessions,
+  and the host timezone, with a warning when it is UTC.
 - `browser_open` and the other `browser_*` tools drive a stateful flow.
   `browser_open` takes `webrtc_ip_handling_policy` but no proxy; open a proxied
   session with `webskrap browser open --proxy URL` and the tools reuse it.

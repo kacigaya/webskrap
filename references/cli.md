@@ -8,8 +8,10 @@ for arguments and help text.
 
 `webskrap fetch` uses headless Patchright stealth mode. `webskrap install`
 downloads the Playwright and Patchright Chromium browsers. `doctor` reports
-readiness and warns when the host timezone is UTC, while `schema` describes
-commands as JSON.
+readiness, browser identity, host CPU architecture, and Fontconfig family count.
+It warns when the host timezone is UTC. `fetch` and `search` try Chrome, Edge,
+then bundled Chromium when a channel cannot launch. `schema` describes commands
+as JSON.
 
 ```bash
 webskrap doctor --format json

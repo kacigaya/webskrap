@@ -9,6 +9,20 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `doctor` reports the launched browser identity, host CPU architecture, and
+  distinct Fontconfig family count. The font count is `null` when `fc-list`
+  is unavailable.
+
+### Changed
+
+- `doctor`, `fetch`, and `search` try installed Edge after Chrome fails to
+  launch, then bundled Chromium. Sandbox failures still stop immediately in
+  `fetch` and `search`.
+- Browser profiles leave `Accept` to the browser instead of injecting a fixed
+  value. Caller-supplied `Accept` headers still apply.
+
 ## [2.9.0] - 2026-09-25
 
 ### Added
