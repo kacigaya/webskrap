@@ -61,6 +61,10 @@ webskrap browser screenshot page.png --full-page
 webskrap browser close
 ```
 
+`click`, `dblclick` and `type` use human mouse and keystroke timing (wheel
+scrolling, a curved cursor path, a human button hold, spaced keys) and refuse
+a covered target; `fill` sets a value at once.
+
 Snapshot refs become stale when the DOM changes. Take another snapshot before
 retrying. `wait` accepts one condition. Do not guess when callers provide more
 than one.
