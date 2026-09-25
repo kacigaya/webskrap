@@ -72,7 +72,14 @@ def test_diagnose_lists_sessions_even_when_the_browser_is_broken(
     assert report["ok"] is False
     assert report["hint"] == "Run: webskrap install"
     assert report["sessions"] == [
-        {"session": "shop", "running": False, "pid": None, "port": None, "chromium_sandbox": None}
+        {
+            "session": "shop",
+            "running": False,
+            "pid": None,
+            "port": None,
+            "chromium_sandbox": None,
+            "proxy_server": None,
+        }
     ]
 
 

@@ -661,10 +661,11 @@ def list_session_names() -> list[str]:
 def list_sessions() -> list[dict[str, Any]]:
     """Return one entry per session.
 
-    Each is ``{"session", "running", "pid", "port", "chromium_sandbox"}``. The
-    last three are None for a session that is not running; ``chromium_sandbox``
-    reports how the running browser was launched, so an operator can see which
-    sessions gave up renderer isolation.
+    Each is ``{"session", "running", "pid", "port", "chromium_sandbox",
+    "proxy_server"}``. The last four are None for a session that is not
+    running. ``chromium_sandbox`` and ``proxy_server`` report how the running
+    browser was launched, so an operator can see which sessions gave up
+    renderer isolation and where each one's traffic goes.
     """
     sessions = []
     for name in list_session_names():
@@ -680,6 +681,7 @@ def list_sessions() -> list[dict[str, Any]]:
                 "chromium_sandbox": (
                     bool(state.get("chromium_sandbox", False)) if running and state else None
                 ),
+                "proxy_server": state.get("proxy_server") if running and state else None,
             }
         )
     return sessions

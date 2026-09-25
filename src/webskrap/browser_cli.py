@@ -256,6 +256,7 @@ def list_command(format: FormatOption = "human") -> None:
     table.add_column("PID")
     table.add_column("Port")
     table.add_column("Sandbox")
+    table.add_column("Proxy")
     for entry in sessions:
         sandbox = entry["chromium_sandbox"]
         table.add_row(
@@ -264,6 +265,7 @@ def list_command(format: FormatOption = "human") -> None:
             str(entry["pid"] or ""),
             str(entry["port"] or ""),
             "" if sandbox is None else ("yes" if sandbox else "no"),
+            str(entry.get("proxy_server") or ""),
         )
     console.print(table)
 

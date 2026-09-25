@@ -219,8 +219,26 @@ def test_list_sessions_reports_sandbox_state(
             "pid": None,
             "port": None,
             "chromium_sandbox": None,
+            "proxy_server": None,
         }
     ]
+
+
+def test_list_sessions_reports_the_running_proxy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+    directory = tmp_path / "proxied"
+    directory.mkdir()
+    browser_session.write_state(
+        directory,
+        {"pid": 7, "port": 1, "chromium_sandbox": True, "proxy_server": "http://proxy.test:8080"},
+    )
+    monkeypatch.setattr(browser_session, "session_running", lambda _d, state: state is not None)
+
+    [entry] = browser_session.list_sessions()
+
+    assert entry["proxy_server"] == "http://proxy.test:8080"
 
 
 @pytest.mark.parametrize("name", [".", "..", "../evil"])
