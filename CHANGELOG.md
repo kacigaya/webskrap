@@ -11,6 +11,27 @@ history, so they summarize each release rather than list every change.
 
 ### Added
 
+- `WebSkrapSession.human_type` and `webskrap.human.type_text`: click into a
+  field and type one key at a time, each held 30-90 ms and 40-160 ms apart,
+  with an occasional longer pause.
+
+### Changed
+
+- `human_click` scrolls with mouse-wheel notches instead of
+  `scroll_into_view_if_needed` (which fires no `wheel` events), holds the
+  button 60-140 ms unless `delay` is given (Playwright holds it ~2 ms), and
+  refuses a target covered at the click point, checked with `elementFromPoint`
+  before any pointer event.
+- Cookie consent dismissal clicks the reject control with the humanized click,
+  including inside CMP iframes.
+- Persistent-session `click`/`dblclick` (`webskrap browser`, MCP
+  `browser_interact`) use the humanized click, and `type` uses human typing.
+  They are slower than before by design; `fill` is unchanged.
+- The humanized input moved to `webskrap.human`, which takes a locator and
+  either driver's page.
+
+### Added
+
 - Persistent browser sessions can run behind a proxy:
   `webskrap browser open --proxy URL` and `open_session(proxy_server=...)`.
   `--webrtc-ip-handling-policy` (CLI) and `webrtc_ip_handling_policy`
