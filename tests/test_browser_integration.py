@@ -6,6 +6,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -361,3 +362,50 @@ def test_persistent_session_applies_the_webrtc_policy(
         browser_session.close_session(name, delete_data=True)
 
     assert bool(types) is expect_candidates
+
+
+# A button below the fold and a text field, with every input event the
+# page's own scripts would see recorded on window.__events.
+_BEHAVIOR_PAGE = (
+    "data:text/html,<title>behavior</title>"
+    "<input id=q style='position:absolute;top:2600px'>"
+    "<button id=go style='position:absolute;top:2400px'>Go</button>"
+    "<div style='height:4000px'></div>"
+    "<script>window.__events=[];"
+    "for(const t of ['wheel','mousemove','mousedown','mouseup','click','keydown','keyup'])"
+    "addEventListener(t,e=>__events.push({t,ts:e.timeStamp,trusted:e.isTrusted}),true);"
+    "</script>"
+)
+
+
+def test_persistent_actions_produce_human_input_events(persistent_session_env: Path) -> None:
+    name = "behavior"
+
+    async def exercise() -> list[dict[str, Any]]:
+        await browser_session.open_session(name)
+
+        async def act(page: Any) -> list[dict[str, Any]]:
+            await browser_session.goto(page, _BEHAVIOR_PAGE, "load")
+            await browser_session.element_action(page, "click", "#go", [])
+            await browser_session.element_action(page, "type", "#q", ["abc"])
+            return await browser_session.evaluate(page, "window.__events")
+
+        return await browser_session.run_page_action(name, act, timeout_ms=30_000)
+
+    try:
+        events = asyncio.run(exercise())
+    finally:
+        browser_session.close_session(name, delete_data=True)
+
+    kinds = [event["t"] for event in events]
+    assert all(event["trusted"] for event in events)
+    assert kinds.count("wheel") >= 5  # scrolled to the button by wheel, not a jump
+    first_down = kinds.index("mousedown")
+    assert kinds[:first_down].count("mousemove") >= 10  # a path, not a teleport
+    down, up = events[first_down], events[kinds.index("mouseup")]
+    assert up["ts"] - down["ts"] >= 50  # a human button hold, not ~2 ms
+    keydowns = [event["ts"] for event in events if event["t"] == "keydown"]
+    assert len(keydowns) == 3
+    assert all(
+        later - earlier >= 50 for earlier, later in zip(keydowns, keydowns[1:], strict=False)
+    )
