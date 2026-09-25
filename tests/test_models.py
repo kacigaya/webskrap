@@ -37,6 +37,13 @@ def test_profile_generates_context_options() -> None:
     assert options["locale"] == "en-US"
     assert options["timezone_id"] == "Europe/Paris"
     assert options["extra_http_headers"]["Accept-Language"] == "en-US,en;q=0.9"
+    assert "Accept" not in options["extra_http_headers"]
+
+
+def test_profile_preserves_caller_accept_header() -> None:
+    profile = BrowserProfile(name="custom", extra_http_headers={"Accept": "application/json"})
+
+    assert profile.headers()["Accept"] == "application/json"
 
 
 def test_session_config_maps_proxy_and_storage_state() -> None:

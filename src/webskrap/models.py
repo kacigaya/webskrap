@@ -217,10 +217,6 @@ class BrowserProfile(BaseModel):
     def headers(self) -> dict[str, str]:
         """Return the default request headers, with ``extra_http_headers`` last."""
         headers = {
-            "Accept": (
-                "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                "image/avif,image/webp,*/*;q=0.8"
-            ),
             "Accept-Language": self.accept_language(),
             "Upgrade-Insecure-Requests": "1",
         }
