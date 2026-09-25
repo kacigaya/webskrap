@@ -758,30 +758,33 @@ async def _with_channel_fallback(
     config: SessionConfig,
     output_format: OutputFormat,
 ) -> T:
-    """Run, retrying on bundled chromium when the chosen channel cannot launch.
+    """Run, trying Edge and bundled Chromium when Chrome cannot launch.
 
     The default channel is `chrome`, which does not exist on every platform
-    (Linux ARM64 has no Chrome build). Falling back keeps `webskrap fetch`
-    and `webskrap search` working there instead of dumping a Playwright
-    traceback.
+    (Linux ARM64 has no Chrome build). An installed Edge is tried before the
+    bundled Chromium. Sandbox failures and non-launch errors are not retried.
     """
-    try:
-        return await run(config)
-    except Exception as exc:
-        if not _is_launch_failure(exc):
-            raise
-        # Another channel cannot fix a host that cannot sandbox.
-        if config.channel in (None, "chromium") or is_sandbox_failure(exc):
-            _fail_launch(exc, output_format)
-        stderr_console.print(
-            f"[yellow]channel '{config.channel}' did not launch; retrying with chromium[/yellow]"
-        )
+    fallbacks = ("msedge", "chromium") if config.channel == "chrome" else ("chromium",)
+    channels = (config.channel, *(() if config.channel in (None, "chromium") else fallbacks))
+    last_failure: Exception | None = None
+    for index, channel in enumerate(channels):
         try:
-            return await run(config.model_copy(update={"channel": "chromium"}))
-        except Exception as retry_exc:
-            if not _is_launch_failure(retry_exc):
+            selected = config if index == 0 else config.model_copy(update={"channel": channel})
+            return await run(selected)
+        except Exception as exc:
+            if not _is_launch_failure(exc):
                 raise
-            _fail_launch(retry_exc, output_format)
+            if is_sandbox_failure(exc):
+                _fail_launch(exc, output_format)
+            last_failure = exc
+            if index + 1 < len(channels):
+                stderr_console.print(
+                    f"[yellow]channel '{channel}' did not launch; "
+                    f"retrying with {channels[index + 1]}[/yellow]"
+                )
+    if last_failure is None:
+        raise RuntimeError("no browser channel to launch")
+    _fail_launch(last_failure, output_format)
 
 
 async def _fetch_with_channel_fallback(
