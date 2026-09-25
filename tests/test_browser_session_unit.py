@@ -707,3 +707,49 @@ def test_open_rejects_a_credentialed_proxy_before_launching(
         asyncio.run(browser_session.open_session("net", proxy_server="http://u:p@proxy.test:8080"))
 
     assert launches == []
+
+
+class _ActionLocator:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def click(self, *args: Any, **kwargs: Any) -> None:
+        self.calls.append(("click", args, kwargs))
+
+    async def fill(self, *args: Any, **kwargs: Any) -> None:
+        self.calls.append(("fill", args, kwargs))
+
+
+def _action_page(locator: _ActionLocator) -> Any:
+    class _PageStub:
+        def locator(self, _selector: str) -> _ActionLocator:
+            return locator
+
+    return _PageStub()
+
+
+@pytest.mark.parametrize(("action", "extra"), [("click", {}), ("dblclick", {"click_count": 2})])
+def test_click_actions_use_the_human_path(
+    monkeypatch: pytest.MonkeyPatch, action: str, extra: dict[str, int]
+) -> None:
+    human_clicks: list[dict[str, Any]] = []
+
+    async def fake_human_click(_page: Any, _locator: Any, **options: Any) -> None:
+        human_clicks.append(options)
+
+    monkeypatch.setattr("webskrap.human.click", fake_human_click)
+    locator = _ActionLocator()
+
+    asyncio.run(browser_session.element_action(_action_page(locator), action, "#go", []))
+
+    # Playwright only checks actionability; the click itself is humanized.
+    assert locator.calls == [("click", (), {"trial": True})]
+    assert human_clicks == [{"description": "#go", **extra}]
+
+
+def test_fill_still_sets_the_value_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    locator = _ActionLocator()
+
+    asyncio.run(browser_session.element_action(_action_page(locator), "fill", "#q", ["hi"]))
+
+    assert locator.calls == [("fill", ("hi",), {})]
