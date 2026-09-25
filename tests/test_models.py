@@ -152,12 +152,12 @@ def test_headless_chromium_gets_simulated_screen() -> None:
     assert "--screen-info={1920x1080}" in args
 
 
-def test_headless_chromium_keeps_scrollbars_and_pointer_media() -> None:
+def test_headless_chromium_keeps_scrollbars_and_audio() -> None:
     ignored = SessionConfig(headless=True).launch_options()["ignore_default_args"]
 
     assert "--hide-scrollbars" in ignored
     assert "--mute-audio" in ignored
-    assert any(arg.startswith("--blink-settings=") for arg in ignored)
+    assert not any(arg.startswith("--blink-settings=") for arg in ignored)
     assert "ignore_default_args" not in SessionConfig(headless=False).launch_options()
     assert "ignore_default_args" not in SessionConfig(browser="firefox").launch_options()
 

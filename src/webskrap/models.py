@@ -438,12 +438,11 @@ class SessionConfig(BaseModel):
             # every one-shot launch.
             options["chromium_sandbox"] = self.chromium_sandbox
             if options["headless"]:
-                # Playwright adds these only in headless mode. They make a
-                # page observe missing scrollbars and forced pointer media.
+                # Keep Playwright's pointer media setting: without it headless
+                # Chromium reports no hover or fine pointer on a desktop.
                 options["ignore_default_args"] = [
                     "--hide-scrollbars",
                     "--mute-audio",
-                    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
                 ]
         channel = self.channel
         if channel is None and self.browser == "chromium" and options["headless"]:
