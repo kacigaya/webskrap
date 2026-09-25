@@ -18,10 +18,24 @@ class _Element:
     async def is_visible(self) -> bool:
         return self.visible
 
-    async def click(self, **_options: object) -> None:
+    async def click(self, *, trial: bool = False, **_options: object) -> None:
         if not self.clickable:
             raise RuntimeError("element is covered")
-        self.clicked = True
+        # Consent only trial-clicks through Playwright; the real click is the
+        # humanized one, stubbed below.
+        assert trial is True
+
+
+@pytest.fixture(autouse=True)
+def _record_human_clicks(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, object]]:
+    clicks: list[tuple[object, object]] = []
+
+    async def fake_click(page: object, element: _Element, **_options: object) -> None:
+        clicks.append((page, element))
+        element.clicked = True
+
+    monkeypatch.setattr("webskrap.human.click", fake_click)
+    return clicks
 
 
 class _Locator:
@@ -186,3 +200,16 @@ def test_reject_text_pattern_matches_reject_labels(label: str) -> None:
 )
 def test_reject_text_pattern_ignores_other_labels(label: str) -> None:
     assert REJECT_TEXT_PATTERN.search(label) is None
+
+
+@pytest.mark.asyncio
+async def test_clicks_with_the_pages_mouse_even_inside_a_frame(
+    _record_human_clicks: list[tuple[object, object]],
+) -> None:
+    # Notices often live in CMP iframes; the mouse belongs to the page, and
+    # bounding boxes are reported in the page's coordinates.
+    button = _Element()
+    page = _Page([_Frame(), _Frame(cmp=_Locator([button]))])
+
+    assert await decline_cookies(page) == "cmp"
+    assert _record_human_clicks == [(page, button)]
