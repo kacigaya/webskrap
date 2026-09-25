@@ -13,6 +13,10 @@ is answered after a small fixed delay to model real-world network cost, so the
 effect of blocking resources is observable and repeatable. No external sites are
 contacted. Timings vary with the host and browser version.
 
+Sessions use the stealth setup: the Patchright driver, headless=True with
+virtual_display=True, so Chromium runs headed on a private Xvfb screen. This
+needs Linux with Xvfb installed.
+
 Run:  python benchmarks.py
 If Chromium cannot use its OS sandbox on this host:
       WEBSKRAP_CHROMIUM_SANDBOX=0 python benchmarks.py
@@ -132,7 +136,9 @@ def benchmark(func):
 
 def _config(policy: ResourcePolicy) -> SessionConfig:
     return SessionConfig(
+        driver="patchright",
         headless=True,
+        virtual_display=True,
         chromium_sandbox=sandbox_enabled(None),
         resource_policy=policy,
         decline_cookies=False,

@@ -190,14 +190,14 @@ const DETECTION_ROWS: {
 ];
 
 const RESOURCE_ROUTING = [
-  { policy: "LITE", time: "405.61", vs: "0.68x" },
-  { policy: "DOCUMENTS", time: "413.90", vs: "0.70x" },
-  { policy: "ALL", time: "594.56", vs: "1.00x" },
+  { policy: "DOCUMENTS", time: "238.78", vs: "0.43x" },
+  { policy: "LITE", time: "286.02", vs: "0.51x" },
+  { policy: "ALL", time: "558.60", vs: "1.00x" },
 ];
 
 const SESSION_REUSE = [
-  { mode: "Warm session reuse", time: "464.11", vs: "1.00x", best: true },
-  { mode: "Cold launch per fetch", time: "849.87", vs: "1.83x", best: false },
+  { mode: "Warm session reuse", time: "257.81", vs: "1.00x", best: true },
+  { mode: "Cold launch per fetch", time: "1,373.01", vs: "5.33x", best: false },
 ];
 
 export default function BenchmarksPage() {
@@ -338,9 +338,14 @@ export default function BenchmarksPage() {
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Performance</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
             Measured on 2026-09-25 against a local HTTP server with delayed assets. No
-            external sites were contacted. The host was ARM64, running Python 3.14.7,
-            Playwright 1.63.0, and Chrome for Testing 153.0.8010.12. Its Chromium
-            sandbox was unavailable, so this run used{" "}
+            external sites were contacted. Every session used the stealth setup: the
+            Patchright driver with{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">headless=True</code>{" "}
+            and{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">virtual_display=True</code>
+            , so Chromium ran headed on a private 1920x1080 Xvfb screen. The host was
+            ARM64, running Python 3.14.7, Patchright 1.63.0, and Chromium
+            153.0.8010.12. Its Chromium sandbox was unavailable, so this run used{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
               WEBSKRAP_CHROMIUM_SANDBOX=0 python benchmarks.py
             </code>
@@ -377,9 +382,8 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              In this run, LITE took 32% less time than ALL and DOCUMENTS took 30% less.
-              A second resource-only run put DOCUMENTS ahead of LITE, so their ordering
-              is not stable on this host.
+              In this run, DOCUMENTS took 57% less time than ALL and LITE took 49% less.
+              A second full run kept the same order (213.65, 250.37, and 502.51 ms).
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -411,7 +415,9 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              Cold launch took 1.83 times as long as warm session reuse in this run.
+              Cold launch took 5.33 times as long as warm session reuse in this run.
+              Each cold fetch also starts its own Xvfb server, which adds to launch
+              cost.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -423,12 +429,13 @@ export default function BenchmarksPage() {
           </FrameHeader>
           <Frame className="bg-transparent p-0">
             <FrameHeader className="flex-row items-baseline gap-3">
-              <span className="shrink-0 whitespace-nowrap font-heading text-3xl font-bold tabular-nums sm:text-4xl">218.89 ms</span>
+              <span className="shrink-0 whitespace-nowrap font-heading text-3xl font-bold tabular-nums sm:text-4xl">260.61 ms</span>
               <FrameDescription>batch time divided by 8 pages</FrameDescription>
             </FrameHeader>
             <FrameDescription>
-              Average batch time was 1,751.10 ms. The per-page figure is a
-              throughput equivalent, not the latency of an individual page.
+              Average batch time was 2,084.91 ms. The per-page figure is a
+              throughput equivalent, not the latency of an individual page. A second
+              run measured 1,740.49 ms per batch, so expect this figure to vary.
             </FrameDescription>
           </Frame>
         </Frame>
