@@ -424,6 +424,7 @@ async def browser_open(
     url: str | None = None,
     session: str = "default",
     webrtc_ip_handling_policy: str | None = None,
+    fake_media_devices: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent headless browser session.
 
@@ -447,6 +448,7 @@ async def browser_open(
             disable_non_proxied_udp to keep the host's LAN and direct public
             addresses out of WebRTC candidates. Fixed at launch; reopening a
             running session with a different policy is refused.
+        fake_media_devices: Supply Chromium's synthetic camera and microphone.
     """
     with _tool_errors():
         if url is not None:
@@ -455,6 +457,7 @@ async def browser_open(
             session,
             headless=True,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+            fake_media_devices=fake_media_devices,
         )
     if url:
         payload.update(

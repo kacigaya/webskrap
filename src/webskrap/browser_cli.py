@@ -157,6 +157,10 @@ def open_command(
             ),
         ),
     ] = None,
+    fake_media_devices: Annotated[
+        bool,
+        typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -186,6 +190,7 @@ def open_command(
             chromium_sandbox=False if no_sandbox else None,
             proxy_server=proxy,
             webrtc_ip_handling_policy=policy,
+            fake_media_devices=fake_media_devices,
         ),
         output_format,
     )

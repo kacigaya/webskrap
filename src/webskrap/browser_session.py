@@ -320,6 +320,7 @@ def stealth_launch_args(
     chromium_sandbox: bool,
     proxy_server: str | None = None,
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
+    fake_media_devices: bool = False,
 ) -> list[str]:
     """Return the browser flags a one-shot fetch would get, for a detached launch.
 
@@ -344,6 +345,7 @@ def stealth_launch_args(
         chromium_sandbox=chromium_sandbox,
         proxy=proxy,
         webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+        fake_media_devices=fake_media_devices,
     )
     args = list(config.launch_options().get("args", []))
     if proxy is not None:
@@ -386,6 +388,7 @@ def launch_browser(
     chromium_sandbox: bool = True,
     proxy_server: str | None = None,
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
+    fake_media_devices: bool = False,
 ) -> tuple[int, int]:
     """Start a detached Chromium and return its (pid, CDP port).
 
@@ -400,6 +403,7 @@ def launch_browser(
         proxy_server: Unauthenticated proxy URL for all browser traffic.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy; defaults to
             ``disable_non_proxied_udp`` when ``proxy_server`` is set.
+        fake_media_devices: Supply a synthetic camera and microphone.
 
     Raises:
         WebSkrapError: If the browser exits during startup or never reports a
@@ -426,6 +430,7 @@ def launch_browser(
             chromium_sandbox=chromium_sandbox,
             proxy_server=proxy_server,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+            fake_media_devices=fake_media_devices,
         ),
     ]
     if headless:
@@ -499,6 +504,7 @@ async def open_session(
     chromium_sandbox: bool | None = None,
     proxy_server: str | None = None,
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
+    fake_media_devices: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
@@ -515,11 +521,12 @@ async def open_session(
             traffic; see :func:`persistent_proxy_server`.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy. Defaults to
             ``disable_non_proxied_udp`` when ``proxy_server`` is set.
+        fake_media_devices: Supply a synthetic camera and microphone.
 
     Returns:
         ``{"session", "pid", "port", "reused", "chromium_sandbox",
-        "proxy_server", "webrtc_ip_handling_policy"}``. The last two are what
-        the running browser was launched with.
+        "proxy_server", "webrtc_ip_handling_policy", "fake_media_devices"}``.
+        The last three describe the running browser's launch settings.
 
     Raises:
         WebSkrapError: If the name or proxy is invalid, the browser fails to
@@ -540,6 +547,12 @@ async def open_session(
         reused = state is not None
         if state is not None:
             _require_same_network(name, state, proxy_server, webrtc_ip_handling_policy)
+            if fake_media_devices and not state.get("fake_media_devices", False):
+                msg = (
+                    f"session '{name}' is already running without fake media devices. "
+                    f"Run: webskrap browser close --session {name}, then open it again"
+                )
+                raise WebSkrapError(msg, code=ErrorCode.USAGE)
 
         if state is None:
             executable = await chromium_executable()
@@ -551,6 +564,7 @@ async def open_session(
                 chromium_sandbox=sandboxed,
                 proxy_server=proxy_server,
                 webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+                fake_media_devices=fake_media_devices,
             )
             state = {
                 "pid": pid,
@@ -562,6 +576,7 @@ async def open_session(
                 # Recorded so a later open can refuse to reuse this browser for
                 # a different proxy. Never holds credentials; those are refused.
                 "proxy_server": proxy_server,
+                "fake_media_devices": fake_media_devices,
                 "webrtc_ip_handling_policy": SessionConfig(
                     proxy=ProxyConfig(server=proxy_server) if proxy_server else None,
                     webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -584,6 +599,7 @@ async def open_session(
             "chromium_sandbox": bool(state.get("chromium_sandbox", False)),
             "proxy_server": state.get("proxy_server"),
             "webrtc_ip_handling_policy": state.get("webrtc_ip_handling_policy"),
+            "fake_media_devices": bool(state.get("fake_media_devices", False)),
         }
     finally:
         await asyncio.to_thread(operation_lock.release)

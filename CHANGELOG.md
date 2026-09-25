@@ -11,9 +11,11 @@ history, so they summarize each release rather than list every change.
 
 ### Added
 
-- `SessionConfig(fake_media_devices=True)`, `fetch/search --fake-media-devices`,
-  and the MCP `stealth_fetch`/`search` option enable Chromium's synthetic camera
-  and microphone. Permission prompts remain active.
+- `SessionConfig(fake_media_devices=True)` and `--fake-media-devices` on fetch,
+  search, and browser open enable Chromium's synthetic camera and microphone.
+  MCP `stealth_fetch`, `search`, and `browser_open` offer the same option.
+  Permission prompts remain active. Persistent sessions need reopening to
+  enable it.
 
 ### Changed
 

@@ -753,9 +753,19 @@ def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(browser_session, "open_session", fake_open)
 
-    asyncio.run(mcp_server.browser_open(webrtc_ip_handling_policy="disable_non_proxied_udp"))
+    asyncio.run(
+        mcp_server.browser_open(
+            webrtc_ip_handling_policy="disable_non_proxied_udp", fake_media_devices=True
+        )
+    )
 
-    assert calls == [{"headless": True, "webrtc_ip_handling_policy": "disable_non_proxied_udp"}]
+    assert calls == [
+        {
+            "headless": True,
+            "webrtc_ip_handling_policy": "disable_non_proxied_udp",
+            "fake_media_devices": True,
+        }
+    ]
 
 
 def test_browser_open_rejects_an_unknown_webrtc_policy() -> None:

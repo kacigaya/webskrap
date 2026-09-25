@@ -170,7 +170,7 @@ headless `--mute-audio` switch. The pointer setting stays: without it,
 headless Chromium reports no hover or fine pointer.
 
 Set `fake_media_devices=True` in `SessionConfig`, or pass
-`--fake-media-devices` to `fetch` or `search`, to use Chromium's synthetic
+`--fake-media-devices` to `fetch`, `search`, or `browser open`, to use Chromium's synthetic
 camera and microphone. Permission prompts remain active. Sites can detect
 the synthetic devices, so the default is off.
 
