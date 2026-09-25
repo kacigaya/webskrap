@@ -201,6 +201,7 @@ def test_search_uses_the_stealth_fetch_configuration(monkeypatch: Any, tmp_path:
             engine="ddg",
             user_data_dir="search/ddg",
             webrtc_ip_handling_policy="disable_non_proxied_udp",
+            fake_media_devices=True,
             decline_cookies=False,
         )
     )
@@ -213,6 +214,7 @@ def test_search_uses_the_stealth_fetch_configuration(monkeypatch: Any, tmp_path:
     assert config.headless is True
     assert config.user_data_dir == root / "search" / "ddg"
     assert config.webrtc_ip_handling_policy == "disable_non_proxied_udp"
+    assert config.fake_media_devices is True
     assert config.decline_cookies is False
 
 

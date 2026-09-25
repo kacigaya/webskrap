@@ -605,6 +605,7 @@ def test_search_forwards_engine_and_stealth_options(monkeypatch: Any, tmp_path: 
             "lite",
             "--webrtc-ip-handling-policy",
             "disable_non_proxied_udp",
+            "--fake-media-devices",
             "--launch-arg",
             "--lang=en-GB",
         ],
@@ -618,6 +619,7 @@ def test_search_forwards_engine_and_stealth_options(monkeypatch: Any, tmp_path: 
     assert config.decline_cookies is False
     assert config.resource_policy is ResourcePolicy.LITE
     assert config.webrtc_ip_handling_policy == "disable_non_proxied_udp"
+    assert config.fake_media_devices is True
     assert "--lang=en-GB" in config.launch_args
 
 

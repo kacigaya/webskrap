@@ -162,6 +162,16 @@ def test_headless_chromium_keeps_scrollbars_and_pointer_media() -> None:
     assert "ignore_default_args" not in SessionConfig(browser="firefox").launch_options()
 
 
+def test_fake_media_devices_are_opt_in_and_chromium_only() -> None:
+    flag = "--use-fake-device-for-media-stream"
+
+    assert flag not in SessionConfig().launch_options()["args"]
+    assert flag in SessionConfig(fake_media_devices=True).launch_options()["args"]
+    assert "args" not in SessionConfig(browser="firefox", fake_media_devices=True).launch_options()
+    config = SessionConfig(fake_media_devices=True, launch_args=[flag])
+    assert config.launch_options()["args"].count(flag) == 1
+
+
 def test_headless_screen_size_is_configurable() -> None:
     config = SessionConfig(headless=True, headless_screen=Viewport(width=1366, height=768))
 

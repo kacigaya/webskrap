@@ -357,6 +357,9 @@ class SessionConfig(BaseModel):
     # is itself rare: fingerprinting audits report it as blocking. To hide
     # SwiftShader without losing WebGL, use gpu="mesa" instead.
     reduce_fingerprint_surface: bool = False
+    # Supply Chromium's synthetic camera and microphone when a page needs
+    # media devices. Permission prompts still follow the normal browser flow.
+    fake_media_devices: bool = False
     # Chromium WebRTC IP handling policy. Use "disable_non_proxied_udp" to
     # prevent non-proxied UDP ICE candidates, which avoids WebRTC exposing local
     # or direct public IP candidates on leak-test pages without patching the
@@ -463,6 +466,7 @@ class SessionConfig(BaseModel):
             + self._screen_args()
             + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
+            + self._fake_media_args()
             + self._gpu_args()
             + self._webrtc_ip_handling_args()
             + list(self.launch_args)
@@ -606,6 +610,14 @@ class SessionConfig(BaseModel):
             for prefix, arg in candidates.items()
             if not any(a == prefix or a.startswith(f"{prefix}=") for a in self.launch_args)
         ]
+
+    def _fake_media_args(self) -> list[str]:
+        flag = "--use-fake-device-for-media-stream"
+        if self.browser != "chromium" or not self.fake_media_devices:
+            return []
+        if any(a == flag or a.startswith(f"{flag}=") for a in self.launch_args):
+            return []
+        return [flag]
 
     def context_options(self, profile: BrowserProfile) -> dict[str, Any]:
         """Return Playwright context options for ``profile`` under this config.
