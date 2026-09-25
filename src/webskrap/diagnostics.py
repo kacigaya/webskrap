@@ -77,6 +77,8 @@ def font_count() -> int | None:
             [str(Path(executable).resolve()), "--format=%{family}\n"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             check=False,
         )
