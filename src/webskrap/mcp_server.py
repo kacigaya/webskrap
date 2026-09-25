@@ -417,6 +417,7 @@ async def _browser_action(
 async def browser_open(
     url: str | None = None,
     session: str = "default",
+    webrtc_ip_handling_policy: str | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent headless browser session.
 
@@ -429,16 +430,26 @@ async def browser_open(
     The browser keeps Chromium's OS sandbox. Environments that cannot sandbox
     must set WEBSKRAP_CHROMIUM_SANDBOX=0 before starting the server; the switch
     is deliberately not a tool argument, so a page cannot talk the model into
-    weakening renderer isolation.
+    weakening renderer isolation. A proxy is not a tool argument either, for
+    the same reason: sessions opened with `webskrap browser open --proxy`
+    keep theirs, and the result reports it as proxy_server.
 
     Args:
         url: Optional URL to open after launch.
         session: Session name; letters, digits, '.', '_' or '-'.
+        webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
+            disable_non_proxied_udp to keep the host's LAN and direct public
+            addresses out of WebRTC candidates. Fixed at launch; reopening a
+            running session with a different policy is refused.
     """
     with _tool_errors():
         if url is not None:
             url = await validate_mcp_url(url)
-        payload = await browser_session.open_session(session, headless=True)
+        payload = await browser_session.open_session(
+            session,
+            headless=True,
+            webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+        )
     if url:
         payload.update(
             await _browser_action(
