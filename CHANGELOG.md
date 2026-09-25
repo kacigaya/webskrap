@@ -20,7 +20,8 @@ history, so they summarize each release rather than list every change.
 ### Changed
 
 - Headless Chromium windows leave 80 pixels free at the right and bottom of
-  the configured screen instead of filling it. Browser launches omit
+  the configured screen instead of filling it. The headless screen reports
+  80 pixels less available height for a taskbar. Browser launches omit
   Playwright's headless switches that hide scrollbars and mute audio.
 
 ## [2.8.0] - 2026-09-25

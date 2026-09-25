@@ -146,7 +146,8 @@ Headless Chrome has no physical display, so screen and window metrics
 defaulting to an 800x600 screen with zero outer dimensions. For chromium headless
 runs WebSkrap configures a virtual screen at launch via browser flags
 (`--screen-info`, `--window-size`, `--window-position`). The window is 80 pixels
-smaller in each dimension, leaving space at the right and bottom. The default
+smaller in each dimension, and `screen.availHeight` leaves 80 pixels at the
+bottom for a taskbar. The default
 screen is 1920x1080; set
 `headless_screen` to a `Viewport` to change it, or to `None` to disable:
 

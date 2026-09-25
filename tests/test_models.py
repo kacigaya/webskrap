@@ -149,7 +149,7 @@ def test_headless_chromium_gets_simulated_screen() -> None:
 
     assert "--window-size=1840,1000" in args
     assert "--window-position=0,0" in args
-    assert "--screen-info={1920x1080}" in args
+    assert "--screen-info={1920x1080 workAreaBottom=80}" in args
 
 
 def test_headless_chromium_keeps_scrollbars_and_audio() -> None:
@@ -178,7 +178,7 @@ def test_headless_screen_size_is_configurable() -> None:
     args = config.launch_options()["args"]
 
     assert "--window-size=1286,688" in args
-    assert "--screen-info={1366x768}" in args
+    assert "--screen-info={1366x768 workAreaBottom=80}" in args
 
 
 def test_headless_screen_can_be_disabled() -> None:
@@ -203,7 +203,7 @@ def test_user_launch_args_override_simulated_screen() -> None:
     assert "--window-size=800,600" in args
     assert "--window-size=1840,1000" not in args
     # untouched flags still applied
-    assert "--screen-info={1920x1080}" in args
+    assert "--screen-info={1920x1080 workAreaBottom=80}" in args
 
 
 def test_non_chromium_headless_omits_simulated_screen() -> None:

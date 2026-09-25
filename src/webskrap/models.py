@@ -540,7 +540,8 @@ class SessionConfig(BaseModel):
         width, height = self.headless_screen.width, self.headless_screen.height
         # Leave space at the right and bottom, as a normal desktop window
         # does. The screen itself keeps its full configured dimensions.
-        window_width, window_height = max(1, width - 80), max(1, height - 80)
+        bottom_gap = min(80, height - 1)
+        window_width, window_height = max(1, width - 80), height - bottom_gap
         candidates = {
             "--window-size": f"--window-size={window_width},{window_height}",
             "--window-position": "--window-position=0,0",
@@ -548,7 +549,9 @@ class SessionConfig(BaseModel):
         if not self.virtual_display:
             # Headless-only flag defining a screen at 0,0. Under a virtual
             # display the X server is the screen.
-            candidates["--screen-info"] = f"--screen-info={{{width}x{height}}}"
+            candidates["--screen-info"] = (
+                f"--screen-info={{{width}x{height} workAreaBottom={bottom_gap}}}"
+            )
         return [
             arg
             for prefix, arg in candidates.items()

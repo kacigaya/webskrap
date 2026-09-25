@@ -500,7 +500,7 @@ def test_launch_hides_automation_and_sets_a_virtual_screen(
 
     command = commands[0]
     assert "--disable-blink-features=AutomationControlled" in command
-    assert "--screen-info={1920x1080}" in command
+    assert "--screen-info={1920x1080 workAreaBottom=80}" in command
     assert "--window-size=1840,1000" in command
     assert "--window-position=0,0" in command
     assert command.count("--no-sandbox") == 0
