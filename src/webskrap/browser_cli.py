@@ -36,7 +36,12 @@ from webskrap.cli_output import (
 )
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import ElementState, LoadState, WaitUntil
-from webskrap.parsing import parse_element_state, parse_load_state, parse_wait_until
+from webskrap.parsing import (
+    parse_element_state,
+    parse_load_state,
+    parse_wait_until,
+    parse_webrtc_ip_handling_policy,
+)
 
 browser_app = typer.Typer(
     help="Drive a persistent browser with Playwright CLI-style commands.",
@@ -131,6 +136,27 @@ def open_command(
             help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
         ),
     ] = False,
+    proxy: Annotated[
+        str | None,
+        typer.Option(
+            "--proxy",
+            help=(
+                "Route the session through this proxy (http, https, socks4 or socks5 URL, "
+                "no credentials)."
+            ),
+        ),
+    ] = None,
+    webrtc_ip_handling_policy: Annotated[
+        str | None,
+        typer.Option(
+            "--webrtc-ip-handling-policy",
+            help=(
+                "Chromium WebRTC IP policy: default, default_public_and_private_interfaces, "
+                "default_public_interface_only, disable_non_proxied_udp. "
+                "Defaults to disable_non_proxied_udp with --proxy."
+            ),
+        ),
+    ] = None,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -138,8 +164,19 @@ def open_command(
     The browser keeps Chromium's OS sandbox unless --no-sandbox is passed (or
     WEBSKRAP_CHROMIUM_SANDBOX=0 is set for hosts that cannot sandbox at all).
     Without it, a renderer compromised by a hostile page is no longer contained.
+
+    With --proxy, all traffic goes through the proxy and WebRTC stops offering
+    non-proxied UDP candidates, so pages see neither the host's LAN addresses
+    nor its direct public address. The proxy is fixed at launch: reopening a
+    running session with a different one is refused.
     """
     output_format = parse_output_format(format)
+    try:
+        policy = parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            str(exc).partition(" must ")[2], param_hint="--webrtc-ip-handling-policy"
+        ) from exc
     payload = _run(
         browser_session.open_session(
             session,
@@ -147,6 +184,8 @@ def open_command(
             # None, not True: an unset flag leaves the environment default in
             # place, while --no-sandbox is an explicit opt-out that wins.
             chromium_sandbox=False if no_sandbox else None,
+            proxy_server=proxy,
+            webrtc_ip_handling_policy=policy,
         ),
         output_format,
     )
@@ -165,6 +204,8 @@ def open_command(
         return
     verb = "Reusing" if payload["reused"] else "Opened"
     console.print(f"{verb} session [bold]{session}[/bold] (pid {payload['pid']})")
+    if payload.get("proxy_server"):
+        console.print(f"Proxy: {payload['proxy_server']}")
     if not payload["chromium_sandbox"]:
         stderr_console.print("[yellow]warning:[/yellow] Chromium sandbox disabled")
     if url:
