@@ -54,7 +54,8 @@ async def click(
         locator: Element to click.
         description: Human-readable target, used in error messages.
         **click_options: ``position``, ``timeout``, ``strict``, ``trial``,
-            ``modifiers``, ``button``, ``click_count`` and ``delay``.
+            ``modifiers``, ``button``, ``click_count`` and ``delay`` (how long
+            the button stays down, in ms; a human-range value when omitted).
 
     Raises:
         WebSkrapError: If ``strict`` was requested and the locator matches
@@ -92,6 +93,9 @@ async def click(
     await page.wait_for_timeout(uniform(40, 140))
 
     mouse_options = mouse_click_options(click_options)
+    # Playwright holds the button for about 2 ms; people hold it for roughly
+    # 60-140 ms, and click duration is one of the cheapest bot features.
+    mouse_options.setdefault("delay", uniform(60, 140))
     modifiers = click_options.get("modifiers") or []
     for modifier in modifiers:
         await page.keyboard.down(modifier)

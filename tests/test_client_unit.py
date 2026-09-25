@@ -873,3 +873,17 @@ async def test_mesa_gpu_without_lavapipe_fails_before_launch(
     assert excinfo.value.code is ErrorCode.BROWSER_LAUNCH
     assert chromium.options == {}  # the browser was never launched
     assert displays == []  # nor the display
+
+
+@pytest.mark.asyncio
+async def test_human_click_holds_the_button_for_a_human_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Playwright's own click releases after ~2 ms; unset, the hold is drawn
+    # from 60-140 ms. uniform() returning its lower bound pins it to 60.
+    monkeypatch.setattr("webskrap.human.uniform", lambda start, _end: start)
+    page = _Page()
+
+    await _session().human_click(page, "button")  # type: ignore[arg-type]
+
+    assert page.mouse.clicks[0][2] == {"delay": 60}
