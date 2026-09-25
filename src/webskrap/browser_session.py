@@ -779,13 +779,18 @@ async def element_action(page: Page, action: str, target: str, values: list[str]
 
     Clicks go along a human cursor path with a human button hold (see
     :func:`webskrap.human.click`), after a trial click that keeps
-    Playwright's actionability check (visible, stable, not covered).
+    Playwright's actionability check (visible, stable, not covered). ``type``
+    clicks into the field and types with human keystroke timing (see
+    :func:`webskrap.human.type_text`); ``fill`` still sets the value at once.
     """
     arguments = element_arguments(action, values)
     locator = await resolve_locator(page, target)
     if action in HUMAN_CLICK_ACTIONS:
         await locator.click(trial=True)
         await humanize.click(page, locator, description=target, **HUMAN_CLICK_ACTIONS[action])
+        return
+    if action == "type":
+        await humanize.type_text(page, locator, arguments[0], description=target)
         return
     await getattr(locator, ELEMENT_ACTIONS[action][0])(*arguments)
 

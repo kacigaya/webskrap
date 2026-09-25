@@ -753,3 +753,18 @@ def test_fill_still_sets_the_value_directly(monkeypatch: pytest.MonkeyPatch) -> 
     asyncio.run(browser_session.element_action(_action_page(locator), "fill", "#q", ["hi"]))
 
     assert locator.calls == [("fill", ("hi",), {})]
+
+
+def test_type_action_uses_human_typing(monkeypatch: pytest.MonkeyPatch) -> None:
+    typed: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_type_text(_page: Any, _locator: Any, text: str, **options: Any) -> None:
+        typed.append((text, options))
+
+    monkeypatch.setattr("webskrap.human.type_text", fake_type_text)
+    locator = _ActionLocator()
+
+    asyncio.run(browser_session.element_action(_action_page(locator), "type", "#q", ["hello"]))
+
+    assert typed == [("hello", {"description": "#q"})]
+    assert locator.calls == []  # no press_sequentially
