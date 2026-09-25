@@ -9,13 +9,13 @@ from webskrap.client import (
     WebSkrapClient,
     WebSkrapError,
     WebSkrapSession,
-    _bezier_path,
     _resource_route_handler,
     browser_doctor,
     lavapipe_available,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
+from webskrap.human import bezier_path
 from webskrap.models import ResourcePolicy, SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
 
@@ -435,7 +435,7 @@ async def test_human_click_false_delegates_to_page_click() -> None:
 
 @pytest.mark.asyncio
 async def test_human_click_waits_moves_and_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("webskrap.client.uniform", lambda _start, _end: 0)
+    monkeypatch.setattr("webskrap.human.uniform", lambda _start, _end: 0)
     locator = _Locator()
     page = _Page(locator)
 
@@ -469,7 +469,7 @@ async def test_human_click_waits_moves_and_clicks(monkeypatch: pytest.MonkeyPatc
 
 def test_bezier_path_curves_and_lands_on_target() -> None:
     start, end = (0.0, 0.0), (200.0, 100.0)
-    path = _bezier_path(start, end, 24)
+    path = bezier_path(start, end, 24)
 
     assert len(path) == 24
     assert path[-1] == end  # exact landing
