@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/webskrap-logo.png" alt="WebSkrap logo" width="200">
+  <img src="https://raw.githubusercontent.com/kacigaya/webskrap/main/assets/webskrap-logo.png" alt="WebSkrap logo" width="200">
 </p>
 
 <h1 align="center">WebSkrap</h1>
