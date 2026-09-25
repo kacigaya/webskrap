@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-09-25
+
 ### Added
 
 - `doctor` reports the launched browser identity, host CPU architecture, and
@@ -22,6 +24,8 @@ history, so they summarize each release rather than list every change.
   `fetch` and `search`.
 - Browser profiles leave `Accept` to the browser instead of injecting a fixed
   value. Caller-supplied `Accept` headers still apply.
+- Benchmark documentation notes that timings vary by host and browser version;
+  the benchmark script honors `WEBSKRAP_CHROMIUM_SANDBOX`.
 
 ## [2.9.0] - 2026-09-25
 
@@ -568,7 +572,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/kacigaya/webskrap/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/kacigaya/webskrap/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/kacigaya/webskrap/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/kacigaya/webskrap/compare/v2.6.0...v2.7.0
