@@ -92,6 +92,22 @@ The supported policy values are `default`,
 `default_public_and_private_interfaces`, `default_public_interface_only`, and
 `disable_non_proxied_udp`.
 
+Behind a proxy this is the default. A session with `proxy` set and no explicit
+policy gets `disable_non_proxied_udp`, because otherwise ICE still gathers the
+host's LAN address and, through STUN, its direct public address, which is the
+address the proxy is meant to hide. Pass `webrtc_ip_handling_policy="default"`
+to keep Chromium's behavior behind a proxy.
+
+Persistent sessions take the same controls:
+`webskrap browser open --proxy socks5://proxy.example:1080` routes all of the
+session's traffic through the proxy and blocks non-proxied UDP, and
+`--webrtc-ip-handling-policy` overrides the policy. Both are fixed when the
+browser starts, so reopening a running session with a different proxy or policy
+is refused rather than silently reusing a browser that bypasses the proxy.
+Persistent sessions cannot authenticate to a proxy (credentials in the URL are
+refused); use an unauthenticated or IP-allowlisted proxy there, or a one-shot
+session, whose `ProxyConfig` handles credentials.
+
 WebRTC IP handling only controls ICE candidates. It will not hide the page's
 normal remote address, and it will not normalize unrelated fingerprint surfaces
 such as fonts, canvas, battery, device memory, or TLS/session metadata.
