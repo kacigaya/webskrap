@@ -496,6 +496,8 @@ async def open_session(
     *,
     headless: bool = True,
     chromium_sandbox: bool | None = None,
+    proxy_server: str | None = None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
@@ -508,13 +510,25 @@ async def open_session(
         chromium_sandbox: Keep Chromium's OS sandbox. None consults
             ``WEBSKRAP_CHROMIUM_SANDBOX`` and otherwise sandboxes. See
             :func:`sandbox_enabled` and :func:`launch_browser`.
+        proxy_server: Unauthenticated proxy URL for all of the session's
+            traffic; see :func:`persistent_proxy_server`.
+        webrtc_ip_handling_policy: Chromium WebRTC ICE policy. Defaults to
+            ``disable_non_proxied_udp`` when ``proxy_server`` is set.
 
     Returns:
-        ``{"session", "pid", "port", "reused", "chromium_sandbox"}``.
+        ``{"session", "pid", "port", "reused", "chromium_sandbox",
+        "proxy_server", "webrtc_ip_handling_policy"}``. The last two are what
+        the running browser was launched with.
 
     Raises:
-        WebSkrapError: If the name is invalid or the browser fails to start.
+        WebSkrapError: If the name or proxy is invalid, the browser fails to
+            start, or a running session was launched with a different proxy
+            or WebRTC policy than requested (``usage``). Launch flags cannot
+            change on a running browser, and silently reusing it would send
+            traffic outside the requested proxy.
     """
+    if proxy_server is not None:
+        persistent_proxy_server(proxy_server)
     operation_lock = await _acquire_session_operation_lock(name)
     try:
         # Unconditional, so a session directory created by an older version (or
@@ -523,6 +537,8 @@ async def open_session(
         existing = read_state(directory)
         state = existing if session_running(directory, existing) else None
         reused = state is not None
+        if state is not None:
+            _require_same_network(name, state, proxy_server, webrtc_ip_handling_policy)
 
         if state is None:
             executable = await chromium_executable()
@@ -532,6 +548,8 @@ async def open_session(
                 executable=executable,
                 headless=headless,
                 chromium_sandbox=sandboxed,
+                proxy_server=proxy_server,
+                webrtc_ip_handling_policy=webrtc_ip_handling_policy,
             )
             state = {
                 "pid": pid,
@@ -540,6 +558,13 @@ async def open_session(
                 # Recorded so `browser list` can show which running sessions gave
                 # up renderer isolation; a reused session keeps its launch value.
                 "chromium_sandbox": sandboxed,
+                # Recorded so a later open can refuse to reuse this browser for
+                # a different proxy. Never holds credentials; those are refused.
+                "proxy_server": proxy_server,
+                "webrtc_ip_handling_policy": SessionConfig(
+                    proxy=ProxyConfig(server=proxy_server) if proxy_server else None,
+                    webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+                ).effective_webrtc_ip_handling_policy(),
                 "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
             }
             try:
@@ -556,9 +581,44 @@ async def open_session(
             "port": state["port"],
             "reused": reused,
             "chromium_sandbox": bool(state.get("chromium_sandbox", False)),
+            "proxy_server": state.get("proxy_server"),
+            "webrtc_ip_handling_policy": state.get("webrtc_ip_handling_policy"),
         }
     finally:
         await asyncio.to_thread(operation_lock.release)
+
+
+def _require_same_network(
+    name: str,
+    state: dict[str, Any],
+    proxy_server: str | None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None,
+) -> None:
+    """Refuse to reuse a running session for a different proxy or WebRTC policy.
+
+    Only settings the caller asked for are compared: reopening a proxied
+    session without naming the proxy reuses it, and its traffic still goes
+    through that proxy.
+    """
+    mismatched = [
+        label
+        for label, requested, running in (
+            ("proxy", proxy_server, state.get("proxy_server")),
+            (
+                "WebRTC policy",
+                webrtc_ip_handling_policy,
+                state.get("webrtc_ip_handling_policy"),
+            ),
+        )
+        if requested is not None and requested != running
+    ]
+    if mismatched:
+        msg = (
+            f"session '{name}' is already running with a different "
+            f"{' and '.join(mismatched)}. Run: webskrap browser close --session {name}, "
+            "then open it again"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
 
 
 def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
