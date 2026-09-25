@@ -281,6 +281,7 @@ def test_browser_session_lifecycle(persistent_session_env: Path) -> None:
                 "pid": sessions[0]["pid"],
                 "port": sessions[0]["port"],
                 "chromium_sandbox": sessions[0]["chromium_sandbox"],
+                "proxy_server": None,
             }
         ]
     finally:
