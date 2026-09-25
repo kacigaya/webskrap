@@ -90,7 +90,7 @@ def _async_playwright(driver: str):
 
 async def browser_doctor(
     driver: str = "patchright",
-    channels: tuple[str | None, ...] = ("chrome", "chromium"),
+    channels: tuple[str | None, ...] = ("chrome", "msedge", "chromium"),
     *,
     chromium_sandbox: bool = True,
 ) -> dict[str, object]:
