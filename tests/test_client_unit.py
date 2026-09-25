@@ -15,7 +15,7 @@ from webskrap.client import (
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
-from webskrap.human import bezier_path
+from webskrap.human import bezier_path, scroll_into_view
 from webskrap.models import ResourcePolicy, SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
 
@@ -44,12 +44,16 @@ class _Mouse:
     def __init__(self) -> None:
         self.moves: list[tuple[float, float, int | None]] = []
         self.clicks: list[tuple[float, float, dict[str, object]]] = []
+        self.wheels: list[tuple[float, float]] = []
 
     async def move(self, x: float, y: float, *, steps: int | None = None) -> None:
         self.moves.append((x, y, steps))
 
     async def click(self, x: float, y: float, **options: object) -> None:
         self.clicks.append((x, y, options))
+
+    async def wheel(self, delta_x: float, delta_y: float) -> None:
+        self.wheels.append((delta_x, delta_y))
 
 
 class _Keyboard:
@@ -103,8 +107,11 @@ class _Page:
     async def wait_for_timeout(self, timeout: float) -> None:
         self.timeouts.append(timeout)
 
-    async def evaluate(self, script: str) -> None:
+    async def evaluate(self, script: str) -> object:
         self.evaluations.append(script)
+        if "innerHeight" in script:
+            return [1280, 720]
+        return None
 
 
 class _Response:
@@ -461,8 +468,12 @@ async def test_human_click_waits_moves_and_clicks(monkeypatch: pytest.MonkeyPatc
         move[2] == 1 and abs(move[0] - 30) < 1e-6 and abs(move[1] - 30) < 1e-6
         for move in page.mouse.moves
     )
-    # one settle wait + one wait per curve step + one final wait.
-    assert page.timeouts == [0] * (1 + 12 + 1)
+    # The box starts 20px from the top, inside the view margin, but aiming
+    # it lower needs less than one wheel notch, so the wheel stays still and
+    # Playwright's scroll finishes (one pause); then one settle wait, one
+    # wait per curve step and one final wait.
+    assert page.mouse.wheels == []
+    assert page.timeouts == [0] * (1 + 1 + 12 + 1)
     assert page.mouse.clicks == [(30, 30, {"button": "left", "click_count": 1, "delay": 25})]
     assert page.keyboard.events == [("down", "Shift"), ("up", "Shift")]
 
@@ -887,3 +898,62 @@ async def test_human_click_holds_the_button_for_a_human_duration(
     await _session().human_click(page, "button")  # type: ignore[arg-type]
 
     assert page.mouse.clicks[0][2] == {"delay": 60}
+
+
+class _ScrollingPage(_Page):
+    """A page whose wheel moves the locator's box, like a scrolling document."""
+
+    def __init__(self, box_y: float, scrolls: bool = True) -> None:
+        super().__init__(_Locator(box={"x": 100, "y": box_y, "width": 80, "height": 30}))
+        self._scrolls = scrolls
+        page = self
+
+        async def wheel(delta_x: float, delta_y: float) -> None:
+            page.mouse.wheels.append((delta_x, delta_y))
+            if page._scrolls:
+                page._locator.box["y"] -= delta_y
+
+        self.mouse.wheel = wheel  # type: ignore[method-assign]
+
+
+@pytest.mark.asyncio
+async def test_scroll_wheels_a_far_element_into_view() -> None:
+    page = _ScrollingPage(box_y=2400)
+
+    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
+
+    deltas = [dy for _dx, dy in page.mouse.wheels]
+    assert deltas and all(0 < dy <= 120 for dy in deltas)  # notch-sized, downward
+    assert 40 <= page._locator.box["y"] <= 720 - 40 - 30
+    assert page._locator.scrolled == []  # no programmatic jump needed
+
+
+@pytest.mark.asyncio
+async def test_scroll_wheels_up_to_an_element_above() -> None:
+    page = _ScrollingPage(box_y=-900)
+
+    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
+
+    assert all(dy < 0 for _dx, dy in page.mouse.wheels)
+    assert page._locator.scrolled == []
+
+
+@pytest.mark.asyncio
+async def test_scroll_leaves_a_visible_element_alone() -> None:
+    page = _ScrollingPage(box_y=300)
+
+    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
+
+    assert page.mouse.wheels == []
+    assert page._locator.scrolled == []
+
+
+@pytest.mark.asyncio
+async def test_scroll_falls_back_when_the_wheel_moves_nothing() -> None:
+    # e.g. the element sits in an inner scroll container the cursor is not over.
+    page = _ScrollingPage(box_y=2400, scrolls=False)
+
+    await scroll_into_view(page, page._locator, timeout=500)  # type: ignore[arg-type]
+
+    assert page.mouse.wheels  # it tried the wheel first
+    assert page._locator.scrolled == [{"timeout": 500}]

@@ -63,7 +63,7 @@ async def click(
     """
     timeout = click_options.get("timeout")
     await locator.wait_for(state="visible", timeout=timeout)
-    await locator.scroll_into_view_if_needed(timeout=timeout)
+    await scroll_into_view(page, locator, timeout=timeout)
 
     if click_options.get("strict") is True and await locator.count() != 1:
         msg = f"strict mode expected one element for selector: {description}"
@@ -104,6 +104,52 @@ async def click(
     finally:
         for modifier in reversed(modifiers):
             await page.keyboard.up(modifier)
+
+
+#: Viewport margin, in CSS pixels, an element must clear to count as in view.
+VIEW_MARGIN = 40
+#: Wheel batches before giving up and letting Playwright scroll.
+MAX_WHEEL_BATCHES = 12
+
+
+async def scroll_into_view(
+    page: AnyPage,
+    locator: AnyLocator,
+    *,
+    timeout: float | None = None,
+) -> None:
+    """Bring ``locator`` into view with mouse-wheel notches, not a jump.
+
+    Playwright's ``scroll_into_view_if_needed`` scrolls without a single
+    ``wheel`` event, so a page that listens sees the content move on its own.
+    This wheels in notch-sized steps with short pauses, measuring again after
+    each batch since layouts shift while scrolling. If the wheel makes no
+    progress (the element sits in an inner container the cursor is not over,
+    or the page does not scroll), Playwright's scroll finishes the job.
+    """
+    viewport = await page.evaluate("() => [window.innerWidth, window.innerHeight]")
+    height = float(viewport[1])
+    previous_top: float | None = None
+    for _ in range(MAX_WHEEL_BATCHES):
+        box = await locator.bounding_box(timeout=timeout)
+        if box is None:
+            break
+        top, bottom = box["y"], box["y"] + box["height"]
+        if top >= VIEW_MARGIN and bottom <= height - VIEW_MARGIN:
+            return
+        if previous_top is not None and abs(top - previous_top) < 1:
+            break  # the wheel moved nothing
+        previous_top = top
+        # Aim the element somewhere in the upper half, not at an exact edge.
+        remaining = top - height * uniform(0.25, 0.45)
+        while abs(remaining) > 20:
+            notch = min(abs(remaining), uniform(80, 120))
+            step = notch if remaining > 0 else -notch
+            await page.mouse.wheel(0, step)
+            remaining -= step
+            await page.wait_for_timeout(uniform(16, 45))
+        await page.wait_for_timeout(uniform(60, 160))
+    await locator.scroll_into_view_if_needed(timeout=timeout)
 
 
 def click_point(
