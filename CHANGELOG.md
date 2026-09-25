@@ -14,6 +14,14 @@ history, so they summarize each release rather than list every change.
 - `WebSkrapSession.human_type` and `webskrap.human.type_text`: click into a
   field and type one key at a time, each held 30-90 ms and 40-160 ms apart,
   with an occasional longer pause.
+- Persistent browser sessions can run behind a proxy:
+  `webskrap browser open --proxy URL` and `open_session(proxy_server=...)`.
+  `--webrtc-ip-handling-policy` (CLI) and `webrtc_ip_handling_policy`
+  (`open_session`, MCP `browser_open`) set the WebRTC policy. Both are fixed at
+  launch; reopening a running session with a different proxy or policy is a
+  `usage` error. Proxy URLs with credentials are refused, since nothing stays
+  attached to answer the proxy. `browser list` shows each session's proxy. The
+  MCP tools take no proxy argument.
 
 ### Changed
 
@@ -29,20 +37,6 @@ history, so they summarize each release rather than list every change.
   They are slower than before by design; `fill` is unchanged.
 - The humanized input moved to `webskrap.human`, which takes a locator and
   either driver's page.
-
-### Added
-
-- Persistent browser sessions can run behind a proxy:
-  `webskrap browser open --proxy URL` and `open_session(proxy_server=...)`.
-  `--webrtc-ip-handling-policy` (CLI) and `webrtc_ip_handling_policy`
-  (`open_session`, MCP `browser_open`) set the WebRTC policy. Both are fixed at
-  launch; reopening a running session with a different proxy or policy is a
-  `usage` error. Proxy URLs with credentials are refused, since nothing stays
-  attached to answer the proxy. `browser list` shows each session's proxy. The
-  MCP tools take no proxy argument.
-
-### Changed
-
 - A session with a proxy and no explicit `webrtc_ip_handling_policy` now gets
   `disable_non_proxied_udp`, so WebRTC no longer reveals the host's LAN and
   direct public addresses behind the proxy. Pass `"default"` to keep
