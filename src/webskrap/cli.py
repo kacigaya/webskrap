@@ -315,6 +315,10 @@ def fetch_command(
             ),
         ),
     ] = GpuBackend.AUTO,
+    fake_media_devices: Annotated[
+        bool,
+        typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
+    ] = False,
     launch_args: Annotated[
         list[str] | None,
         typer.Option(
@@ -367,6 +371,7 @@ def fetch_command(
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
             gpu=gpu,
+            fake_media_devices=fake_media_devices,
             launch_args=launch_args or [],
             no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -400,6 +405,7 @@ async def _fetch(
     mask_headless_user_agent: bool,
     virtual_display: bool,
     gpu: GpuBackend,
+    fake_media_devices: bool,
     launch_args: list[str],
     no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
@@ -421,6 +427,7 @@ async def _fetch(
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
         gpu=gpu,
+        fake_media_devices=fake_media_devices,
         launch_args=launch_args,
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )
@@ -570,6 +577,10 @@ def search_command(
             ),
         ),
     ] = GpuBackend.AUTO,
+    fake_media_devices: Annotated[
+        bool,
+        typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
+    ] = False,
     launch_args: Annotated[
         list[str] | None,
         typer.Option(
@@ -620,6 +631,7 @@ def search_command(
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
             gpu=gpu,
+            fake_media_devices=fake_media_devices,
             launch_args=launch_args or [],
             no_sandbox=no_sandbox,
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -645,6 +657,7 @@ async def _search(
     mask_headless_user_agent: bool,
     virtual_display: bool,
     gpu: GpuBackend,
+    fake_media_devices: bool,
     launch_args: list[str],
     no_sandbox: bool,
     webrtc_ip_handling_policy: str | None,
@@ -665,6 +678,7 @@ async def _search(
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
         gpu=gpu,
+        fake_media_devices=fake_media_devices,
         launch_args=launch_args,
         webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
     )

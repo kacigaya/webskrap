@@ -500,8 +500,8 @@ def test_launch_hides_automation_and_sets_a_virtual_screen(
 
     command = commands[0]
     assert "--disable-blink-features=AutomationControlled" in command
-    assert "--screen-info={1920x1080}" in command
-    assert "--window-size=1920,1080" in command
+    assert "--screen-info={1920x1080 workAreaBottom=80}" in command
+    assert "--window-size=1840,1000" in command
     assert "--window-position=0,0" in command
     assert command.count("--no-sandbox") == 0
 
@@ -527,6 +527,16 @@ def test_launch_opt_out_adds_no_sandbox_once(
     _launch(tmp_path, headless=True, chromium_sandbox=False)
 
     assert commands[0].count("--no-sandbox") == 1
+
+
+def test_launch_fake_media_devices_is_opt_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True, fake_media_devices=True)
+
+    assert "--use-fake-device-for-media-stream" in commands[0]
 
 
 async def test_evaluate_runs_in_the_page_world() -> None:
@@ -648,6 +658,30 @@ def test_open_without_proxy_records_none(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     assert opened["proxy_server"] is None
     assert opened["webrtc_ip_handling_policy"] is None
+
+
+def test_open_records_fake_media_and_requires_relaunch_to_enable_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    asyncio.run(browser_session.open_session("media"))
+
+    with pytest.raises(WebSkrapError, match="without fake media devices"):
+        asyncio.run(browser_session.open_session("media", fake_media_devices=True))
+
+    assert len(launches) == 1
+
+
+def test_open_reuses_fake_media_session_without_repeating_option(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    opened = asyncio.run(browser_session.open_session("media", fake_media_devices=True))
+    reused = asyncio.run(browser_session.open_session("media"))
+
+    assert launches[0]["fake_media_devices"] is True
+    assert opened["fake_media_devices"] is True
+    assert reused["fake_media_devices"] is True
 
 
 @pytest.mark.parametrize(

@@ -147,9 +147,29 @@ def test_headless_chromium_gets_simulated_screen() -> None:
 
     args = config.launch_options()["args"]
 
-    assert "--window-size=1920,1080" in args
+    assert "--window-size=1840,1000" in args
     assert "--window-position=0,0" in args
-    assert "--screen-info={1920x1080}" in args
+    assert "--screen-info={1920x1080 workAreaBottom=80}" in args
+
+
+def test_headless_chromium_keeps_scrollbars_and_audio() -> None:
+    ignored = SessionConfig(headless=True).launch_options()["ignore_default_args"]
+
+    assert "--hide-scrollbars" in ignored
+    assert "--mute-audio" in ignored
+    assert not any(arg.startswith("--blink-settings=") for arg in ignored)
+    assert "ignore_default_args" not in SessionConfig(headless=False).launch_options()
+    assert "ignore_default_args" not in SessionConfig(browser="firefox").launch_options()
+
+
+def test_fake_media_devices_are_opt_in_and_chromium_only() -> None:
+    flag = "--use-fake-device-for-media-stream"
+
+    assert flag not in SessionConfig().launch_options()["args"]
+    assert flag in SessionConfig(fake_media_devices=True).launch_options()["args"]
+    assert "args" not in SessionConfig(browser="firefox", fake_media_devices=True).launch_options()
+    config = SessionConfig(fake_media_devices=True, launch_args=[flag])
+    assert config.launch_options()["args"].count(flag) == 1
 
 
 def test_headless_screen_size_is_configurable() -> None:
@@ -157,8 +177,8 @@ def test_headless_screen_size_is_configurable() -> None:
 
     args = config.launch_options()["args"]
 
-    assert "--window-size=1366,768" in args
-    assert "--screen-info={1366x768}" in args
+    assert "--window-size=1286,688" in args
+    assert "--screen-info={1366x768 workAreaBottom=80}" in args
 
 
 def test_headless_screen_can_be_disabled() -> None:
@@ -181,9 +201,9 @@ def test_user_launch_args_override_simulated_screen() -> None:
     args = config.launch_options()["args"]
 
     assert "--window-size=800,600" in args
-    assert "--window-size=1920,1080" not in args
+    assert "--window-size=1840,1000" not in args
     # untouched flags still applied
-    assert "--screen-info={1920x1080}" in args
+    assert "--screen-info={1920x1080 workAreaBottom=80}" in args
 
 
 def test_non_chromium_headless_omits_simulated_screen() -> None:
@@ -589,7 +609,7 @@ def test_virtual_display_launches_headed_with_window_but_no_headless_screen() ->
     options = config.launch_options()
 
     assert options["headless"] is False
-    assert "--window-size=1920,1080" in options["args"]
+    assert "--window-size=1840,1000" in options["args"]
     assert "--window-position=0,0" in options["args"]
     # --screen-info only exists in headless mode; Xvfb supplies the screen.
     assert not any(a.startswith("--screen-info") for a in options["args"])

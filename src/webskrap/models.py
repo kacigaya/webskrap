@@ -317,8 +317,8 @@ class SessionConfig(BaseModel):
     # Simulated screen for headless chromium. Headless Chrome has no physical
     # display, so screen/window metrics (screen.width, outerWidth, ...) leak as
     # headless tells. A virtual screen of this size is configured at launch via
-    # browser flags (not JS spoofing), giving coherent metrics. Set to None to
-    # disable.
+    # browser flags (not JS spoofing). The window leaves 80 px at the right
+    # and bottom of this screen. Set to None to disable.
     headless_screen: Viewport | None = Field(
         default_factory=lambda: Viewport(width=1920, height=1080)
     )
@@ -357,6 +357,9 @@ class SessionConfig(BaseModel):
     # is itself rare: fingerprinting audits report it as blocking. To hide
     # SwiftShader without losing WebGL, use gpu="mesa" instead.
     reduce_fingerprint_surface: bool = False
+    # Supply Chromium's synthetic camera and microphone when a page needs
+    # media devices. Permission prompts still follow the normal browser flow.
+    fake_media_devices: bool = False
     # Chromium WebRTC IP handling policy. Use "disable_non_proxied_udp" to
     # prevent non-proxied UDP ICE candidates, which avoids WebRTC exposing local
     # or direct public IP candidates on leak-test pages without patching the
@@ -434,6 +437,13 @@ class SessionConfig(BaseModel):
             # this is explicitly True, so leaving it out silently unsandboxed
             # every one-shot launch.
             options["chromium_sandbox"] = self.chromium_sandbox
+            if options["headless"]:
+                # Keep Playwright's pointer media setting: without it headless
+                # Chromium reports no hover or fine pointer on a desktop.
+                options["ignore_default_args"] = [
+                    "--hide-scrollbars",
+                    "--mute-audio",
+                ]
         channel = self.channel
         if channel is None and self.browser == "chromium" and options["headless"]:
             # With no channel, Playwright runs headless Chromium on the old
@@ -455,6 +465,7 @@ class SessionConfig(BaseModel):
             + self._screen_args()
             + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
+            + self._fake_media_args()
             + self._gpu_args()
             + self._webrtc_ip_handling_args()
             + list(self.launch_args)
@@ -527,14 +538,20 @@ class SessionConfig(BaseModel):
         if not (self.headless and self.browser == "chromium" and self.headless_screen):
             return []
         width, height = self.headless_screen.width, self.headless_screen.height
+        # Leave space at the right and bottom, as a normal desktop window
+        # does. The screen itself keeps its full configured dimensions.
+        bottom_gap = min(80, height - 1)
+        window_width, window_height = max(1, width - 80), height - bottom_gap
         candidates = {
-            "--window-size": f"--window-size={width},{height}",
+            "--window-size": f"--window-size={window_width},{window_height}",
             "--window-position": "--window-position=0,0",
         }
         if not self.virtual_display:
             # Headless-only flag defining a screen at 0,0. Under a virtual
             # display the X server is the screen.
-            candidates["--screen-info"] = f"--screen-info={{{width}x{height}}}"
+            candidates["--screen-info"] = (
+                f"--screen-info={{{width}x{height} workAreaBottom={bottom_gap}}}"
+            )
         return [
             arg
             for prefix, arg in candidates.items()
@@ -595,6 +612,14 @@ class SessionConfig(BaseModel):
             for prefix, arg in candidates.items()
             if not any(a == prefix or a.startswith(f"{prefix}=") for a in self.launch_args)
         ]
+
+    def _fake_media_args(self) -> list[str]:
+        flag = "--use-fake-device-for-media-stream"
+        if self.browser != "chromium" or not self.fake_media_devices:
+            return []
+        if any(a == flag or a.startswith(f"{flag}=") for a in self.launch_args):
+            return []
+        return [flag]
 
     def context_options(self, profile: BrowserProfile) -> dict[str, Any]:
         """Return Playwright context options for ``profile`` under this config.

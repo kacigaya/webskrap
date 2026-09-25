@@ -9,6 +9,21 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `SessionConfig(fake_media_devices=True)` and `--fake-media-devices` on fetch,
+  search, and browser open enable Chromium's synthetic camera and microphone.
+  MCP `stealth_fetch`, `search`, and `browser_open` offer the same option.
+  Permission prompts remain active. Persistent sessions need reopening to
+  enable it.
+
+### Changed
+
+- Headless Chromium windows leave 80 pixels free at the right and bottom of
+  the configured screen instead of filling it. The headless screen reports
+  80 pixels less available height for a taskbar. Browser launches omit
+  Playwright's headless switches that hide scrollbars and mute audio.
+
 ## [2.8.0] - 2026-09-25
 
 ### Added

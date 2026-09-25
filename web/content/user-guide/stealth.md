@@ -145,9 +145,10 @@ Headless Chrome has no physical display, so screen and window metrics
 (`screen.width`, `window.outerWidth`, ...) otherwise leak as headless tells,
 defaulting to an 800x600 screen with zero outer dimensions. For chromium headless
 runs WebSkrap configures a virtual screen at launch via browser flags
-(`--screen-info`, `--window-size`, `--window-position`), so the page reports
-coherent display metrics. This is a real browser-level screen, not JavaScript
-spoofing, so it does not register as tampering. The default is 1920x1080; set
+(`--screen-info`, `--window-size`, `--window-position`). The window is 80 pixels
+smaller in each dimension, and `screen.availHeight` leaves 80 pixels at the
+bottom for a taskbar. The default
+screen is 1920x1080; set
 `headless_screen` to a `Viewport` to change it, or to `None` to disable:
 
 ```python
@@ -164,7 +165,15 @@ config = SessionConfig(
 The other headless tell that survives patchright is headless mode itself:
 Chrome stamps `HeadlessChrome` into `navigator.userAgent` and the worker UA
 (including `SharedWorker`, which runs in its own process), and Playwright only
-hides scrollbars and forces hover/pointer media types in headless mode.
+adds switches that hide scrollbars and set desktop hover/pointer media types
+in headless mode. WebSkrap omits the scrollbar switch and Playwright's
+headless `--mute-audio` switch. The pointer setting stays: without it,
+headless Chromium reports no hover or fine pointer.
+
+Set `fake_media_devices=True` in `SessionConfig`, or pass
+`--fake-media-devices` to `fetch`, `search`, or `browser open`, to use Chromium's synthetic
+camera and microphone. Permission prompts remain active. Sites can detect
+the synthetic devices, so the default is off.
 
 ### Virtual display
 

@@ -206,6 +206,7 @@ async def stealth_fetch(
     mask_headless_user_agent: bool = False,
     virtual_display: bool = False,
     gpu: GpuBackend = GpuBackend.AUTO,
+    fake_media_devices: bool = False,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
     max_chars: int = 20_000,
@@ -239,6 +240,7 @@ async def stealth_fetch(
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
             without a GPU, a known headless tell); "mesa" uses Mesa's
             lavapipe (Linux with mesa-vulkan-drivers).
+        fake_media_devices: Provide Chromium's synthetic camera and microphone.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
@@ -265,6 +267,7 @@ async def stealth_fetch(
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
             gpu=gpu,
+            fake_media_devices=fake_media_devices,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
         )
@@ -295,6 +298,7 @@ async def search(
     mask_headless_user_agent: bool = False,
     virtual_display: bool = False,
     gpu: GpuBackend = GpuBackend.AUTO,
+    fake_media_devices: bool = False,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
     decline_cookies: bool = True,
@@ -328,6 +332,7 @@ async def search(
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
             without a GPU, a known headless tell); "mesa" uses Mesa's
             lavapipe (Linux with mesa-vulkan-drivers).
+        fake_media_devices: Provide Chromium's synthetic camera and microphone.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
@@ -347,6 +352,7 @@ async def search(
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
             gpu=gpu,
+            fake_media_devices=fake_media_devices,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
         )
@@ -418,6 +424,7 @@ async def browser_open(
     url: str | None = None,
     session: str = "default",
     webrtc_ip_handling_policy: str | None = None,
+    fake_media_devices: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent headless browser session.
 
@@ -441,6 +448,7 @@ async def browser_open(
             disable_non_proxied_udp to keep the host's LAN and direct public
             addresses out of WebRTC candidates. Fixed at launch; reopening a
             running session with a different policy is refused.
+        fake_media_devices: Supply Chromium's synthetic camera and microphone.
     """
     with _tool_errors():
         if url is not None:
@@ -449,6 +457,7 @@ async def browser_open(
             session,
             headless=True,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+            fake_media_devices=fake_media_devices,
         )
     if url:
         payload.update(
