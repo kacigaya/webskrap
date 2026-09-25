@@ -19,12 +19,12 @@ import time
 from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
-from secrets import SystemRandom
 from typing import Any
 from uuid import uuid4
 
-from playwright.async_api import Browser, BrowserContext, FloatRect, Page
+from playwright.async_api import Browser, BrowserContext, Page
 
+from webskrap import human as humanize
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.display import VirtualDisplay
@@ -45,13 +45,6 @@ from webskrap.search import parse_results, search_url
 from webskrap.urls import validate_url
 
 logger = logging.getLogger(__name__)
-
-# Cursor jitter below is pixel offsets and sleep durations, never a token,
-# identifier, or security decision, so `random` would be adequate. It draws
-# from system entropy anyway: a few dozen values per click cost nothing next to
-# the millisecond sleeps between mouse moves, and it keeps the module free of
-# predictable-RNG calls that a security scanner would have to be told to ignore.
-uniform = SystemRandom().uniform
 
 # Collects every anchor's resolved absolute URL once, in document order, and
 # returns the first ``max`` of them plus the unique total. Deduplicating in the
@@ -407,48 +400,26 @@ class WebSkrapSession:
         if not human:
             await page.click(selector, **click_options)
             return
+        await humanize.click(page, page.locator(selector), description=selector, **click_options)
 
-        locator = page.locator(selector)
-        timeout = click_options.get("timeout")
-        await locator.wait_for(state="visible", timeout=timeout)
-        await locator.scroll_into_view_if_needed(timeout=timeout)
+    async def human_type(self, page: Page, selector: str, text: str, **options: Any) -> None:
+        """Click into ``selector`` and type ``text`` with human keystroke timing.
 
-        if click_options.get("strict") is True and await locator.count() != 1:
-            msg = f"strict mode expected one element for selector: {selector}"
-            raise WebSkrapError(msg, code=ErrorCode.USAGE)
+        The counterpart of :meth:`human_click` for keyboard input; see
+        :func:`webskrap.human.type_text`. ``timeout`` is honored.
 
-        box = await locator.bounding_box(timeout=timeout)
-        if box is None:
-            msg = f"could not find a visible bounding box for selector: {selector}"
-            raise WebSkrapError(msg, code=ErrorCode.USAGE)
-
-        x, y = _human_click_point(box, click_options.get("position"))
-        if click_options.get("trial"):
-            return
-
-        await page.wait_for_timeout(uniform(80, 220))
-
-        start_x = x + uniform(-160, 160)
-        start_y = y + uniform(-90, 90)
-        await page.mouse.move(start_x, start_y, steps=1)
-        end_x = x + uniform(-8, 8)
-        end_y = y + uniform(-6, 6)
-        distance = ((end_x - start_x) ** 2 + (end_y - start_y) ** 2) ** 0.5
-        steps = max(12, min(48, int(distance / 6)))
-        for px, py in _bezier_path((start_x, start_y), (end_x, end_y), steps):
-            await page.mouse.move(px, py, steps=1)
-            await page.wait_for_timeout(uniform(2, 9))
-        await page.wait_for_timeout(uniform(40, 140))
-
-        mouse_options = _mouse_click_options(click_options)
-        modifiers = click_options.get("modifiers") or []
-        for modifier in modifiers:
-            await page.keyboard.down(modifier)
-        try:
-            await page.mouse.click(x, y, **mouse_options)
-        finally:
-            for modifier in reversed(modifiers):
-                await page.keyboard.up(modifier)
+        Raises:
+            WebSkrapError: If the session is closed or the field has no
+                visible bounding box.
+        """
+        self._ensure_open()
+        await humanize.type_text(
+            page,
+            page.locator(selector),
+            text,
+            description=selector,
+            timeout=options.get("timeout"),
+        )
 
     async def close(self) -> None:
         """Close the context, its browser, temp profile and virtual display.
@@ -935,68 +906,6 @@ def _resource_route_handler(policy: ResourcePolicy):
             await route.continue_()
 
     return handle
-
-
-def _human_click_point(
-    box: FloatRect,
-    position: Mapping[str, float] | None,
-) -> tuple[float, float]:
-    if position is not None:
-        return box["x"] + position["x"], box["y"] + position["y"]
-
-    jitter_x = min(box["width"] * 0.2, 6)
-    jitter_y = min(box["height"] * 0.2, 6)
-    return (
-        box["x"] + box["width"] / 2 + uniform(-jitter_x, jitter_x),
-        box["y"] + box["height"] / 2 + uniform(-jitter_y, jitter_y),
-    )
-
-
-def _bezier_path(
-    start: tuple[float, float],
-    end: tuple[float, float],
-    steps: int,
-) -> list[tuple[float, float]]:
-    """Curved, eased cursor path from start to end.
-
-    Mimics HumanCursor's trajectory: a cubic Bezier bent off the straight line
-    by randomized control points, with smoothstep-eased spacing so velocity
-    ramps up then slows near the target instead of moving in a straight,
-    evenly-spaced line (the linear ``mouse.move(steps=n)`` robot tell).
-    """
-    x0, y0 = start
-    x3, y3 = end
-    dx, dy = x3 - x0, y3 - y0
-    distance = max(1.0, (dx * dx + dy * dy) ** 0.5)
-    nx, ny = -dy / distance, dx / distance  # unit normal to the straight line
-    bend = distance * uniform(0.08, 0.22) * (1 if uniform(0, 1) < 0.5 else -1)
-    cx1 = x0 + dx / 3 + nx * bend * uniform(0.6, 1.0)
-    cy1 = y0 + dy / 3 + ny * bend * uniform(0.6, 1.0)
-    cx2 = x0 + dx * 2 / 3 + nx * bend * uniform(0.6, 1.0)
-    cy2 = y0 + dy * 2 / 3 + ny * bend * uniform(0.6, 1.0)
-
-    points: list[tuple[float, float]] = []
-    for i in range(1, steps + 1):
-        t = i / steps
-        t = t * t * (3 - 2 * t)  # smoothstep -> non-uniform speed
-        mt = 1 - t
-        bx = mt**3 * x0 + 3 * mt**2 * t * cx1 + 3 * mt * t**2 * cx2 + t**3 * x3
-        by = mt**3 * y0 + 3 * mt**2 * t * cy1 + 3 * mt * t**2 * cy2 + t**3 * y3
-        taper = mt  # jitter fades to zero at the target
-        points.append((bx + uniform(-1.2, 1.2) * taper, by + uniform(-1.2, 1.2) * taper))
-    points[-1] = (x3, y3)
-    return points
-
-
-def _mouse_click_options(click_options: dict[str, Any]) -> dict[str, Any]:
-    mouse_options: dict[str, Any] = {}
-    if "button" in click_options:
-        mouse_options["button"] = click_options["button"]
-    if "click_count" in click_options:
-        mouse_options["click_count"] = click_options["click_count"]
-    if "delay" in click_options:
-        mouse_options["delay"] = click_options["delay"]
-    return mouse_options
 
 
 async def _maybe_screenshot(page: Page, screenshot: bool | str | Path) -> Path | None:

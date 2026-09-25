@@ -21,6 +21,8 @@ from contextlib import suppress
 from time import monotonic
 from typing import Any
 
+from webskrap import human as humanize
+
 # Reject/deny buttons of common consent management platforms.
 CMP_REJECT_SELECTORS = (
     "#onetrust-reject-all-handler",
@@ -204,7 +206,7 @@ async def decline_cookies(page: Any, *, timeout_ms: float = 2_000) -> str | None
 
     for attempt in range(POLL_ATTEMPTS):
         for frame in page.frames:
-            strategy = await _decline_in_frame(frame, deadline)
+            strategy = await _decline_in_frame(page, frame, deadline)
             if strategy is not None:
                 with suppress(Exception):  # settle wait is best-effort
                     await page.wait_for_timeout(SETTLE_MS)
@@ -233,7 +235,7 @@ def _is_consent_frame(frame: Any) -> bool:
     return bool(CONSENT_FRAME_URL_PATTERN.search(getattr(frame, "url", "") or ""))
 
 
-async def _decline_in_frame(frame: Any, deadline: float) -> str | None:
+async def _decline_in_frame(page: Any, frame: Any, deadline: float) -> str | None:
     text_scope = frame if _is_consent_frame(frame) else frame.locator(CONSENT_CONTAINER_CSS)
     candidates = (
         ("cmp", frame.locator(CMP_REJECT_CSS)),
@@ -252,12 +254,14 @@ async def _decline_in_frame(frame: Any, deadline: float) -> str | None:
             try:
                 if not await element.is_visible():
                     continue
-                # Playwright dispatches real browser input events here, not a
-                # JavaScript el.click(), so this is not a synthesized-event
-                # tell. Deliberately not human_click: that takes a Page and
-                # notices live in frames, and consent widgets do not score
-                # cursor trajectory.
-                await element.click(timeout=click_timeout)
+                # The banner is usually the first thing clicked on a page, and
+                # the page's own bot script sees every mouse event, so a
+                # teleported 2 ms click here is the one that gets scored. The
+                # humanized click moves the page's mouse, which reaches into
+                # frames, and refuses a covered element.
+                await humanize.click(
+                    page, element, description="cookie notice reject control", timeout=click_timeout
+                )
             # S112/BLE001: one unclickable candidate (covered, detached, or the
             # page already navigating) must not abandon the remaining ones, and
             # the library logs nothing by design.

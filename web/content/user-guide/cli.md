@@ -221,6 +221,12 @@ ref like `[ref=e15]`. Interaction commands (`click`, `dblclick`, `hover`,
 Playwright selector. Refs describe the current page, so take a fresh
 `snapshot` after the page changes.
 
+`click` and `dblclick` scroll with the mouse wheel, move the cursor along a
+curved path and hold the button for a human 60-140 ms; `type` clicks into the
+field and types with human keystroke timing. Both refuse a target covered by
+another element. They are slower than Playwright's direct input on purpose (see
+[Humanizer](/docs/user-guide/humanizer)); `fill` still sets a value at once.
+
 Navigation uses `goto`, `back`, `forward`, and `reload`; `press` sends a key
 to the page, and `eval` runs JavaScript and prints the JSON result. All
 commands support `--format json` for scripting and agents, and fail with exit

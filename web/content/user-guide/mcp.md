@@ -147,7 +147,9 @@ A typical flow:
 2. `browser_snapshot`, where each element carries a ref like `[ref=e15]`.
 3. `browser_interact` with `action: "click"` and `target: "e15"` (or any
    Playwright selector). `fill` and `type` take one entry in `values`;
-   `select` takes one or more.
+   `select` takes one or more. `click`, `dblclick` and `type` use human mouse
+   and keystroke timing, so they take noticeably longer than `fill`; see
+   [Humanizer](/docs/user-guide/humanizer).
 4. `browser_eval` or `browser_screenshot` to read results.
 5. `browser_close` when done (`delete_data: true` to drop the profile).
 

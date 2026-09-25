@@ -106,12 +106,14 @@ asyncio.run(main())
 ## Human-like clicks
 
 Use `human_click` for manual interactions that should wait for the element, scroll it into
-view, pause briefly, move the mouse, and then click.
+view with the mouse wheel, pause briefly, move the mouse, and then click with a human
+button hold. `human_type` types into a field with human keystroke timing.
 
 ```python
 page = await session.context.new_page()
 await page.goto("https://example.com", wait_until="domcontentloaded")
 await session.human_click(page, "label[for='radio1']")
+await session.human_type(page, "input[name='q']", "running shoes")
 ```
 
 ## Profiles and resource policy

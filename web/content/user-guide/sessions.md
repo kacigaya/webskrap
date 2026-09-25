@@ -130,6 +130,13 @@ await session.human_click(
 )
 ```
 
+For keyboard input, `human_type` clicks into a field and types one key at a
+time with human timing:
+
+```python
+await session.human_type(page, "input[name='q']", "running shoes")
+```
+
 See the [Humanizer](/docs/user-guide/humanizer) guide for the focused behavior
 reference and safety boundaries.
 

@@ -35,6 +35,7 @@ from patchright.async_api import Locator, Page
 from patchright.async_api import async_playwright as patchright_playwright
 from playwright.async_api import async_playwright
 
+from webskrap import human as humanize
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
     ElementState,
@@ -768,10 +769,27 @@ def element_arguments(action: str, values: list[str]) -> list[Any]:
     return [values]
 
 
+#: Actions driven through :mod:`webskrap.human` instead of the locator
+#: method, with extra mouse options: ``click`` and ``dblclick``.
+HUMAN_CLICK_ACTIONS: dict[str, dict[str, int]] = {"click": {}, "dblclick": {"click_count": 2}}
+
+
 async def element_action(page: Page, action: str, target: str, values: list[str]) -> None:
-    """Run an :data:`ELEMENT_ACTIONS` interaction against ``target``."""
+    """Run an :data:`ELEMENT_ACTIONS` interaction against ``target``.
+
+    Clicks go along a human cursor path with a human button hold, refusing a
+    covered element (see :func:`webskrap.human.click`). ``type``
+    clicks into the field and types with human keystroke timing (see
+    :func:`webskrap.human.type_text`); ``fill`` still sets the value at once.
+    """
     arguments = element_arguments(action, values)
     locator = await resolve_locator(page, target)
+    if action in HUMAN_CLICK_ACTIONS:
+        await humanize.click(page, locator, description=target, **HUMAN_CLICK_ACTIONS[action])
+        return
+    if action == "type":
+        await humanize.type_text(page, locator, arguments[0], description=target)
+        return
     await getattr(locator, ELEMENT_ACTIONS[action][0])(*arguments)
 
 

@@ -9,13 +9,13 @@ from webskrap.client import (
     WebSkrapClient,
     WebSkrapError,
     WebSkrapSession,
-    _bezier_path,
     _resource_route_handler,
     browser_doctor,
     lavapipe_available,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
+from webskrap.human import bezier_path, scroll_into_view
 from webskrap.models import ResourcePolicy, SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
 
@@ -44,12 +44,16 @@ class _Mouse:
     def __init__(self) -> None:
         self.moves: list[tuple[float, float, int | None]] = []
         self.clicks: list[tuple[float, float, dict[str, object]]] = []
+        self.wheels: list[tuple[float, float]] = []
 
     async def move(self, x: float, y: float, *, steps: int | None = None) -> None:
         self.moves.append((x, y, steps))
 
     async def click(self, x: float, y: float, **options: object) -> None:
         self.clicks.append((x, y, options))
+
+    async def wheel(self, delta_x: float, delta_y: float) -> None:
+        self.wheels.append((delta_x, delta_y))
 
 
 class _Keyboard:
@@ -64,9 +68,13 @@ class _Keyboard:
 
 
 class _Locator:
-    def __init__(self, box: dict[str, float] | None = None, count: int = 1) -> None:
+    def __init__(
+        self, box: dict[str, float] | None = None, count: int = 1, *, receives_click: bool = True
+    ) -> None:
         self.box = box or {"x": 10, "y": 20, "width": 100, "height": 40}
         self.element_count = count
+        self.receives_click = receives_click
+        self.hit_tests: list[object] = []
         self.waits: list[dict[str, object]] = []
         self.scrolled: list[dict[str, object]] = []
 
@@ -81,6 +89,10 @@ class _Locator:
 
     async def count(self) -> int:
         return self.element_count
+
+    async def evaluate(self, _script: str, arg: object) -> bool:
+        self.hit_tests.append(arg)
+        return self.receives_click
 
 
 class _Page:
@@ -103,8 +115,11 @@ class _Page:
     async def wait_for_timeout(self, timeout: float) -> None:
         self.timeouts.append(timeout)
 
-    async def evaluate(self, script: str) -> None:
+    async def evaluate(self, script: str) -> object:
         self.evaluations.append(script)
+        if "innerHeight" in script:
+            return [1280, 720]
+        return None
 
 
 class _Response:
@@ -435,7 +450,7 @@ async def test_human_click_false_delegates_to_page_click() -> None:
 
 @pytest.mark.asyncio
 async def test_human_click_waits_moves_and_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("webskrap.client.uniform", lambda _start, _end: 0)
+    monkeypatch.setattr("webskrap.human.uniform", lambda _start, _end: 0)
     locator = _Locator()
     page = _Page(locator)
 
@@ -461,15 +476,19 @@ async def test_human_click_waits_moves_and_clicks(monkeypatch: pytest.MonkeyPatc
         move[2] == 1 and abs(move[0] - 30) < 1e-6 and abs(move[1] - 30) < 1e-6
         for move in page.mouse.moves
     )
-    # one settle wait + one wait per curve step + one final wait.
-    assert page.timeouts == [0] * (1 + 12 + 1)
+    # The box starts 20px from the top, inside the view margin, but aiming
+    # it lower needs less than one wheel notch, so the wheel stays still and
+    # Playwright's scroll finishes (one pause); then one settle wait, one
+    # wait per curve step and one final wait.
+    assert page.mouse.wheels == []
+    assert page.timeouts == [0] * (1 + 1 + 12 + 1)
     assert page.mouse.clicks == [(30, 30, {"button": "left", "click_count": 1, "delay": 25})]
     assert page.keyboard.events == [("down", "Shift"), ("up", "Shift")]
 
 
 def test_bezier_path_curves_and_lands_on_target() -> None:
     start, end = (0.0, 0.0), (200.0, 100.0)
-    path = _bezier_path(start, end, 24)
+    path = bezier_path(start, end, 24)
 
     assert len(path) == 24
     assert path[-1] == end  # exact landing
@@ -873,3 +892,146 @@ async def test_mesa_gpu_without_lavapipe_fails_before_launch(
     assert excinfo.value.code is ErrorCode.BROWSER_LAUNCH
     assert chromium.options == {}  # the browser was never launched
     assert displays == []  # nor the display
+
+
+@pytest.mark.asyncio
+async def test_human_click_holds_the_button_for_a_human_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Playwright's own click releases after ~2 ms; unset, the hold is drawn
+    # from 60-140 ms. uniform() returning its lower bound pins it to 60.
+    monkeypatch.setattr("webskrap.human.uniform", lambda start, _end: start)
+    page = _Page()
+
+    await _session().human_click(page, "button")  # type: ignore[arg-type]
+
+    assert page.mouse.clicks[0][2] == {"delay": 60}
+
+
+class _ScrollingPage(_Page):
+    """A page whose wheel moves the locator's box, like a scrolling document."""
+
+    def __init__(self, box_y: float, scrolls: bool = True) -> None:
+        super().__init__(_Locator(box={"x": 100, "y": box_y, "width": 80, "height": 30}))
+        self._scrolls = scrolls
+        page = self
+
+        async def wheel(delta_x: float, delta_y: float) -> None:
+            page.mouse.wheels.append((delta_x, delta_y))
+            if page._scrolls:
+                page._locator.box["y"] -= delta_y
+
+        self.mouse.wheel = wheel  # type: ignore[method-assign]
+
+
+@pytest.mark.asyncio
+async def test_scroll_wheels_a_far_element_into_view() -> None:
+    page = _ScrollingPage(box_y=2400)
+
+    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
+
+    deltas = [dy for _dx, dy in page.mouse.wheels]
+    assert deltas and all(0 < dy <= 120 for dy in deltas)  # notch-sized, downward
+    assert 40 <= page._locator.box["y"] <= 720 - 40 - 30
+    assert page._locator.scrolled == []  # no programmatic jump needed
+
+
+@pytest.mark.asyncio
+async def test_scroll_wheels_up_to_an_element_above() -> None:
+    page = _ScrollingPage(box_y=-900)
+
+    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
+
+    assert all(dy < 0 for _dx, dy in page.mouse.wheels)
+    assert page._locator.scrolled == []
+
+
+@pytest.mark.asyncio
+async def test_scroll_leaves_a_visible_element_alone() -> None:
+    page = _ScrollingPage(box_y=300)
+
+    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
+
+    assert page.mouse.wheels == []
+    assert page._locator.scrolled == []
+
+
+@pytest.mark.asyncio
+async def test_scroll_falls_back_when_the_wheel_moves_nothing() -> None:
+    # e.g. the element sits in an inner scroll container the cursor is not over.
+    page = _ScrollingPage(box_y=2400, scrolls=False)
+
+    await scroll_into_view(page, page._locator, timeout=500)  # type: ignore[arg-type]
+
+    assert page.mouse.wheels  # it tried the wheel first
+    assert page._locator.scrolled == [{"timeout": 500}]
+
+
+class _TypingKeyboard(_Keyboard):
+    def __init__(self) -> None:
+        super().__init__()
+        self.typed: list[tuple[str, float]] = []
+
+    async def type(self, text: str, *, delay: float) -> None:
+        self.typed.append((text, delay))
+
+
+@pytest.mark.asyncio
+async def test_human_type_clicks_then_types_each_key_with_human_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # uniform() returning its upper bound: hold 90 ms, and the "long pause"
+    # draw (1.0) never beats 1/12, so every gap is the 160 ms upper bound.
+    monkeypatch.setattr("webskrap.human.uniform", lambda _start, end: end)
+    page = _Page(_Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}))
+    page.keyboard = _TypingKeyboard()
+
+    await _session().human_type(page, "input[name=q]", "hé!")  # type: ignore[arg-type]
+
+    assert len(page.mouse.clicks) == 1  # focused with a humanized click
+    assert page.keyboard.typed == [("h", 90), ("é", 90), ("!", 90)]
+    assert page.timeouts[-3:] == [160, 160, 160]
+
+
+@pytest.mark.asyncio
+async def test_human_type_pauses_now_and_then(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A draw of 0 lands under 1/12, so each gap is a long 250-600 ms pause.
+    monkeypatch.setattr("webskrap.human.uniform", lambda start, _end: start)
+    page = _Page(_Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}))
+    page.keyboard = _TypingKeyboard()
+
+    await _session().human_type(page, "input", "ab")  # type: ignore[arg-type]
+
+    assert page.timeouts[-2:] == [250, 250]
+
+
+@pytest.mark.asyncio
+async def test_human_type_on_a_closed_session_fails() -> None:
+    session = _session()
+    session._closed = True
+
+    with pytest.raises(WebSkrapError, match="is closed"):
+        await session.human_type(_Page(), "input", "x")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_human_click_refuses_a_covered_element() -> None:
+    locator = _Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}, receives_click=False)
+    page = _Page(locator)
+
+    with pytest.raises(WebSkrapError, match="covers the click point"):
+        await _session().human_click(page, "#go")  # type: ignore[arg-type]
+
+    # Checked before any pointer event, so the page saw nothing.
+    assert page.mouse.moves == []
+    assert page.mouse.clicks == []
+
+
+@pytest.mark.asyncio
+async def test_human_click_hit_tests_the_exact_click_point() -> None:
+    locator = _Locator(box={"x": 10, "y": 200, "width": 100, "height": 30})
+    page = _Page(locator)
+
+    await _session().human_click(page, "#go", position={"x": 7, "y": 5})  # type: ignore[arg-type]
+
+    assert locator.hit_tests == [[7, 5]]
