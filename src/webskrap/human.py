@@ -106,6 +106,33 @@ async def click(
             await page.keyboard.up(modifier)
 
 
+async def type_text(
+    page: AnyPage,
+    locator: AnyLocator,
+    text: str,
+    *,
+    description: str,
+    timeout: float | None = None,
+) -> None:
+    """Click into ``locator`` and type ``text`` one key at a time, like a person.
+
+    Playwright's ``fill`` sets the value with no key events, and
+    ``press_sequentially`` types at a constant rate; keystroke timing is
+    scored on both the hold time of each key and the gap between keys. Each
+    character is held for 30-90 ms, keys are 40-160 ms apart, and roughly one
+    key in twelve is followed by a longer 250-600 ms pause. Text is appended
+    to whatever the field holds, as with ``press_sequentially``.
+
+    Raises:
+        WebSkrapError: If the field has no visible bounding box.
+    """
+    await click(page, locator, description=description, timeout=timeout)
+    for character in text:
+        await page.keyboard.type(character, delay=uniform(30, 90))
+        pause = uniform(250, 600) if uniform(0, 1) < 1 / 12 else uniform(40, 160)
+        await page.wait_for_timeout(pause)
+
+
 #: Viewport margin, in CSS pixels, an element must clear to count as in view.
 VIEW_MARGIN = 40
 #: Wheel batches before giving up and letting Playwright scroll.

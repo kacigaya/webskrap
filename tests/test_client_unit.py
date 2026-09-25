@@ -957,3 +957,50 @@ async def test_scroll_falls_back_when_the_wheel_moves_nothing() -> None:
 
     assert page.mouse.wheels  # it tried the wheel first
     assert page._locator.scrolled == [{"timeout": 500}]
+
+
+class _TypingKeyboard(_Keyboard):
+    def __init__(self) -> None:
+        super().__init__()
+        self.typed: list[tuple[str, float]] = []
+
+    async def type(self, text: str, *, delay: float) -> None:
+        self.typed.append((text, delay))
+
+
+@pytest.mark.asyncio
+async def test_human_type_clicks_then_types_each_key_with_human_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # uniform() returning its upper bound: hold 90 ms, and the "long pause"
+    # draw (1.0) never beats 1/12, so every gap is the 160 ms upper bound.
+    monkeypatch.setattr("webskrap.human.uniform", lambda _start, end: end)
+    page = _Page(_Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}))
+    page.keyboard = _TypingKeyboard()
+
+    await _session().human_type(page, "input[name=q]", "hé!")  # type: ignore[arg-type]
+
+    assert len(page.mouse.clicks) == 1  # focused with a humanized click
+    assert page.keyboard.typed == [("h", 90), ("é", 90), ("!", 90)]
+    assert page.timeouts[-3:] == [160, 160, 160]
+
+
+@pytest.mark.asyncio
+async def test_human_type_pauses_now_and_then(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A draw of 0 lands under 1/12, so each gap is a long 250-600 ms pause.
+    monkeypatch.setattr("webskrap.human.uniform", lambda start, _end: start)
+    page = _Page(_Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}))
+    page.keyboard = _TypingKeyboard()
+
+    await _session().human_type(page, "input", "ab")  # type: ignore[arg-type]
+
+    assert page.timeouts[-2:] == [250, 250]
+
+
+@pytest.mark.asyncio
+async def test_human_type_on_a_closed_session_fails() -> None:
+    session = _session()
+    session._closed = True
+
+    with pytest.raises(WebSkrapError, match="is closed"):
+        await session.human_type(_Page(), "input", "x")  # type: ignore[arg-type]

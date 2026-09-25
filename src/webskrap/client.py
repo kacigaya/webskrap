@@ -402,6 +402,25 @@ class WebSkrapSession:
             return
         await humanize.click(page, page.locator(selector), description=selector, **click_options)
 
+    async def human_type(self, page: Page, selector: str, text: str, **options: Any) -> None:
+        """Click into ``selector`` and type ``text`` with human keystroke timing.
+
+        The counterpart of :meth:`human_click` for keyboard input; see
+        :func:`webskrap.human.type_text`. ``timeout`` is honored.
+
+        Raises:
+            WebSkrapError: If the session is closed or the field has no
+                visible bounding box.
+        """
+        self._ensure_open()
+        await humanize.type_text(
+            page,
+            page.locator(selector),
+            text,
+            description=selector,
+            timeout=options.get("timeout"),
+        )
+
     async def close(self) -> None:
         """Close the context, its browser, temp profile and virtual display.
 
