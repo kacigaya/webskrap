@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-09-25
+
 ### Added
 
 - `SessionConfig(fake_media_devices=True)` and `--fake-media-devices` on fetch,
@@ -552,7 +554,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.9.0...HEAD
+[2.9.0]: https://github.com/kacigaya/webskrap/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/kacigaya/webskrap/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/kacigaya/webskrap/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/kacigaya/webskrap/compare/v2.5.0...v2.6.0
