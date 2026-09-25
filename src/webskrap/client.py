@@ -130,6 +130,11 @@ async def browser_doctor(
                 "message": f"{driver.title()} headless {channel_name} is ready.",
                 "driver": driver,
                 "channel": channel_name,
+                "browser_identity": {
+                    "chrome": "Chrome",
+                    "msedge": "Edge",
+                    "chromium": "Chromium",
+                }.get(channel_name, channel_name),
                 "executable_path": executable_path,
             }
     return {
@@ -137,6 +142,7 @@ async def browser_doctor(
         "message": f"{driver.title()} Chromium did not launch: {failure}",
         "driver": driver,
         "channel": None,
+        "browser_identity": None,
         "executable_path": executable_path,
         "hint": RECOVERY_HINTS[
             ErrorCode.SANDBOX

@@ -296,6 +296,18 @@ def test_doctor_json_success(monkeypatch: Any) -> None:
     assert json.loads(result.output) == {"ok": True, "message": "ready"}
 
 
+def test_doctor_human_shows_browser_identity(monkeypatch: Any) -> None:
+    async def fake_doctor() -> dict[str, object]:
+        return {"ok": True, "message": "ready", "browser_identity": "Edge"}
+
+    monkeypatch.setattr(cli, "_doctor", fake_doctor)
+
+    result = runner.invoke(cli.app, ["doctor"])
+
+    assert result.exit_code == 0, result.output
+    assert "Browser: Edge" in result.output
+
+
 def test_doctor_json_failure(monkeypatch: Any) -> None:
     async def fake_doctor() -> dict[str, object]:
         return {"ok": False, "message": "broken", "hint": "fix it"}
