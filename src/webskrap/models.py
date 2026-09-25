@@ -434,6 +434,14 @@ class SessionConfig(BaseModel):
             # this is explicitly True, so leaving it out silently unsandboxed
             # every one-shot launch.
             options["chromium_sandbox"] = self.chromium_sandbox
+            if options["headless"]:
+                # Playwright adds these only in headless mode. They make a
+                # page observe missing scrollbars and forced pointer media.
+                options["ignore_default_args"] = [
+                    "--hide-scrollbars",
+                    "--mute-audio",
+                    "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+                ]
         channel = self.channel
         if channel is None and self.browser == "chromium" and options["headless"]:
             # With no channel, Playwright runs headless Chromium on the old
