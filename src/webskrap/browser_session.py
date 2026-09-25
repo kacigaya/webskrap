@@ -36,7 +36,15 @@ from patchright.async_api import async_playwright as patchright_playwright
 from playwright.async_api import async_playwright
 
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import ElementState, LoadState, SessionConfig, WaitUntil, text_window
+from webskrap.models import (
+    ElementState,
+    LoadState,
+    ProxyConfig,
+    SessionConfig,
+    WaitUntil,
+    WebRtcIPHandlingPolicy,
+    text_window,
+)
 from webskrap.paths import secure_directory
 from webskrap.urls import validate_url
 
@@ -305,19 +313,68 @@ def signal_group(pid: int, sig: signal.Signals) -> None:
             os.kill(pid, sig)
 
 
-def stealth_launch_args(*, headless: bool, chromium_sandbox: bool) -> list[str]:
+def stealth_launch_args(
+    *,
+    headless: bool,
+    chromium_sandbox: bool,
+    proxy_server: str | None = None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
+) -> list[str]:
     """Return the browser flags a one-shot fetch would get, for a detached launch.
 
     Built from :class:`~webskrap.models.SessionConfig` so both paths share one
     definition: ``--disable-blink-features=AutomationControlled`` (otherwise a
     remote-debugging port sets ``navigator.webdriver``), the headless virtual
-    screen and window (otherwise 800x600 at 10,10), and ``--no-sandbox`` only
-    when the sandbox is off. ``driver="playwright"`` is deliberate: Patchright
-    injects the automation flag itself when it launches, but here WebSkrap
-    spawns the process, so the flag has to be on the command line.
+    screen and window (otherwise 800x600 at 10,10), ``--no-sandbox`` only
+    when the sandbox is off, and the WebRTC policy, which defaults to
+    ``disable_non_proxied_udp`` behind a proxy. ``driver="playwright"`` is
+    deliberate: Patchright injects the automation flag itself when it
+    launches, but here WebSkrap spawns the process, so the flag has to be on
+    the command line. The proxy itself is a Playwright context option there,
+    so it is added as ``--proxy-server`` here.
+
+    Raises:
+        WebSkrapError: If ``proxy_server`` is not a proxy URL WebSkrap accepts
+            or embeds credentials (see :func:`persistent_proxy_server`).
     """
-    config = SessionConfig(headless=headless, chromium_sandbox=chromium_sandbox)
-    return list(config.launch_options().get("args", []))
+    proxy = ProxyConfig(server=persistent_proxy_server(proxy_server)) if proxy_server else None
+    config = SessionConfig(
+        headless=headless,
+        chromium_sandbox=chromium_sandbox,
+        proxy=proxy,
+        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+    )
+    args = list(config.launch_options().get("args", []))
+    if proxy is not None:
+        args.append(f"--proxy-server={proxy.server}")
+    return args
+
+
+def persistent_proxy_server(server: str) -> str:
+    """Validate a proxy URL for a persistent session and return it.
+
+    Credentials are refused: Chromium ignores them in ``--proxy-server``, and
+    a session whose every action attaches over CDP briefly and disconnects
+    has nobody listening when the proxy asks for authentication. Use an
+    unauthenticated or IP-allowlisted proxy, or a one-shot fetch, whose
+    ``ProxyConfig`` handles credentials.
+
+    Raises:
+        WebSkrapError: If ``server`` has no http/https/socks4/socks5 scheme or
+            embeds credentials (``usage``).
+    """
+    try:
+        ProxyConfig(server=server)
+    except ValueError as exc:
+        msg = "proxy server must start with http://, https://, socks4://, or socks5://"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE) from exc
+    if "@" in server.split("://", 1)[1].split("/", 1)[0]:
+        msg = (
+            "persistent sessions cannot authenticate to a proxy: pass a proxy URL "
+            "without user:password@"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    return server
 
 
 def launch_browser(
@@ -326,6 +383,8 @@ def launch_browser(
     executable: str,
     headless: bool,
     chromium_sandbox: bool = True,
+    proxy_server: str | None = None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
 ) -> tuple[int, int]:
     """Start a detached Chromium and return its (pid, CDP port).
 
@@ -337,6 +396,9 @@ def launch_browser(
             ``--no-sandbox``, which lets a compromised renderer processing a
             hostile page reach the rest of the machine. Only do that where the
             sandbox genuinely cannot start.
+        proxy_server: Unauthenticated proxy URL for all browser traffic.
+        webrtc_ip_handling_policy: Chromium WebRTC ICE policy; defaults to
+            ``disable_non_proxied_udp`` when ``proxy_server`` is set.
 
     Raises:
         WebSkrapError: If the browser exits during startup or never reports a
@@ -358,7 +420,12 @@ def launch_browser(
         # and tracks restores internally, but that tracking is unavailable when
         # attaching over CDP, so trade bfcache for deterministic load events.
         "--disable-features=BackForwardCache",
-        *stealth_launch_args(headless=headless, chromium_sandbox=chromium_sandbox),
+        *stealth_launch_args(
+            headless=headless,
+            chromium_sandbox=chromium_sandbox,
+            proxy_server=proxy_server,
+            webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+        ),
     ]
     if headless:
         command.append("--headless=new")

@@ -525,3 +525,65 @@ async def test_evaluate_runs_in_the_page_world() -> None:
 
     assert result == "ok"
     assert calls == [("window.app", {"isolated_context": False})]
+
+
+def test_launch_routes_through_the_proxy_and_blocks_webrtc_leaks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True, proxy_server="socks5://proxy.test:1080")
+
+    command = commands[0]
+    assert "--proxy-server=socks5://proxy.test:1080" in command
+    assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in command
+    assert "--force-webrtc-ip-handling-policy" in command
+
+
+def test_launch_without_proxy_leaves_webrtc_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True)
+
+    assert not any(a.startswith(("--proxy-server", "--webrtc")) for a in commands[0])
+
+
+def test_launch_explicit_webrtc_policy_wins(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(
+        tmp_path,
+        headless=True,
+        proxy_server="http://proxy.test:8080",
+        webrtc_ip_handling_policy="default_public_interface_only",
+    )
+
+    assert "--webrtc-ip-handling-policy=default_public_interface_only" in commands[0]
+
+
+@pytest.mark.parametrize(
+    ("server", "message"),
+    [
+        pytest.param("proxy.test:8080", "must start with", id="no-scheme"),
+        pytest.param("ftp://proxy.test", "must start with", id="bad-scheme"),
+        pytest.param("http://user:secret@proxy.test:8080", "cannot authenticate", id="credentials"),
+        pytest.param("socks5://user@proxy.test:1080", "cannot authenticate", id="username-only"),
+    ],
+)
+def test_persistent_proxy_is_validated(server: str, message: str) -> None:
+    with pytest.raises(WebSkrapError, match=message) as excinfo:
+        browser_session.persistent_proxy_server(server)
+
+    assert excinfo.value.code is ErrorCode.USAGE
+    # A refused credential never reaches the error text.
+    assert "secret" not in str(excinfo.value)
+
+
+def test_persistent_proxy_accepts_paths_with_at_signs_outside_the_authority() -> None:
+    server = "http://proxy.test:8080/p@th"
+
+    assert browser_session.persistent_proxy_server(server) == server
