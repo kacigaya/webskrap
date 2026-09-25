@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ def _stub_probe(monkeypatch: Any, **overrides: Any) -> None:
 
 def test_diagnose_keeps_the_launch_probe_and_adds_context(monkeypatch: Any, tmp_path: Path) -> None:
     _stub_probe(monkeypatch)
+    monkeypatch.setattr(diagnostics, "font_count", lambda: 17)
     monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
     monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(tmp_path / "profiles"))
@@ -38,6 +40,7 @@ def test_diagnose_keeps_the_launch_probe_and_adds_context(monkeypatch: Any, tmp_
     assert report["versions"]["webskrap"]
     assert report["versions"]["python"]
     assert report["cpu_architecture"] == diagnostics.platform.machine()
+    assert report["font_count"] == 17
     assert report["paths"] == {
         "sessions_root": str(tmp_path / "sessions"),
         "output_root": str(tmp_path / "out"),
@@ -88,6 +91,26 @@ def test_package_version_returns_none_for_an_absent_distribution() -> None:
     assert diagnostics.package_version("webskrap-does-not-exist") is None
 
 
+def test_font_count_deduplicates_primary_families(monkeypatch: Any) -> None:
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _command: "/usr/bin/fc-list")
+    def fake_run(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=["fc-list"],
+            returncode=0,
+            stdout="Liberation Sans,Liberation Sans Regular\nLiberation Sans\nNoto Serif\n",
+        )
+
+    monkeypatch.setattr(diagnostics.subprocess, "run", fake_run)
+
+    assert diagnostics.font_count() == 2
+
+
+def test_font_count_reports_missing_fontconfig(monkeypatch: Any) -> None:
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _command: None)
+
+    assert diagnostics.font_count() is None
+
+
 @pytest.mark.browser
 def test_diagnose_probes_a_real_browser(monkeypatch: Any, sandbox_supported: bool) -> None:
     # The probe launches with the same sandbox setting fetches use, so a host
@@ -98,7 +121,7 @@ def test_diagnose_probes_a_real_browser(monkeypatch: Any, sandbox_supported: boo
     report = asyncio.run(diagnostics.diagnose())
 
     assert report["ok"] is True
-    assert report["channel"] in ("chrome", "chromium")
+    assert report["channel"] in ("chrome", "msedge", "chromium")
     assert Path(str(report["executable_path"])).exists()
 
 
