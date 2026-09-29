@@ -100,11 +100,12 @@ Working in a session
   next call, not another snapshot.
 
 Cost
-- max_chars defaults to 20000 characters, roughly 5k tokens. Start lower and page with
+- max_chars defaults to 8000 characters. Start lower and page with
   the returned next_text_offset / next_snapshot_offset.
 - resource_policy="lite" skips images, fonts and media.
 - text_only stays True unless you actually need markup.
-- Lower browser_snapshot's depth before raising its max_chars.
+- browser_snapshot defaults to depth=6; use depth=null for the full tree.
+- Read session text with browser_text instead of building an accessibility tree.
 - In browser_eval, return the value you want, not document.body.innerHTML.
 
 Failures
@@ -133,7 +134,7 @@ async def fetch(
     wait_until: str = "networkidle",
     resource_policy: str = "all",
     timeout_ms: float = 60_000,
-    max_chars: int = 20_000,
+    max_chars: int = 8_000,
     offset: int = 0,
     text_only: bool = True,
     include_links: bool = False,
@@ -209,7 +210,7 @@ async def stealth_fetch(
     fake_media_devices: bool = False,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
-    max_chars: int = 20_000,
+    max_chars: int = 8_000,
     offset: int = 0,
     text_only: bool = True,
     include_links: bool = False,
@@ -498,8 +499,8 @@ async def browser_goto(
 @mcp.tool(title="Snapshot the page", annotations=_hints(read_only=True))
 async def browser_snapshot(
     session: str = "default",
-    depth: int | None = None,
-    max_chars: int = 20_000,
+    depth: int | None = 6,
+    max_chars: int = 8_000,
     offset: int = 0,
 ) -> dict[str, Any]:
     """Return an aria snapshot of the current page with eN element refs.
@@ -510,7 +511,8 @@ async def browser_snapshot(
 
     Args:
         session: Browser session name.
-        depth: Maximum snapshot tree depth. Lower it before raising max_chars:
+        depth: Maximum snapshot tree depth (default 6; None for unlimited). Lower it
+            before raising max_chars:
             a shallow tree of the whole page is usually more useful than the
             first characters of a deep one.
         max_chars: Maximum characters of snapshot text to return.
@@ -523,6 +525,30 @@ async def browser_snapshot(
         browser_session.DEFAULT_ACTION_TIMEOUT_MS,
     )
     return browser_session.shape_snapshot(result, max_chars, offset)
+
+
+@mcp.tool(title="Read page text", annotations=_hints(read_only=True))
+async def browser_text(
+    session: str = "default",
+    max_chars: int = 8_000,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Read visible body text without building an accessibility snapshot.
+
+    The text window is selected in the browser so only the requested characters
+    cross the browser connection. Each call reads the current DOM; offsets are
+    stable only while the page text stays unchanged.
+
+    Args:
+        session: Browser session name.
+        max_chars: Maximum characters to return (default 8000).
+        offset: Character index to start at; pass back next_text_offset for more.
+    """
+    return await _browser_action(
+        session,
+        lambda page: browser_session.read_text(page, max_chars=max_chars, offset=offset),
+        browser_session.DEFAULT_ACTION_TIMEOUT_MS,
+    )
 
 
 @mcp.tool(
@@ -666,7 +692,7 @@ async def browser_eval(
     expression: str,
     session: str = "default",
     timeout_ms: float = 10_000,
-    max_chars: int = 20_000,
+    max_chars: int = 8_000,
 ) -> dict[str, Any]:
     """Evaluate JavaScript on the session's current page.
 

@@ -43,6 +43,7 @@ One page per session, no tabs, headless only over MCP.
 | `search` | `query`, `engine`, `url`, `final_url`, `status`, `ok`, `hits` (`title`, `url`, `snippet`), `hits_total`, `hits_truncated`, `elapsed_ms`, `cookie_notice_declined` |
 | `browser_open` | `session`, `pid`, `port`, `reused`, `chromium_sandbox` |
 | `browser_goto` | `status`, `url`, `title` |
+| `browser_text` | `url`, `title`, `text`, `text_length`, `text_offset`, `text_truncated`, `next_text_offset` |
 | `browser_snapshot` | `url`, `title`, `snapshot`, `snapshot_length`, `snapshot_offset`, `snapshot_truncated`, `next_snapshot_offset` |
 | `browser_interact`, `browser_press` | `url`, `title` |
 | `browser_wait_for` | `url`, `title`, `matched` |
@@ -55,11 +56,11 @@ One page per session, no tabs, headless only over MCP.
 
 | Lever | Effect |
 | --- | --- |
-| `max_chars` | Defaults to 20000 characters, about 5k tokens. Start lower. |
-| `offset` | Reads the rest instead of re-fetching with a bigger limit. |
+| `max_chars` | Defaults to 8000 characters. Use offsets to read more. |
+| `offset` | Pages text or snapshots. Fetch tools navigate again; session text stays open. |
 | `resource_policy="lite"` | Skips images, fonts and media. |
 | `text_only=true` | Readable text instead of markup. On by default. |
-| `depth` | Shallower snapshot beats a clipped deep one. |
+| `depth` | Defaults to 6; use null for unlimited snapshot depth. |
 | `include_links=false` | On by default; links cost more than the text on some pages. |
 | `max_results` | A search returns 10 hits by default; `hits_total` says how many the page had. |
 
