@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from live_stealth_helpers import live_proxy, wait_for_recaptcha_score_or_skip
+from live_stealth_helpers import live_gpu, live_proxy, wait_for_recaptcha_score_or_skip
 
 from webskrap import SessionConfig, Viewport, WebSkrapClient
 from webskrap.browser_session import sandbox_enabled
@@ -42,6 +42,7 @@ STEALTH_HEADLESS = SessionConfig(
     headless_screen=Viewport(width=1366, height=768),
     mask_headless_user_agent=True,
     virtual_display=os.environ.get("WEBSKRAP_LIVE_VIRTUAL_DISPLAY") == "1",
+    gpu=live_gpu(),
     proxy=live_proxy(),
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )

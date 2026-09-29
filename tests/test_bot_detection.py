@@ -38,7 +38,7 @@ from json import loads
 from pathlib import Path
 
 import pytest
-from live_stealth_helpers import live_proxy, wait_for_recaptcha_score_or_skip
+from live_stealth_helpers import live_gpu, live_proxy, wait_for_recaptcha_score_or_skip
 
 from webskrap import SessionConfig, WebSkrapClient
 from webskrap.browser_session import sandbox_enabled
@@ -59,6 +59,7 @@ STEALTH = SessionConfig(
     headless=False,
     chromium_sandbox=sandbox_enabled(None),
     user_data_dir=LIVE_PROFILE_DIR,
+    gpu=live_gpu(),
     proxy=live_proxy(),
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )
