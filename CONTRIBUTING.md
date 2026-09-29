@@ -85,7 +85,10 @@ lets the same rule catch an unsafe use somewhere else.
 
 Live tests are opt-in because they depend on third-party sites; they are not
 part of CI and a failure there usually says more about the site than about
-your change. Browser tests need `webskrap install` to have run.
+your change. Browser tests need `webskrap install` to have run. Live suites
+honor `WEBSKRAP_CHROMIUM_SANDBOX=0`, and `WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1` runs
+the headless suite on a private Xvfb display (Linux) instead of masking the
+headless user agent.
 
 Hosts without a working Chromium sandbox (unprivileged containers, images with
 user namespaces disabled) are handled by the `persistent_session_env` fixture,
