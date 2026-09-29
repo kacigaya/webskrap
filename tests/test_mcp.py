@@ -108,6 +108,32 @@ def test_stealth_fetch_defaults_to_clean_text(monkeypatch: Any) -> None:
     assert result["text"] == "Readable body"
 
 
+def test_stealth_fetch_exposes_resource_and_wait_controls(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    asyncio.run(
+        mcp_server.stealth_fetch("https://example.test", resource_policy="lite", wait_until="load")
+    )
+    assert _FakeClient.calls[0]["config"].resource_policy.value == "lite"
+    assert _FakeClient.calls[0]["wait_until"] == "load"
+    assert _FakeClient.calls[0]["decline_cookies"] is True
+
+
+@pytest.mark.parametrize("kwargs", [{"resource_policy": "invalid"}, {"wait_until": "invalid"}])
+def test_stealth_fetch_rejects_bad_controls_before_launch(monkeypatch, kwargs) -> None:
+    _fake_client(monkeypatch)
+    with pytest.raises(WebSkrapError):
+        asyncio.run(mcp_server.stealth_fetch("https://example.test", **kwargs))
+    assert _FakeClient.calls == []
+
+
+def test_context_is_injected_and_not_exposed_in_fetch_schema() -> None:
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    for name in ("fetch", "stealth_fetch", "fetch_session_close"):
+        assert "ctx" not in tools[name].input_schema["properties"]
+        assert "session" in tools[name].input_schema["properties"]
+    assert tools["fetch_session_close"].annotations.destructive_hint is True
+
+
 def test_stealth_fetch_confines_persistent_profile(monkeypatch: Any, tmp_path: Path) -> None:
     _fake_client(monkeypatch)
     root = tmp_path / "profiles"

@@ -44,7 +44,15 @@ Close individual sessions when you are done with them, or let
 
 ```python
 await session.close()
+await client.close_session("default")  # also forgets the named session
 ```
+
+Wait for active fetches before closing. Cancelling a caller waiting for a
+shared launch does not cancel other callers; the client retains ownership and
+closes the browser on shutdown.
+
+`session.fetch(..., decline_cookies=False)` overrides consent dismissal for one
+call without changing shared config. Omit it to use `SessionConfig.decline_cookies`.
 
 ## Persistent storage
 

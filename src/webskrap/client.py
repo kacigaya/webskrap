@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from anyio import CancelScope
 from playwright.async_api import Browser, BrowserContext, Page
 
 from webskrap import human as humanize
@@ -220,6 +221,7 @@ class WebSkrapSession:
         text_only: bool = False,
         include_links: bool = False,
         max_links: int = 50,
+        decline_cookies: bool | None = None,
     ) -> FetchResult:
         """Open ``url`` in a new page, read it, and close the page.
 
@@ -241,6 +243,7 @@ class WebSkrapSession:
                 caller may want.
             max_links: How many links to keep. ``FetchResult.links_total``
                 reports how many there were before the cap.
+            decline_cookies: Per-call consent override; None uses the config.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
@@ -259,7 +262,9 @@ class WebSkrapSession:
                 wait_until=wait_until,
                 timeout=timeout_ms or self.config.navigation_timeout_ms,
             )
-            declined = await self._decline_after_navigation(page, wait_until)
+            declined = await self._decline_after_navigation(
+                page, wait_until, decline_cookies=decline_cookies
+            )
             title = await page.title()
             text = await page.locator("body").inner_text() if text_only else await page.content()
             links, links_total = await _collect_links(
@@ -287,7 +292,8 @@ class WebSkrapSession:
                 links_total=links_total,
             )
         finally:
-            await page.close()
+            with CancelScope(shield=True):
+                await page.close()
 
     async def search(
         self,
@@ -336,7 +342,8 @@ class WebSkrapSession:
             html = await page.content()
             final_url = page.url
         finally:
-            await page.close()
+            with CancelScope(shield=True):
+                await page.close()
         hits = parse_results(engine, html)
         elapsed_ms = (time.perf_counter() - started) * 1000
         status = response.status if response else None
@@ -353,9 +360,12 @@ class WebSkrapSession:
             cookie_notice_declined=declined,
         )
 
-    async def _decline_after_navigation(self, page: Page, wait_until: WaitUntil) -> str | None:
+    async def _decline_after_navigation(
+        self, page: Page, wait_until: WaitUntil, *, decline_cookies: bool | None = None
+    ) -> str | None:
         """Dismiss a consent notice once ``page`` has navigated, if configured."""
-        if not self.config.decline_cookies:
+        enabled = self.config.decline_cookies if decline_cookies is None else decline_cookies
+        if not enabled:
             return None
         budget = self.config.decline_cookies_timeout_ms
         if wait_until == "networkidle":
@@ -437,23 +447,27 @@ class WebSkrapSession:
         """
         if self._closed:
             return
-        try:
-            await self.context.close()
-        finally:
+        # MCP cancellation is level-triggered; cleanup must survive every checkpoint.
+        with CancelScope(shield=True):
             try:
-                if self.browser is not None:
-                    await self.browser.close()
+                await self.context.close()
             finally:
-                if self._temp_user_data_dir is not None:
-                    try:
-                        shutil.rmtree(self._temp_user_data_dir, ignore_errors=False)
-                    except OSError:
-                        logger.debug("could not remove temp profile %s", self._temp_user_data_dir)
-                    self._temp_user_data_dir = None
-                if self._display is not None:
-                    await self._display.stop()
-                    self._display = None
-                self._closed = True
+                try:
+                    if self.browser is not None:
+                        await self.browser.close()
+                finally:
+                    if self._temp_user_data_dir is not None:
+                        try:
+                            await asyncio.to_thread(shutil.rmtree, self._temp_user_data_dir)
+                        except OSError:
+                            logger.debug(
+                                "could not remove temp profile %s", self._temp_user_data_dir
+                            )
+                        self._temp_user_data_dir = None
+                    if self._display is not None:
+                        await self._display.stop()
+                        self._display = None
+                    self._closed = True
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -501,6 +515,8 @@ class WebSkrapClient:
         self._generation = 0
         self._session_tasks: dict[str, asyncio.Task[WebSkrapSession]] = {}
         self._sessions: dict[str, WebSkrapSession] = {}
+        self._ua_cache: dict[tuple[str, str | None, bool], str] = {}
+        self._ua_lock = asyncio.Lock()
 
     async def __aenter__(self) -> WebSkrapClient:
         """Enter the client; the driver still starts on first use, not here."""
@@ -590,6 +606,7 @@ class WebSkrapClient:
                     finally:
                         self._playwright = None
                         self._driver = None
+                        self._ua_cache.clear()
             finally:
                 self._closing = False
         if error := next((result for result in results if isinstance(result, BaseException)), None):
@@ -607,6 +624,7 @@ class WebSkrapClient:
         text_only: bool = False,
         include_links: bool = False,
         max_links: int = 50,
+        decline_cookies: bool | None = None,
     ) -> FetchResult:
         """Fetch one URL in a throwaway session.
 
@@ -624,6 +642,7 @@ class WebSkrapClient:
             text_only: Return visible body text instead of page HTML.
             include_links: Also collect the page's outbound links.
             max_links: How many links to keep.
+            decline_cookies: Per-call consent override; None uses the config.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`.
@@ -642,6 +661,7 @@ class WebSkrapClient:
                 text_only=text_only,
                 include_links=include_links,
                 max_links=max_links,
+                decline_cookies=decline_cookies,
             )
         finally:
             await session.close()
@@ -725,23 +745,33 @@ class WebSkrapClient:
         resolved_config = config or self.default_config
         await self.start(resolved_config.driver, _generation=generation)
         task = self._session_tasks.get(name)
-        owns_task = task is None
         if task is None:
             resolved_profile = self._resolve_profile(profile)
             task = asyncio.create_task(
                 self._create_session(name, resolved_config, resolved_profile)
             )
             self._session_tasks[name] = task
-        try:
-            session = await task
-            if generation != self._generation:
-                msg = "client closed while the session was starting"
-                raise WebSkrapError(msg)
-            self._sessions[name] = session
-            return session
-        finally:
-            if owns_task and self._session_tasks.get(name) is task:
-                self._session_tasks.pop(name)
+            task.add_done_callback(
+                lambda completed: self._session_finished(name, generation, completed)
+            )
+        # One cancelled waiter must not cancel another caller's shared launch.
+        session = await asyncio.shield(task)
+        if generation != self._generation:
+            msg = "client closed while the session was starting"
+            raise WebSkrapError(msg)
+        self._sessions[name] = session
+        return session
+
+    def _session_finished(
+        self, name: str, generation: int, task: asyncio.Task[WebSkrapSession]
+    ) -> None:
+        if self._session_tasks.get(name) is task:
+            self._session_tasks.pop(name)
+        if task.cancelled() or task.exception() is not None:
+            return
+        # Keep ownership even when every waiter was cancelled during launch.
+        if generation == self._generation and not self._closing:
+            self._sessions[name] = task.result()
 
     def _resolve_profile(self, profile: str | BrowserProfile | None) -> BrowserProfile:
         if isinstance(profile, BrowserProfile):
@@ -749,6 +779,28 @@ class WebSkrapClient:
         if profile in self.profiles:
             return self.profiles[profile].model_copy(deep=True)
         return get_profile(profile)
+
+    async def close_session(self, name: str) -> bool:
+        """Close and forget a named session, returning False if absent.
+
+        Call after its fetches finish. Closing an active session interrupts its
+        pages; this method does not schedule or wait for page operations.
+        """
+        task = self._session_tasks.get(name)
+        if task is not None:
+            try:
+                session = await asyncio.shield(task)
+            except Exception:
+                # Failed launches leave no context to release.
+                return False
+        else:
+            session = self._sessions.get(name)
+        if session is None:
+            return False
+        await session.close()
+        if self._sessions.get(name) is session:
+            self._sessions.pop(name, None)
+        return True
 
     async def _create_session(
         self,
@@ -772,6 +824,7 @@ class WebSkrapClient:
             and config.headless
             and not config.virtual_display
             and config.browser == "chromium"
+            and not any(a.startswith("--user-agent") for a in config.launch_args)
         ):
             clean_ua = await self._headless_clean_user_agent(browser_type, config)
             if clean_ua:
@@ -849,6 +902,20 @@ class WebSkrapClient:
     async def _headless_clean_user_agent(
         self, browser_type: Any, config: SessionConfig
     ) -> str | None:
+        # Concurrent sessions share one successful probe per executable/channel.
+        # Failures are not cached, so installing a browser can recover in place.
+        key = (config.browser, config.channel, config.chromium_sandbox)
+        async with self._ua_lock:
+            if key in self._ua_cache:
+                return self._ua_cache[key]
+            ua = await self._probe_headless_user_agent(browser_type, config)
+            if ua is not None:
+                self._ua_cache[key] = ua
+            return ua
+
+    async def _probe_headless_user_agent(
+        self, browser_type: Any, config: SessionConfig
+    ) -> str | None:
         # Probe the real headless UA in a throwaway browser, then rewrite the
         # "HeadlessChrome" token to "Chrome". Returns None if the probe fails or
         # the UA has no headless tell, leaving the native UA untouched.
@@ -865,7 +932,6 @@ class WebSkrapClient:
             return None
         finally:
             await browser.close()
-            await asyncio.sleep(2)
         if not isinstance(ua, str) or "HeadlessChrome" not in ua:
             return None
         return ua.replace("HeadlessChrome", "Chrome")

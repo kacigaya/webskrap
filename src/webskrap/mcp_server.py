@@ -11,8 +11,8 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
@@ -23,7 +23,16 @@ from webskrap import browser_session
 from webskrap.client import WebSkrapClient, WebSkrapError
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
-from webskrap.models import GpuBackend, SessionConfig, shape_fetch_result, shape_search_result
+from webskrap.fetch_runtime import FetchRuntime
+from webskrap.models import (
+    BrowserProfile,
+    FetchResult,
+    GpuBackend,
+    SessionConfig,
+    WaitUntil,
+    shape_fetch_result,
+    shape_search_result,
+)
 from webskrap.parsing import (
     parse_element_state,
     parse_engine,
@@ -44,7 +53,7 @@ MAX_EVAL_CHARS = 10_000
 T = TypeVar("T")
 
 try:
-    from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver import Context, MCPServer
     from mcp.types import ToolAnnotations
 except ImportError as exc:  # pragma: no cover - optional dependency
     msg = "the MCP server requires mcp. Run: pip install webskrap"
@@ -103,6 +112,12 @@ Cost
 - max_chars defaults to 8000 characters. Start lower and page with
   the returned next_text_offset / next_snapshot_offset.
 - resource_policy="lite" skips images, fonts and media.
+- Both fetch tools accept wait_until and resource_policy. stealth_fetch defaults
+  to domcontentloaded; fetch defaults to networkidle.
+- For repeated extraction, opt in with session="crawl" to keep the browser warm.
+  Cookies/storage are shared within that name. Keep config/profile unchanged.
+  fetch_session_close releases it; browser_close manages separate sessions.
+  Up to eight fetches run at once and eight warm fetch sessions stay open.
 - text_only stays True unless you actually need markup.
 - browser_snapshot defaults to depth=6; use depth=null for the full tree.
 - Read session text with browser_text instead of building an accessibility tree.
@@ -123,7 +138,63 @@ browser_eval runs JavaScript in the session's page, so prefer snapshot /
 interact / wait_for, and never evaluate page-controlled text.
 """
 
-mcp = MCPServer("webskrap", instructions=INSTRUCTIONS, version=version("webskrap"))
+
+@asynccontextmanager
+async def _fetch_lifespan(_server: MCPServer) -> AsyncIterator[FetchRuntime]:
+    runtime = FetchRuntime()
+    try:
+        yield runtime
+    finally:
+        await runtime.close()
+
+
+mcp = MCPServer(
+    "webskrap", instructions=INSTRUCTIONS, version=version("webskrap"), lifespan=_fetch_lifespan
+)
+
+
+async def _run_fetch(
+    url: str,
+    *,
+    config: SessionConfig,
+    profile: BrowserProfile,
+    wait_until: WaitUntil,
+    timeout_ms: float,
+    text_only: bool,
+    include_links: bool,
+    max_links: int,
+    session: str | None,
+    ctx: Context | None,
+) -> FetchResult:
+    if ctx is None:
+        if session is not None:
+            raise WebSkrapError("fetch sessions require the MCP lifespan", code=ErrorCode.USAGE)
+        # Direct Python tool calls retain their one-shot lifecycle.
+        async with WebSkrapClient() as client:
+            return await client.fetch(
+                url,
+                config=config,
+                profile=profile,
+                wait_until=wait_until,
+                timeout_ms=timeout_ms,
+                text_only=text_only,
+                include_links=include_links,
+                max_links=max_links,
+                decline_cookies=config.decline_cookies,
+            )
+    runtime = ctx.request_context.lifespan_context
+    if not isinstance(runtime, FetchRuntime):
+        raise WebSkrapError("fetch runtime is unavailable", code=ErrorCode.USAGE)
+    async with runtime.use(session, config, profile) as target:
+        return await target.fetch(
+            url,
+            wait_until=wait_until,
+            timeout_ms=timeout_ms,
+            text_only=text_only,
+            include_links=include_links,
+            max_links=max_links,
+            decline_cookies=config.decline_cookies,
+        )
 
 
 @mcp.tool(title="Fetch a page", annotations=_hints(read_only=True, open_world=True))
@@ -140,6 +211,9 @@ async def fetch(
     include_links: bool = False,
     max_links: int = 50,
     decline_cookies: bool = True,
+    *,
+    session: str | None = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Fetch a URL with the Patchright stealth driver and return page data.
 
@@ -169,6 +243,9 @@ async def fetch(
         max_links: How many links to return; links_total counts them all.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
+        session: Opt-in warm fetch session. Shares cookies/storage across calls;
+            keep profile/config identical and close with fetch_session_close.
+        ctx: Server-injected request context.
     """
     with _tool_errors():
         url = await validate_mcp_url(url)
@@ -181,17 +258,18 @@ async def fetch(
             resource_policy=parse_resource_policy(resource_policy),
             decline_cookies=decline_cookies,
         )
-        async with WebSkrapClient() as client:
-            result = await client.fetch(
-                url,
-                profile=get_profile(profile),
-                config=config,
-                wait_until=parse_wait_until(wait_until),
-                timeout_ms=timeout_ms,
-                text_only=text_only,
-                include_links=include_links,
-                max_links=max_links,
-            )
+        result = await _run_fetch(
+            url,
+            profile=get_profile(profile),
+            config=config,
+            wait_until=parse_wait_until(wait_until),
+            timeout_ms=timeout_ms,
+            text_only=text_only,
+            include_links=include_links,
+            max_links=max_links,
+            session=session,
+            ctx=ctx,
+        )
         return shape_fetch_result(result, max_chars, offset)
 
 
@@ -216,6 +294,11 @@ async def stealth_fetch(
     include_links: bool = False,
     max_links: int = 50,
     decline_cookies: bool = True,
+    *,
+    wait_until: str = "domcontentloaded",
+    resource_policy: str = "all",
+    session: str | None = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Fetch a URL with the Patchright stealth driver (CDP-leak-free).
 
@@ -253,6 +336,11 @@ async def stealth_fetch(
         max_links: How many links to return; links_total counts them all.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
+        wait_until: commit, domcontentloaded (default), load, or networkidle.
+        resource_policy: all, lite (block images/fonts/media), or documents.
+        session: Opt-in warm fetch session. Shares cookies/storage across calls;
+            keep profile/config identical and close with fetch_session_close.
+        ctx: Server-injected request context.
     """
     with _tool_errors():
         url = await validate_mcp_url(url)
@@ -271,18 +359,38 @@ async def stealth_fetch(
             fake_media_devices=fake_media_devices,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
+            resource_policy=parse_resource_policy(resource_policy),
         )
-        async with WebSkrapClient() as client:
-            result = await client.fetch(
-                url,
-                profile=get_profile(profile),
-                config=config,
-                timeout_ms=timeout_ms,
-                text_only=text_only,
-                include_links=include_links,
-                max_links=max_links,
-            )
+        result = await _run_fetch(
+            url,
+            profile=get_profile(profile),
+            config=config,
+            wait_until=parse_wait_until(wait_until),
+            timeout_ms=timeout_ms,
+            text_only=text_only,
+            include_links=include_links,
+            max_links=max_links,
+            session=session,
+            ctx=ctx,
+        )
         return shape_fetch_result(result, max_chars, offset)
+
+
+@mcp.tool(
+    title="Close a warm fetch session",
+    annotations=_hints(read_only=False, destructive=True, idempotent=True),
+)
+async def fetch_session_close(session: str, ctx: Context) -> dict[str, bool]:
+    """Release a named fetch session's browser and temporary cookies/storage.
+
+    Separate from browser_* sessions. Persistent user_data_dir files survive.
+    A busy session is refused; retry after its fetches finish.
+    """
+    with _tool_errors():
+        runtime = ctx.request_context.lifespan_context
+        if not isinstance(runtime, FetchRuntime):
+            raise WebSkrapError("fetch runtime is unavailable", code=ErrorCode.USAGE)
+        return {"closed": await runtime.close_session(session)}
 
 
 @mcp.tool(title="Search the web", annotations=_hints(read_only=True, open_world=True))
