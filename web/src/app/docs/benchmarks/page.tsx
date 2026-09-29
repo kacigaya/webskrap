@@ -68,7 +68,7 @@ const FEATURE_COLUMNS = [
 const FEATURE_ROWS: { feature: string; values: string[] }[] = [
   {
     feature: "reCAPTCHA v3 score",
-    values: ["0.1", "0.3-0.5", "0.3-0.7", "0.7-0.9", "0.9", "Pass in headed mode (>=0.7 gate)"],
+    values: ["0.1", "0.3-0.5", "0.3-0.7", "0.7-0.9", "0.9", "Pass headed (>=0.7 gate); scored in virtual display"],
   },
   {
     feature: "Cloudflare Turnstile",
@@ -156,8 +156,8 @@ const DETECTION_ROWS: {
     service: "bot.sannysoft.com",
     stock: "DETECTED",
     cloak: "Not listed",
-    webskrap: "TIMEOUT",
-    notes: "Latest run timed out waiting for networkidle",
+    webskrap: "FAIL (WebGL)",
+    notes: "Only WebGL Vendor and Renderer flagged: GPU-less headed Chromium has no WebGL; gpu=\"mesa\" enables it",
   },
   {
     service: "BrowserLeaks WebRTC",
@@ -216,7 +216,7 @@ export default function BenchmarksPage() {
         <div className="flex flex-col gap-1">
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Comparison</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            This is a June 26, 2026 snapshot. CloakBrowser values came from its{" "}
+            This is a September 25, 2026 snapshot. CloakBrowser values came from its{" "}
             <a
               href="https://github.com/CloakHQ/CloakBrowser/blob/main/README.md"
               className="text-primary underline"
@@ -225,9 +225,16 @@ export default function BenchmarksPage() {
             </a>
             ; WebSkrap values came from a separate live report generated with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
-              python scripts/live_stealth_report.py --no-open --report-only
+              WEBSKRAP_BROWSER_CHANNEL=chromium WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1
+              WEBSKRAP_CHROMIUM_SANDBOX=0 xvfb-run -a python
+              scripts/live_stealth_report.py --no-open --report-only
             </code>
-            . The projects were not tested side by side. Detection sites and browser
+            . Both suites ran Patchright with Chromium 153 on ARM64 Linux with no GPU
+            and no proxy. The headed suite ran under{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">xvfb-run</code>; the
+            headless suite used{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">virtual_display=True</code>
+            , so both drove a headed browser on an Xvfb screen. The projects were not tested side by side. Detection sites and browser
             versions change, so these results do not predict a current score.
           </p>
         </div>
@@ -282,7 +289,7 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameTitle>Detection services</FrameTitle>
-            <FrameDescription>Stock Playwright vs CloakBrowser vs WebSkrap patchright headed</FrameDescription>
+            <FrameDescription>Stock Playwright vs CloakBrowser vs WebSkrap patchright headed on Xvfb</FrameDescription>
           </FrameHeader>
           <Table
             variant="card"
@@ -323,10 +330,11 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameDescription>
-              June 26 WebSkrap live summary: 24 passed, 2 failed, 1 skipped. Headed: 17
-              passed, 1 failed. Headless: 7 passed, 1 failed, 1 skipped. The two failures
-              were Sannysoft headed/headless networkidle timeouts; the headless skip was
-              reCAPTCHA v3 not returning a score from Google&apos;s public demo.
+              September 25 WebSkrap live summary: 23 passed, 4 failed. Headed: 16 passed,
+              2 failed. Virtual display: 7 passed, 2 failed. In both suites Sannysoft
+              flagged only the missing WebGL vendor and renderer, and Are You Headless
+              failed because the site returned 502 Bad Gateway to every client. reCAPTCHA
+              v3 returned a score in both suites.
             </FrameDescription>
           </FrameHeader>
         </Frame>
