@@ -200,6 +200,40 @@ const SESSION_REUSE = [
   { mode: "Cold launch per fetch", time: "1,373.01", vs: "5.33x", best: false },
 ];
 
+// Median of three alternating passes per mode; ranges show run-to-run spread.
+const MODE_COMPARISON = [
+  {
+    benchmark: "ALL policy",
+    virtual: { median: "546.19", range: "526.00-971.66" },
+    headed: { median: "491.86", range: "469.94-502.30" },
+  },
+  {
+    benchmark: "LITE policy",
+    virtual: { median: "264.63", range: "224.47-276.93" },
+    headed: { median: "276.98", range: "257.43-277.03" },
+  },
+  {
+    benchmark: "DOCUMENTS policy",
+    virtual: { median: "244.70", range: "207.87-253.18" },
+    headed: { median: "217.09", range: "200.15-217.14" },
+  },
+  {
+    benchmark: "Warm session reuse",
+    virtual: { median: "253.54", range: "251.61-282.66" },
+    headed: { median: "278.05", range: "245.17-309.57" },
+  },
+  {
+    benchmark: "Cold launch per fetch",
+    virtual: { median: "2,185.87", range: "1,359.93-2,724.47" },
+    headed: { median: "2,505.93", range: "1,151.82-3,457.16" },
+  },
+  {
+    benchmark: "Concurrency, per page",
+    virtual: { median: "225.75", range: "224.87-250.63" },
+    headed: { median: "213.82", range: "193.72-299.11" },
+  },
+];
+
 export default function BenchmarksPage() {
   return (
     <div className="flex flex-col gap-12">
@@ -446,6 +480,61 @@ export default function BenchmarksPage() {
               run measured 1,740.49 ms per batch, so expect this figure to vary.
             </FrameDescription>
           </Frame>
+        </Frame>
+
+        <Frame className="gap-3 bg-transparent p-0">
+          <FrameHeader className="p-0">
+            <FrameTitle>Headed vs virtual display</FrameTitle>
+            <FrameDescription>
+              Median time in ms, with the range across three passes
+            </FrameDescription>
+          </FrameHeader>
+          <Table variant="card" scrollLabel="Headed and virtual display benchmark table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Benchmark</TableHead>
+                <TableHead className="text-right">Virtual display</TableHead>
+                <TableHead className="text-right">Headed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {MODE_COMPARISON.map((row) => (
+                <TableRow key={row.benchmark}>
+                  <TableCell className="font-medium">{row.benchmark}</TableCell>
+                  {[row.virtual, row.headed].map((result, index) => (
+                    <TableCell key={index} className="text-right tabular-nums">
+                      {result.median}
+                      <span className="block text-xs text-muted-foreground">
+                        {result.range}
+                      </span>
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <FrameHeader>
+            <FrameDescription>
+              Measured on 2026-09-29 on the same host, alternating three passes of{" "}
+              <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
+                python benchmarks.py
+              </code>{" "}
+              with three passes of{" "}
+              <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
+                xvfb-run -a python benchmarks.py --mode headed
+              </code>
+              , both with{" "}
+              <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
+                WEBSKRAP_CHROMIUM_SANDBOX=0
+              </code>
+              . Headed mode used{" "}
+              <code className="rounded bg-muted px-1.5 py-0.5 text-sm">headless=False</code>{" "}
+              on a 1920x1080 Xvfb screen started by xvfb-run instead of one per
+              session. Once the browser is running, the two modes differ by less than
+              the spread between passes. Cold launch varied the most, because the
+              host was also serving other work during these runs.
+            </FrameDescription>
+          </FrameHeader>
         </Frame>
       </section>
 
