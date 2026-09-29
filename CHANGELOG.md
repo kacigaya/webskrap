@@ -9,8 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-09-29
+
 ### Added
 
+- MCP `browser_text` returns visible text from an open session in pages,
+  with length, truncation, and continuation metadata, without building an
+  accessibility tree.
 - MCP `fetch` and `stealth_fetch` accept an opt-in `session` name for warm
   browser reuse. `fetch_session_close` releases idle fetch sessions. Cookies
   and storage are shared only when requested; eight fetches may run at once
@@ -25,6 +30,12 @@ history, so they summarize each release rather than list every change.
 
 ### Changed
 
+- MCP `fetch`, `stealth_fetch`, `browser_snapshot`, and `browser_eval` default
+  `max_chars` to 8000 instead of 20000. Larger explicit limits still work.
+- MCP `browser_snapshot` defaults to depth 6. Pass `depth: null` for the full
+  tree. The CLI and Python snapshot defaults are unchanged.
+- Link extraction skips labels past `max_links` while keeping URL order,
+  deduplication, and the total unique link count.
 - MCP fetch tools retain their driver for the server lifetime. Unnamed calls
   still use fresh browsers and temporary profiles.
 - UA masking caches successful probes per browser/channel/sandbox setting
@@ -625,7 +636,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.10.1...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/kacigaya/webskrap/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/kacigaya/webskrap/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/kacigaya/webskrap/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/kacigaya/webskrap/compare/v2.8.0...v2.9.0
