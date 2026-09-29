@@ -26,11 +26,16 @@ state must persist.
 
 ## Keep results small
 
-- Start with a low `max_chars`. Continue with `offset` and
-  `next_text_offset` instead of fetching again.
+- `max_chars` defaults to 8000 for fetch, snapshot, text, and eval tools.
+  Continue with `offset` and `next_text_offset` on stable page text. Fetch
+  windows navigate again; use `browser_text` in a session to avoid re-fetching.
+- `browser_text` reads visible body text and selects the window in the browser,
+  avoiding a full accessibility tree and full-text transfer. The browser still
+  computes full body text to report its length.
 - Use `resource_policy=lite` to skip images, fonts, and media.
 - Keep `include_links` off unless links are needed.
-- For snapshots, reduce `depth` before truncating a deep tree.
+- Snapshots default to `depth=6`. Set `depth=null` for an unlimited tree,
+  or reduce depth before increasing `max_chars`.
 - Make `browser_eval` return the required value, not the full DOM.
 
 ## Safety boundaries

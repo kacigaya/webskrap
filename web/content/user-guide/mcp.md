@@ -47,6 +47,7 @@ python -m webskrap.mcp_server
 | `doctor` | Check that Patchright and Chromium can launch. |
 | `browser_open` | Start (or reuse) a persistent headless browser session. |
 | `browser_goto` | Navigate the session's current page. |
+| `browser_text` | Visible body text, windowed in the browser without an accessibility tree. |
 | `browser_snapshot` | Aria snapshot of the page with `eN` element refs. |
 | `browser_interact` | Click, fill, type, select, hover, check, or uncheck an element. |
 | `browser_press` | Press a keyboard key on the page. |
@@ -76,7 +77,7 @@ leave the notice in place.
 | `wait_until` | `networkidle` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
 | `resource_policy` | `all` | `all`, `lite`, or `documents`. |
 | `timeout_ms` | `60000` | Navigation timeout. |
-| `max_chars` | `20000` | Maximum returned text characters. |
+| `max_chars` | `8000` | Maximum returned text characters. |
 | `text_only` | `true` | Return clean visible text; set `false` for raw HTML. |
 | `decline_cookies` | `true` | Click a cookie consent notice's reject button after load. |
 
@@ -153,7 +154,12 @@ A typical flow:
 4. `browser_eval` or `browser_screenshot` to read results.
 5. `browser_close` when done (`delete_data: true` to drop the profile).
 
-Snapshots are truncated to `max_chars` (default 20000) and report
+Snapshots default to `depth=6`; pass `depth: null` for the full tree.
+Use `browser_text` for reading without element refs. It accepts `max_chars` and
+`offset`, and returns `next_text_offset` for paging through the current text.
+Offsets remain valid only while the text stays unchanged.
+
+Snapshots are truncated to `max_chars` (default 8000) and report
 `snapshot_truncated`; refs describe the current DOM, so take a fresh snapshot
 after the page changes. Failed actions return a one-line error.
 

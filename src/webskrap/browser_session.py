@@ -837,6 +837,39 @@ async def snapshot(page: Page, *, depth: int | None = None) -> dict[str, Any]:
     return {**await page_state(page), "snapshot": tree}
 
 
+async def read_text(page: Page, *, max_chars: int, offset: int = 0) -> dict[str, Any]:
+    """Return a visible-text window, limiting data transferred from the browser.
+
+    Iterate Unicode code points to match Python's text_window offsets, including
+    astral characters. innerText preserves the existing visible-text semantics;
+    the browser still computes full body text to report its exact length.
+    """
+    window = await page.locator("body").evaluate(
+        """(body, {limit, start}) => {
+          const text = body.innerText;
+          const end = start + limit;
+          const selected = [];
+          let length = 0;
+          for (const character of text) {
+            if (length >= start && length < end) selected.push(character);
+            length++;
+          }
+          const offset = Math.min(start, length);
+          const stop = Math.min(end, length);
+          return {
+            title: document.title,
+            text: selected.join(''),
+            text_length: length,
+            text_offset: offset,
+            text_truncated: stop < length,
+            next_text_offset: stop < length ? stop : null,
+          };
+        }""",
+        {"limit": max(0, max_chars), "start": max(0, offset)},
+    )
+    return {"url": page.url, **window}
+
+
 def wait_condition(
     text: str | None,
     text_gone: str | None,

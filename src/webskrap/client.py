@@ -57,6 +57,7 @@ _LINKS_SCRIPT = """(max) => {
     const href = anchor.href;
     if (!href || href.startsWith('javascript:') || seen.has(href)) continue;
     seen.add(href);
+    if (links.length >= Math.max(0, max)) continue;
     links.push({
       href,
       text: (anchor.innerText || anchor.textContent || '')
@@ -65,7 +66,7 @@ _LINKS_SCRIPT = """(max) => {
         .slice(0, 120),
     });
   }
-  return { links: links.slice(0, Math.max(0, max)), total: links.length };
+  return { links, total: seen.size };
 }"""
 
 
