@@ -156,8 +156,8 @@ const DETECTION_ROWS: {
     service: "bot.sannysoft.com",
     stock: "DETECTED",
     cloak: "Not listed",
-    webskrap: "FAIL (WebGL)",
-    notes: "Only WebGL Vendor and Renderer flagged: GPU-less headed Chromium has no WebGL; gpu=\"mesa\" enables it",
+    webskrap: "PASS",
+    notes: "No rows flagged; WebGL rendered by Mesa lavapipe (gpu=\"mesa\") on a GPU-less host",
   },
   {
     service: "BrowserLeaks WebRTC",
@@ -216,7 +216,7 @@ export default function BenchmarksPage() {
         <div className="flex flex-col gap-1">
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Comparison</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            This is a September 25, 2026 snapshot. CloakBrowser values came from its{" "}
+            This is a September 29, 2026 snapshot. CloakBrowser values came from its{" "}
             <a
               href="https://github.com/CloakHQ/CloakBrowser/blob/main/README.md"
               className="text-primary underline"
@@ -226,11 +226,11 @@ export default function BenchmarksPage() {
             ; WebSkrap values came from a separate live report generated with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
               WEBSKRAP_BROWSER_CHANNEL=chromium WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1
-              WEBSKRAP_CHROMIUM_SANDBOX=0 xvfb-run -a python
+              WEBSKRAP_LIVE_GPU=mesa WEBSKRAP_CHROMIUM_SANDBOX=0 xvfb-run -a python
               scripts/live_stealth_report.py --no-open --report-only
             </code>
             . Both suites ran Patchright with Chromium 153 on ARM64 Linux with no GPU
-            and no proxy. The headed suite ran under{" "}
+            and no proxy, rendering WebGL through Mesa lavapipe. The headed suite ran under{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">xvfb-run</code>; the
             headless suite used{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">virtual_display=True</code>
@@ -330,11 +330,11 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameDescription>
-              September 25 WebSkrap live summary: 23 passed, 4 failed. Headed: 16 passed,
-              2 failed. Virtual display: 7 passed, 2 failed. In both suites Sannysoft
-              flagged only the missing WebGL vendor and renderer, and Are You Headless
-              failed because the site returned 502 Bad Gateway to every client. reCAPTCHA
-              v3 returned a score in both suites.
+              September 29 WebSkrap live summary: 25 passed, 2 skipped, 0 failed. Headed:
+              17 passed, 1 skipped. Virtual display: 8 passed, 1 skipped. Both skips were
+              Are You Headless, which returned 502 Bad Gateway to every client; the suites
+              skip a site that answers with a 5xx status. reCAPTCHA v3 returned a score in
+              both suites.
             </FrameDescription>
           </FrameHeader>
         </Frame>
