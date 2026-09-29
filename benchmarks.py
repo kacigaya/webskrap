@@ -13,19 +13,27 @@ is answered after a small fixed delay to model real-world network cost, so the
 effect of blocking resources is observable and repeatable. No external sites are
 contacted. Timings vary with the host and browser version.
 
-Sessions use the stealth setup: the Patchright driver, headless=True with
-virtual_display=True, so Chromium runs headed on a private Xvfb screen. This
-needs Linux with Xvfb installed.
+Sessions use the stealth setup with the Patchright driver. Two modes:
+
+- virtual-display (default): headless=True with virtual_display=True, so
+  Chromium runs headed on a private Xvfb screen WebSkrap starts per session.
+  Needs Linux with Xvfb installed.
+- headed: headless=False on the display in $DISPLAY. On a machine without a
+  desktop, run it under xvfb-run.
 
 Run:  python benchmarks.py
+      python benchmarks.py --mode headed
 If Chromium cannot use its OS sandbox on this host:
       WEBSKRAP_CHROMIUM_SANDBOX=0 python benchmarks.py
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import functools
+import os
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -134,11 +142,15 @@ def benchmark(func):
     return wrapper
 
 
+MODE = "virtual-display"  # set from --mode
+
+
 def _config(policy: ResourcePolicy) -> SessionConfig:
+    headed = MODE == "headed"
     return SessionConfig(
         driver="patchright",
-        headless=True,
-        virtual_display=True,
+        headless=not headed,
+        virtual_display=not headed,
         chromium_sandbox=sandbox_enabled(None),
         resource_policy=policy,
         decline_cookies=False,
@@ -211,5 +223,19 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    print(" WebSkrap performance benchmarks\n")
+    parser = argparse.ArgumentParser(description="Run WebSkrap performance benchmarks.")
+    parser.add_argument(
+        "--mode",
+        choices=("virtual-display", "headed"),
+        default=MODE,
+        help="virtual-display: headless=True on a private Xvfb screen; headed: headless=False.",
+    )
+    MODE = parser.parse_args().mode
+    if (
+        MODE == "headed"
+        and sys.platform.startswith("linux")
+        and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    ):
+        parser.error("headed mode needs a display; on a machine without one, use xvfb-run -a")
+    print(f" WebSkrap performance benchmarks ({MODE})\n")
     asyncio.run(main())
