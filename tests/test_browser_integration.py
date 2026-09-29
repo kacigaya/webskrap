@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 import sys
 import threading
@@ -9,11 +10,79 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from mcp import ClientSession
+from mcp.shared.memory import create_client_server_memory_streams
 
-from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient, browser_session
+from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient, browser_session, mcp_server
 from webskrap.client import lavapipe_available
+from webskrap.fetch_runtime import FetchRuntime
 
 pytestmark = pytest.mark.browser
+
+
+async def test_mcp_protocol_reuses_fetch_sessions_and_keeps_unnamed_calls_isolated(
+    test_server: str, sandbox_supported: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_ALLOW_PRIVATE_NET", "1")
+    monkeypatch.setenv("WEBSKRAP_CHROMIUM_SANDBOX", "1" if sandbox_supported else "0")
+    runtimes: list[FetchRuntime] = []
+
+    class CapturingFetchRuntime(FetchRuntime):
+        def __init__(self):
+            super().__init__()
+            runtimes.append(self)
+
+    monkeypatch.setattr(mcp_server, "FetchRuntime", CapturingFetchRuntime)
+    async with create_client_server_memory_streams() as (client_streams, server_streams):
+        server = asyncio.create_task(
+            mcp_server.mcp._lowlevel_server.run(
+                *server_streams, mcp_server.mcp._lowlevel_server.create_initialization_options()
+            )
+        )
+        try:
+            async with ClientSession(*client_streams) as client:
+                await client.initialize()
+                common = {
+                    "channel": "chromium",
+                    "decline_cookies": False,
+                    "wait_until": "load",
+                    "timeout_ms": 60_000,
+                }
+                result = await client.call_tool(
+                    "fetch", {"url": f"{test_server}/set-cookie", "session": "crawl", **common}
+                )
+                assert not result.is_error
+                result = await client.call_tool(
+                    "stealth_fetch",
+                    {"url": f"{test_server}/echo-cookie", "session": "crawl", **common},
+                )
+                assert not result.is_error
+                assert "webskrap_test=1" in result.structured_content["text"]
+                results = await asyncio.gather(
+                    *(
+                        client.call_tool(
+                            "stealth_fetch",
+                            {"url": test_server, "session": "crawl", **common},
+                        )
+                        for _ in range(3)
+                    )
+                )
+                assert all(not result.is_error for result in results)
+                assert all(result.structured_content["text"] == "WebSkrap" for result in results)
+                result = await client.call_tool(
+                    "fetch", {"url": f"{test_server}/echo-cookie", **common}
+                )
+                assert not result.is_error
+                assert "webskrap_test" not in result.structured_content["text"]
+                result = await client.call_tool("fetch_session_close", {"session": "crawl"})
+                assert not result.is_error
+                assert result.structured_content == {"closed": True}
+        finally:
+            server.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await server
+    assert runtimes[0].client._playwright is None
+
 
 # A OneTrust-shaped notice: matched by an exact CMP selector.
 CMP_BANNER_PAGE = b"""<html><title>Notice</title><body>

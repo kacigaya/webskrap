@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from anyio import CancelScope, sleep
+from playwright.async_api import BrowserContext
 
 from webskrap.client import (
     WebSkrapClient,
@@ -20,6 +23,101 @@ from webskrap.models import ResourcePolicy, SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
 
 SEARCH_FIXTURES = Path(__file__).parent / "fixtures" / "search"
+
+
+async def test_ua_probe_is_shared_cached_and_reset_on_close(monkeypatch) -> None:
+    client = WebSkrapClient()
+    probe = AsyncMock(return_value="Chrome/140.0")
+    monkeypatch.setattr(client, "_probe_headless_user_agent", probe)
+    config = SessionConfig(mask_headless_user_agent=True)
+    uas = await asyncio.gather(
+        *(client._headless_clean_user_agent(object(), config) for _ in range(8))
+    )
+    assert uas == ["Chrome/140.0"] * 8
+    assert probe.await_count == 1
+    await client._headless_clean_user_agent(object(), SessionConfig(channel="chrome"))
+    assert probe.await_count == 2
+    await client.close()
+    await client._headless_clean_user_agent(object(), config)
+    assert probe.await_count == 3
+
+
+async def test_failed_ua_probe_is_not_cached(monkeypatch) -> None:
+    client = WebSkrapClient()
+    probe = AsyncMock(side_effect=[None, "Chrome/140.0"])
+    monkeypatch.setattr(client, "_probe_headless_user_agent", probe)
+    assert await client._headless_clean_user_agent(object(), SessionConfig()) is None
+    assert await client._headless_clean_user_agent(object(), SessionConfig()) == "Chrome/140.0"
+    assert probe.await_count == 2
+
+
+async def test_ua_probe_rewrites_native_version_and_closes_without_sleep(monkeypatch) -> None:
+    page = MagicMock()
+    page.evaluate = AsyncMock(return_value="Mozilla/5.0 HeadlessChrome/140.0.1 Safari/537.36")
+    browser = MagicMock()
+    browser.new_page = AsyncMock(return_value=page)
+    browser.close = AsyncMock()
+    browser_type = MagicMock()
+    browser_type.launch = AsyncMock(return_value=browser)
+    sleep = AsyncMock(side_effect=AssertionError("UA probe must not sleep"))
+    monkeypatch.setattr("webskrap.client.asyncio.sleep", sleep)
+    ua = await WebSkrapClient()._headless_clean_user_agent(browser_type, SessionConfig())
+    assert ua == "Mozilla/5.0 Chrome/140.0.1 Safari/537.36"
+    browser.close.assert_awaited_once()
+    sleep.assert_not_awaited()
+
+
+async def test_explicit_ua_skips_probe(monkeypatch) -> None:
+    chromium = _LaunchChromium()
+    client, _displays, _sizes = _virtual_display_client(monkeypatch, chromium)
+    config = SessionConfig(
+        driver="patchright",
+        mask_headless_user_agent=True,
+        launch_args=["--user-agent=Caller UA"],
+    )
+    session = await client._create_session("ua", config, get_profile(None))
+    assert "--user-agent=Caller UA" in chromium.options["args"]
+    await session.close()
+
+
+async def test_session_close_survives_repeated_cancellation_and_removes_profile(tmp_path) -> None:
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+
+    async def checkpoint_close():
+        await sleep(0)
+        await sleep(0)
+
+    context = MagicMock(spec=BrowserContext)
+    context.close = AsyncMock(side_effect=checkpoint_close)
+    session = WebSkrapSession(
+        name="cancelled",
+        context=context,
+        config=SessionConfig(),
+        profile=get_profile(None),
+        temp_user_data_dir=str(profile_dir),
+    )
+    with CancelScope() as scope:
+        scope.cancel()
+        await session.close()
+    assert session._closed
+    context.close.assert_awaited_once()
+    assert not profile_dir.exists()
+
+
+async def test_failed_close_keeps_client_ownership(monkeypatch) -> None:
+    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
+    client = WebSkrapClient()
+    monkeypatch.setattr(client, "_create_session", lambda *_args: _new_managed_session())
+    session = await client.session("retained")
+    close = session.close
+    monkeypatch.setattr(session, "close", AsyncMock(side_effect=RuntimeError("close failed")))
+    with pytest.raises(RuntimeError, match="close failed"):
+        await client.close_session("retained")
+    assert client._sessions["retained"] is session
+    monkeypatch.setattr(session, "close", close)
+    assert await client.close_session("retained") is True
+    await client.close()
 
 
 class _Request:
@@ -292,6 +390,31 @@ async def test_fetch_skips_cookie_decline_when_disabled() -> None:
 
     assert result.cookie_notice_declined is None
     assert page.consent_waits == []
+
+
+async def test_fetch_consent_override_is_per_call_and_preserves_config(monkeypatch) -> None:
+    declined = []
+
+    async def fake_decline(page, *, timeout_ms):
+        declined.append(page)
+        return "cmp"
+
+    monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
+    config = SessionConfig(decline_cookies=True)
+    session = WebSkrapSession(
+        name="consent",
+        context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
+        config=config,
+        profile=get_profile(None),
+    )
+    skipped, clicked = await asyncio.gather(
+        session.fetch("https://example.test", decline_cookies=False),
+        session.fetch("https://example.test", decline_cookies=True),
+    )
+    assert skipped.cookie_notice_declined is None
+    assert clicked.cookie_notice_declined == "cmp"
+    assert len(declined) == 1
+    assert config.decline_cookies is True
 
 
 class _SearchPage(_FetchPage):

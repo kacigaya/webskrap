@@ -13,16 +13,21 @@ is answered after a small fixed delay to model real-world network cost, so the
 effect of blocking resources is observable and repeatable. No external sites are
 contacted. Timings vary with the host and browser version.
 
-Sessions use the stealth setup with the Patchright driver. Two modes:
+Sessions use the stealth setup with the Patchright driver. Three modes:
 
 - virtual-display (default): headless=True with virtual_display=True, so
   Chromium runs headed on a private Xvfb screen WebSkrap starts per session.
   Needs Linux with Xvfb installed.
 - headed: headless=False on the display in $DISPLAY. On a machine without a
   desktop, run it under xvfb-run.
+- headless: native headless Chromium, without Xvfb.
 
 Run:  python benchmarks.py
       python benchmarks.py --mode headed
+      python benchmarks.py --mode headless --mask-headless-user-agent --repeat 5
+Use --concurrency to set pages per batch and --warmup for untimed batches.
+MCP runtime benchmarks measure the admission/reuse path, excluding JSON-RPC
+transport, URL DNS checks, and result shaping.
 If Chromium cannot use its OS sandbox on this host:
       WEBSKRAP_CHROMIUM_SANDBOX=0 python benchmarks.py
 """
@@ -36,11 +41,14 @@ import os
 import sys
 import threading
 import time
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from statistics import mean
 
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
 from webskrap.browser_session import sandbox_enabled
+from webskrap.fetch_runtime import FetchRuntime
+from webskrap.profiles import get_profile
 
 # --- tunables -------------------------------------------------------------
 
@@ -102,7 +110,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # A completed fetch can close its page while assets are pending.
+        with suppress(BrokenPipeError, ConnectionResetError):
+            self.wfile.write(body)
 
 
 class LocalServer:
@@ -118,6 +128,7 @@ class LocalServer:
     def __exit__(self, *exc: object) -> None:
         self._httpd.shutdown()
         self._thread.join(timeout=5)
+        self._httpd.server_close()
 
 
 # --- benchmark harness ----------------------------------------------------
@@ -143,6 +154,7 @@ def benchmark(func):
 
 
 MODE = "virtual-display"  # set from --mode
+MASK_UA = False
 
 
 def _config(policy: ResourcePolicy) -> SessionConfig:
@@ -150,10 +162,11 @@ def _config(policy: ResourcePolicy) -> SessionConfig:
     return SessionConfig(
         driver="patchright",
         headless=not headed,
-        virtual_display=not headed,
+        virtual_display=MODE == "virtual-display",
         chromium_sandbox=sandbox_enabled(None),
         resource_policy=policy,
         decline_cookies=False,
+        mask_headless_user_agent=MASK_UA,
     )
 
 
@@ -175,6 +188,21 @@ async def bench_warm_session(session) -> None:
 @benchmark
 async def bench_concurrent(session) -> None:
     await asyncio.gather(*(session.fetch(URL, wait_until="load") for _ in range(CONCURRENCY)))
+
+
+@benchmark
+async def bench_mcp_session(runtime) -> None:
+    async with runtime.use("bench", _config(ResourcePolicy.LITE), get_profile(None)) as session:
+        await session.fetch(URL, wait_until="load")
+
+
+@benchmark
+async def bench_mcp_concurrent(runtime) -> None:
+    async def fetch_one() -> None:
+        async with runtime.use("bench", _config(ResourcePolicy.LITE), get_profile(None)) as session:
+            await session.fetch(URL, wait_until="load")
+
+    await asyncio.gather(*(fetch_one() for _ in range(CONCURRENCY)))
 
 
 def display(title: str, results: dict[str, float], baseline_key: str) -> None:
@@ -201,7 +229,8 @@ async def main() -> None:
                 ("DOCUMENTS", ResourcePolicy.DOCUMENTS),
             ):
                 session = await client.session(f"policy_{label}", config=_config(policy))
-                policy_results[label] = await bench_policy(session)
+                async with session:
+                    policy_results[label] = await bench_policy(session)
             display(
                 "Resource routing (full page load with delayed assets)",
                 policy_results,
@@ -215,22 +244,53 @@ async def main() -> None:
                 "warm session reuse": await bench_warm_session(warm),
             }
             display("Session reuse", reuse_results, "warm session reuse")
+            await warm.close()
 
             # 3. Concurrency
             conc = await client.session("conc", config=_config(ResourcePolicy.LITE))
             per_page = round(await bench_concurrent(conc) / CONCURRENCY, 2)
             print(f"Concurrency: {CONCURRENCY} pages/batch, {per_page} ms per page\n")
+            await conc.close()
+
+            # Same admission/reuse path used by fetch and stealth_fetch over MCP.
+            runtime = FetchRuntime()
+            try:
+                mcp_warm = await bench_mcp_session(runtime)
+                display(
+                    "MCP session reuse (driver/browser retained)",
+                    {
+                        "isolated cold fetch": reuse_results["cold launch / fetch"],
+                        "MCP warm": mcp_warm,
+                    },
+                    "isolated cold fetch",
+                )
+                batch_ms = await bench_mcp_concurrent(runtime)
+                print(f"MCP bounded concurrency: {CONCURRENCY * 1000 / batch_ms:.2f} pages/s\n")
+            finally:
+                await runtime.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run WebSkrap performance benchmarks.")
     parser.add_argument(
         "--mode",
-        choices=("virtual-display", "headed"),
+        choices=("virtual-display", "headed", "headless"),
         default=MODE,
-        help="virtual-display: headless=True on a private Xvfb screen; headed: headless=False.",
+        help="virtual-display: headed on private Xvfb; headed: current display; headless: native.",
     )
-    MODE = parser.parse_args().mode
+    parser.add_argument("--repeat", type=int, default=REPEAT, help="Timed batches per benchmark.")
+    parser.add_argument("--warmup", type=int, default=WARMUP, help="Untimed warmup batches.")
+    parser.add_argument("--concurrency", type=int, default=CONCURRENCY, help="Pages per batch.")
+    parser.add_argument(
+        "--mask-headless-user-agent", action="store_true", help="Measure UA probe/cache overhead."
+    )
+    args = parser.parse_args()
+    if args.repeat < 1 or args.warmup < 0 or args.concurrency < 1:
+        parser.error("repeat and concurrency must be positive; warmup must be nonnegative")
+    if args.mask_headless_user_agent and args.mode != "headless":
+        parser.error("--mask-headless-user-agent requires --mode headless")
+    MODE, REPEAT, WARMUP, CONCURRENCY = args.mode, args.repeat, args.warmup, args.concurrency
+    MASK_UA = args.mask_headless_user_agent
     if (
         MODE == "headed"
         and sys.platform.startswith("linux")

@@ -11,12 +11,18 @@ drive a real browser directly. It runs over stdio and exposes fetch tools for
 one-shot scraping plus `browser_*` tools for persistent interactive sessions.
 
 Both `fetch` and `stealth_fetch` run the same CDP-leak-free Patchright stealth
-path the CLI uses (headless Chrome, `networkidle` wait), so JS-heavy and
+path the CLI uses (headless Chrome), so JS-heavy and
 anti-bot pages that block naive scrapers still load. They return clean visible
 page text by default, with no HTML tags, scripts, or CSS noise, so the model
 spends tokens on content instead of markup (typically 5-10x fewer tokens than
 raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control. Pass
 `text_only=false` when you need the HTML.
+
+`fetch` waits for `networkidle` by default; `stealth_fetch` uses
+`domcontentloaded`. Both accept `wait_until` and `resource_policy`. Use `lite`
+to skip images, fonts and media, or `documents` to also skip stylesheets.
+Earlier load states can read before deferred content arrives. Routing disables
+the HTTP cache and does not intercept service-worker-owned requests.
 
 ## Install
 
@@ -43,6 +49,7 @@ python -m webskrap.mcp_server
 | --- | --- |
 | `fetch` | Fetch a URL with the Patchright stealth driver (waits for `networkidle`). |
 | `stealth_fetch` | Same stealth driver with finer fingerprint/WebRTC/UA controls. |
+| `fetch_session_close` | Close an idle warm fetch session; persistent profile files survive. |
 | `search` | Find URLs for a query on Bing (default) or DuckDuckGo, with the `stealth_fetch` stealth controls. |
 | `doctor` | Check that Patchright and Chromium can launch. |
 | `browser_open` | Start (or reuse) a persistent headless browser session. |
@@ -79,6 +86,7 @@ leave the notice in place.
 | `max_chars` | `20000` | Maximum returned text characters. |
 | `text_only` | `true` | Return clean visible text; set `false` for raw HTML. |
 | `decline_cookies` | `true` | Click a cookie consent notice's reject button after load. |
+| `session` | `null` | Opt in to a warm browser with shared cookies/storage. |
 
 Example arguments:
 
@@ -92,8 +100,9 @@ Example arguments:
 }
 ```
 
-`stealth_fetch` accepts the same URL/profile/timeout/output-size controls plus
-Patchright options:
+`stealth_fetch` accepts the same URL/profile/timeout/output-size/session controls,
+`resource_policy` (default `all`) and `wait_until` (default `domcontentloaded`),
+plus Patchright options:
 
 ```json
 {
@@ -114,6 +123,34 @@ When `user_data_dir` is set, it must be relative to
 environment to move that root. Absolute paths, `..` traversal, and symlinks
 resolving outside the root are rejected. This confinement applies only to MCP
 tool input; Python callers can still choose any `SessionConfig.user_data_dir`.
+
+### Warm fetch sessions
+
+For repeated extraction, pass the same `session` name on each fetch:
+
+```json
+{
+  "url": "https://example.com",
+  "session": "crawl",
+  "resource_policy": "lite",
+  "decline_cookies": false
+}
+```
+
+The first call launches the browser; later calls open new pages in its existing
+context. Cookies and storage are shared within that name. Keep profile and
+config options identical; changes are rejected. `timeout_ms`, `decline_cookies`,
+output options and `wait_until` can vary. Concurrent calls can use the same session.
+Up to eight fetches run at once; extra calls wait. Up to eight named sessions
+stay open; close unused ones before creating more.
+
+Call `fetch_session_close(session="crawl")` when done. It returns
+`{"closed": true}`, or `false` for an absent session. Busy sessions are refused.
+The server closes all fetch sessions on shutdown. These sessions are separate
+from `browser_*` sessions and do not survive a server restart. Persistent
+`user_data_dir` files survive closing. Without `session`, each call still uses
+a fresh browser and temporary profile; an explicit `user_data_dir` retains its
+on-disk state.
 
 `search` takes `query`, `engine` (`bing` by default, or `ddg`), `max_results`, and the
 channel, profile, fingerprint and `user_data_dir` arguments `stealth_fetch`

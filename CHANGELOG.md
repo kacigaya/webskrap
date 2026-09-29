@@ -9,6 +9,35 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- MCP `fetch` and `stealth_fetch` accept an opt-in `session` name for warm
+  browser reuse. `fetch_session_close` releases idle fetch sessions. Cookies
+  and storage are shared only when requested; eight fetches may run at once
+  and eight named sessions may stay open.
+- `stealth_fetch` accepts `resource_policy` and `wait_until`, retaining its
+  `all` and `domcontentloaded` defaults.
+- `WebSkrapClient.close_session(name)` closes and forgets a named session.
+- Python fetches accept a per-call `decline_cookies` override. Warm MCP
+  sessions can vary consent dismissal and navigation timeout without relaunching.
+- Benchmarks cover the MCP fetch runtime, native headless mode, UA masking,
+  and configurable repeat, warmup, and concurrency counts.
+
+### Changed
+
+- MCP fetch tools retain their driver for the server lifetime. Unnamed calls
+  still use fresh browsers and temporary profiles.
+- UA masking caches successful probes per browser/channel/sandbox setting
+  within a client and removes the two-second delay after probe shutdown.
+- Temporary browser profile cleanup runs off the event loop.
+
+### Fixed
+
+- Cancelling a caller waiting for a shared session launch no longer cancels
+  other callers or loses ownership of the launching browser.
+- MCP cancellation completes page and browser cleanup. Closing one fetch
+  session no longer holds the registry lock during browser teardown.
+
 ## [2.10.1] - 2026-09-29
 
 ### Added

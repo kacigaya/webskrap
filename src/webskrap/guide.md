@@ -8,13 +8,29 @@
 | Read one page | `stealth_fetch` (preferred) or `fetch` |
 | Read a page and follow its links | `stealth_fetch` with `include_links=true` |
 | Read a long page | `stealth_fetch`, then repeat with `offset=next_text_offset` |
+| Release a warm fetch session | `fetch_session_close` |
 | Click, type, log in, multi-step flow | `browser_open` -> `browser_snapshot` -> `browser_interact` -> `browser_wait_for` |
 | Check why something failed | `doctor` |
 
 `fetch` and `stealth_fetch` use the same stealth browser. `stealth_fetch` adds
 fingerprint, WebRTC, user-agent and persistent-profile control, and is the one
-to reach for by default. Neither keeps cookies between calls: that is what a
-browser session is for.
+to reach for by default. Without `session`, each call gets a fresh browser and
+temporary profile. An explicit `user_data_dir` keeps its on-disk state.
+
+For repeated extraction, pass `session="crawl"` to either fetch tool. The
+browser stays warm and cookies/storage are shared within that name. Use the
+same profile and config on every call; `timeout_ms`, `decline_cookies`, output
+options and `wait_until` may vary. Other changes are rejected until you call
+`fetch_session_close(session="crawl")`. At most eight fetches run at once and
+eight named fetch sessions stay open. A busy session cannot be closed. These
+sessions end when the MCP server stops and are separate from `browser_*`
+sessions. Persistent `user_data_dir` files survive closing.
+
+Both fetch tools accept `resource_policy` and `wait_until`. `stealth_fetch`
+defaults to `domcontentloaded`; `fetch` defaults to `networkidle`. Use `lite`
+to skip images/fonts/media or `documents` to also skip stylesheets. Earlier
+load states can read before deferred page content arrives. Routing disables
+the browser's HTTP cache and does not intercept service-worker-owned requests.
 
 `search` loads Bing's results page (`engine="bing"`, the default) or
 DuckDuckGo's HTML page (`engine="ddg"`) in the same stealth browser and
