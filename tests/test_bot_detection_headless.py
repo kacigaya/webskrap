@@ -8,6 +8,10 @@ They exercise the same public demos as ``test_bot_detection.py`` but run with
 ``headless=True``. Explicit headless-only signals are tolerated; webdriver, CDP,
 Playwright, and stealth/tampering signals are not. The suite uses its own
 persistent Chrome profile so results can be compared with the headed live suite.
+
+Set ``WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1`` to run the suite with
+``virtual_display=True`` (Linux with Xvfb) instead of masking the headless user
+agent, so Chromium runs headed on a private Xvfb screen.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import pytest
 from live_stealth_helpers import live_proxy, wait_for_recaptcha_score_or_skip
 
 from webskrap import SessionConfig, Viewport, WebSkrapClient
+from webskrap.browser_session import sandbox_enabled
 
 pytestmark = [pytest.mark.browser, pytest.mark.live]
 
@@ -32,9 +37,11 @@ STEALTH_HEADLESS = SessionConfig(
     driver="patchright",
     channel=os.environ.get("WEBSKRAP_BROWSER_CHANNEL", "chrome"),
     headless=True,
+    chromium_sandbox=sandbox_enabled(None),
     user_data_dir=LIVE_HEADLESS_PROFILE_DIR,
     headless_screen=Viewport(width=1366, height=768),
     mask_headless_user_agent=True,
+    virtual_display=os.environ.get("WEBSKRAP_LIVE_VIRTUAL_DISPLAY") == "1",
     proxy=live_proxy(),
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )
