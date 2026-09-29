@@ -8,6 +8,10 @@ They exercise the same public demos as ``test_bot_detection.py`` but run with
 ``headless=True``. Explicit headless-only signals are tolerated; webdriver, CDP,
 Playwright, and stealth/tampering signals are not. The suite uses its own
 persistent Chrome profile so results can be compared with the headed live suite.
+
+Set ``WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1`` to run the suite with
+``virtual_display=True`` (Linux with Xvfb) instead of masking the headless user
+agent, so Chromium runs headed on a private Xvfb screen.
 """
 
 from __future__ import annotations
@@ -17,9 +21,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from live_stealth_helpers import live_proxy, wait_for_recaptcha_score_or_skip
+from live_stealth_helpers import (
+    goto_or_skip,
+    live_gpu,
+    live_proxy,
+    wait_for_recaptcha_score_or_skip,
+)
 
 from webskrap import SessionConfig, Viewport, WebSkrapClient
+from webskrap.browser_session import sandbox_enabled
 
 pytestmark = [pytest.mark.browser, pytest.mark.live]
 
@@ -32,9 +42,12 @@ STEALTH_HEADLESS = SessionConfig(
     driver="patchright",
     channel=os.environ.get("WEBSKRAP_BROWSER_CHANNEL", "chrome"),
     headless=True,
+    chromium_sandbox=sandbox_enabled(None),
     user_data_dir=LIVE_HEADLESS_PROFILE_DIR,
     headless_screen=Viewport(width=1366, height=768),
     mask_headless_user_agent=True,
+    virtual_display=os.environ.get("WEBSKRAP_LIVE_VIRTUAL_DISPLAY") == "1",
+    gpu=live_gpu(),
     proxy=live_proxy(),
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )
@@ -91,7 +104,8 @@ def _unexpected(failed: list[str], allowed: set[str]) -> list[str]:
 
 async def test_recaptcha_v3_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://recaptcha-demo.appspot.com/recaptcha-v3-request-scores.php",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -108,7 +122,8 @@ async def test_recaptcha_v3_headless() -> None:
 
 async def test_cloudflare_turnstile_headless_loads() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://2captcha.com/demo/cloudflare-turnstile",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -128,7 +143,8 @@ async def test_cloudflare_turnstile_headless_loads() -> None:
 
 async def test_browserscan_bot_detection_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://www.browserscan.net/bot-detection",
             wait_until="networkidle",
             timeout=60_000,
@@ -167,7 +183,8 @@ async def test_browserscan_bot_detection_headless() -> None:
 
 async def test_fingerprintjs_web_scraping_demo_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://demo.fingerprint.com/web-scraping",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -194,7 +211,8 @@ async def test_fingerprintjs_web_scraping_demo_headless() -> None:
 
 async def test_device_and_browser_info_behavioral_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://deviceandbrowserinfo.com/are_you_a_bot",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -221,7 +239,8 @@ async def test_device_and_browser_info_behavioral_headless() -> None:
 
 async def test_bot_sannysoft_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://bot.sannysoft.com",
             wait_until="networkidle",
             timeout=60_000,
@@ -246,7 +265,8 @@ async def test_bot_sannysoft_headless() -> None:
 async def test_bot_incolumitas_headless() -> None:
     known_acceptable = {"WEBDRIVER", "connectionRTT"} | _INCOL_HEADLESS_LABELS
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://bot.incolumitas.com",
             wait_until="networkidle",
             timeout=60_000,
@@ -265,7 +285,8 @@ async def test_bot_incolumitas_headless() -> None:
 
 async def test_are_you_headless_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://arh.antoinevastel.com/bots/areyouheadless",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -292,7 +313,8 @@ _CREEPJS_EVAL = """() => {
 
 async def test_creepjs_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://abrahamjuliot.github.io/creepjs/",
             wait_until="networkidle",
             timeout=60_000,

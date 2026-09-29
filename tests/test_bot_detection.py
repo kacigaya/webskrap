@@ -38,9 +38,15 @@ from json import loads
 from pathlib import Path
 
 import pytest
-from live_stealth_helpers import live_proxy, wait_for_recaptcha_score_or_skip
+from live_stealth_helpers import (
+    goto_or_skip,
+    live_gpu,
+    live_proxy,
+    wait_for_recaptcha_score_or_skip,
+)
 
 from webskrap import SessionConfig, WebSkrapClient
+from webskrap.browser_session import sandbox_enabled
 
 pytestmark = [pytest.mark.browser, pytest.mark.live]
 
@@ -56,7 +62,9 @@ STEALTH = SessionConfig(
     driver="patchright",
     channel=os.environ.get("WEBSKRAP_BROWSER_CHANNEL", "chrome"),
     headless=False,
+    chromium_sandbox=sandbox_enabled(None),
     user_data_dir=LIVE_PROFILE_DIR,
+    gpu=live_gpu(),
     proxy=live_proxy(),
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )
@@ -112,7 +120,7 @@ def _is_public_ip(value: str) -> bool:
 
 
 async def _json_body(page, url: str) -> dict:
-    response = await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+    response = await goto_or_skip(page, url, wait_until="domcontentloaded", timeout=60_000)
     assert response and response.status < 400, (
         f"{url} returned {response.status if response else None}"
     )
@@ -140,7 +148,8 @@ async def _dnsleaktest_rows(page) -> list[dict[str, str]]:
 async def test_recaptcha_v3() -> None:
     # reCAPTCHA v3 score must be >= 0.7 (human range).
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://recaptcha-demo.appspot.com/recaptcha-v3-request-scores.php",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -160,7 +169,8 @@ async def test_cloudflare_turnstile_demo() -> None:
     # Verify the public demo renders the Turnstile surface. WebSkrap does not
     # solve or submit CAPTCHA challenges.
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://2captcha.com/demo/cloudflare-turnstile",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -193,7 +203,8 @@ async def test_cloudflare_turnstile_demo() -> None:
 async def test_browserscan_bot_detection() -> None:
     # BrowserScan must report 0 abnormal checks.
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://www.browserscan.net/bot-detection",
             wait_until="networkidle",
             timeout=60_000,
@@ -216,7 +227,8 @@ async def test_browserscan_bot_detection() -> None:
 async def test_fingerprintjs_web_scraping_demo() -> None:
     # FingerprintJS web-scraping demo must return flight prices, not block us.
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://demo.fingerprint.com/web-scraping",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -241,7 +253,9 @@ async def test_fingerprintjs_web_scraping_demo() -> None:
 
 async def test_pixelscan_audit_loads_without_explicit_block() -> None:
     async with stealth_page() as page:
-        await page.goto("https://pixelscan.net", wait_until="domcontentloaded", timeout=60_000)
+        await goto_or_skip(
+            page, "https://pixelscan.net", wait_until="domcontentloaded", timeout=60_000
+        )
         await page.wait_for_function(
             """() => /pixelscan|fingerprint|bot/i.test(document.body.innerText)""",
             timeout=30_000,
@@ -254,7 +268,9 @@ async def test_pixelscan_audit_loads_without_explicit_block() -> None:
 
 async def test_browserscan_main_page_renders_fingerprint_summary() -> None:
     async with stealth_page() as page:
-        await page.goto("https://www.browserscan.net", wait_until="networkidle", timeout=60_000)
+        await goto_or_skip(
+            page, "https://www.browserscan.net", wait_until="networkidle", timeout=60_000
+        )
         await page.wait_for_function(
             """() => /browserscan|fingerprint|browser/i.test(document.body.innerText)""",
             timeout=30_000,
@@ -267,7 +283,9 @@ async def test_browserscan_main_page_renders_fingerprint_summary() -> None:
 
 async def test_fingerprint_scan_page_renders_score_surface() -> None:
     async with stealth_page() as page:
-        await page.goto("https://fingerprint-scan.com", wait_until="networkidle", timeout=60_000)
+        await goto_or_skip(
+            page, "https://fingerprint-scan.com", wait_until="networkidle", timeout=60_000
+        )
         await page.wait_for_function(
             """() => /fingerprint|scan|score/i.test(document.body.innerText)""",
             timeout=30_000,
@@ -280,7 +298,9 @@ async def test_fingerprint_scan_page_renders_score_surface() -> None:
 
 async def test_browserleaks_webrtc_policy_hides_private_candidates() -> None:
     async with stealth_page() as page:
-        await page.goto("https://browserleaks.com/webrtc", wait_until="networkidle", timeout=60_000)
+        await goto_or_skip(
+            page, "https://browserleaks.com/webrtc", wait_until="networkidle", timeout=60_000
+        )
         await page.wait_for_function(
             """() => /webrtc|rtcpeerconnection|candidate/i.test(document.body.innerText)""",
             timeout=30_000,
@@ -292,7 +312,8 @@ async def test_browserleaks_webrtc_policy_hides_private_candidates() -> None:
 
 async def test_browserleaks_client_hints_no_headless_ua() -> None:
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://browserleaks.com/client-hints",
             wait_until="networkidle",
             timeout=60_000,
@@ -308,7 +329,9 @@ async def test_browserleaks_client_hints_no_headless_ua() -> None:
 
 async def test_browserleaks_tls_reports_fingerprint_surface() -> None:
     async with stealth_page() as page:
-        await page.goto("https://tls.browserleaks.com", wait_until="networkidle", timeout=60_000)
+        await goto_or_skip(
+            page, "https://tls.browserleaks.com", wait_until="networkidle", timeout=60_000
+        )
         await page.wait_for_function(
             """() => /tls|ja3|ja4|fingerprint/i.test(document.body.innerText)""",
             timeout=30_000,
@@ -335,7 +358,9 @@ async def test_tls_ja3_visibility_and_proxy_consistency() -> None:
 
 async def test_dns_leak_surface_renders() -> None:
     async with stealth_page() as page:
-        await page.goto("https://dnsleaktest.com", wait_until="domcontentloaded", timeout=60_000)
+        await goto_or_skip(
+            page, "https://dnsleaktest.com", wait_until="domcontentloaded", timeout=60_000
+        )
         await page.wait_for_function(
             """() => /dns leak test/i.test(document.title) ||
                 /what is a dns leak|webrtc leak test|standard test|extended test/i
@@ -348,7 +373,9 @@ async def test_dns_leak_surface_renders() -> None:
 
 async def test_dns_standard_test_resolvers_are_public_and_proxy_consistent() -> None:
     async with stealth_page() as page:
-        await page.goto("https://dnsleaktest.com", wait_until="domcontentloaded", timeout=60_000)
+        await goto_or_skip(
+            page, "https://dnsleaktest.com", wait_until="domcontentloaded", timeout=60_000
+        )
         await page.get_by_role("button", name="Standard test").click(timeout=10_000)
         await page.wait_for_function(
             """() => /test complete/i.test(document.body.innerText) &&
@@ -379,7 +406,8 @@ async def test_dns_standard_test_resolvers_are_public_and_proxy_consistent() -> 
 async def test_device_and_browser_info_behavioral() -> None:
     # deviceandbrowserinfo.com behavioral detection: isBot must be false.
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://deviceandbrowserinfo.com/are_you_a_bot",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -405,7 +433,9 @@ async def test_device_and_browser_info_behavioral() -> None:
 async def test_bot_sannysoft() -> None:
     # bot.sannysoft.com — no detection row may be marked failed.
     async with stealth_page() as page:
-        await page.goto("https://bot.sannysoft.com", wait_until="networkidle", timeout=60_000)
+        await goto_or_skip(
+            page, "https://bot.sannysoft.com", wait_until="networkidle", timeout=60_000
+        )
         await page.wait_for_timeout(4_000)
         failed = await page.evaluate(
             """() => {
@@ -426,7 +456,9 @@ async def test_bot_incolumitas() -> None:
     # bot.incolumitas.com — only network/spec false positives are tolerated.
     known_acceptable = {"WEBDRIVER", "connectionRTT"}
     async with stealth_page() as page:
-        await page.goto("https://bot.incolumitas.com", wait_until="networkidle", timeout=60_000)
+        await goto_or_skip(
+            page, "https://bot.incolumitas.com", wait_until="networkidle", timeout=60_000
+        )
         await page.wait_for_timeout(13_000)
         failed = await page.evaluate(
             """() => {
@@ -442,7 +474,8 @@ async def test_bot_incolumitas() -> None:
 async def test_are_you_headless() -> None:
     # antoinevastel "are you headless" — must report not Chrome headless.
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://arh.antoinevastel.com/bots/areyouheadless",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -475,7 +508,8 @@ _CREEPJS_EVAL = """() => {
 
 async def test_creepjs() -> None:
     async with stealth_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://abrahamjuliot.github.io/creepjs/",
             wait_until="networkidle",
             timeout=60_000,

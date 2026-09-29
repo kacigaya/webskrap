@@ -210,6 +210,8 @@ def build_payload(results: list[TestResult], started: float, finished: float) ->
                 "WEBSKRAP_LIVE_HEADLESS_PROFILE_DIR", ".webskrap/live-headless-profile"
             ),
             "proxy": bool(os.environ.get("WEBSKRAP_LIVE_PROXY")),
+            "headless_virtual_display": os.environ.get("WEBSKRAP_LIVE_VIRTUAL_DISPLAY") == "1",
+            "gpu": os.environ.get("WEBSKRAP_LIVE_GPU", "auto"),
         },
         "tests": [result.to_json() for result in results],
         "summary": summarize(results),
