@@ -88,7 +88,9 @@ part of CI and a failure there usually says more about the site than about
 your change. Browser tests need `webskrap install` to have run. Live suites
 honor `WEBSKRAP_CHROMIUM_SANDBOX=0`, and `WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1` runs
 the headless suite on a private Xvfb display (Linux) instead of masking the
-headless user agent.
+headless user agent. On hosts without a GPU, `WEBSKRAP_LIVE_GPU=mesa` renders
+WebGL through Mesa's lavapipe driver so WebGL checks do not fail on the host.
+A demo site answering with a 5xx status skips its test instead of failing it.
 
 Hosts without a working Chromium sandbox (unprivileged containers, images with
 user namespaces disabled) are handled by the `persistent_session_env` fixture,
