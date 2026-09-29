@@ -21,7 +21,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
-from live_stealth_helpers import live_gpu, live_proxy, wait_for_recaptcha_score_or_skip
+from live_stealth_helpers import (
+    goto_or_skip,
+    live_gpu,
+    live_proxy,
+    wait_for_recaptcha_score_or_skip,
+)
 
 from webskrap import SessionConfig, Viewport, WebSkrapClient
 from webskrap.browser_session import sandbox_enabled
@@ -99,7 +104,8 @@ def _unexpected(failed: list[str], allowed: set[str]) -> list[str]:
 
 async def test_recaptcha_v3_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://recaptcha-demo.appspot.com/recaptcha-v3-request-scores.php",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -116,7 +122,8 @@ async def test_recaptcha_v3_headless() -> None:
 
 async def test_cloudflare_turnstile_headless_loads() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://2captcha.com/demo/cloudflare-turnstile",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -136,7 +143,8 @@ async def test_cloudflare_turnstile_headless_loads() -> None:
 
 async def test_browserscan_bot_detection_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://www.browserscan.net/bot-detection",
             wait_until="networkidle",
             timeout=60_000,
@@ -175,7 +183,8 @@ async def test_browserscan_bot_detection_headless() -> None:
 
 async def test_fingerprintjs_web_scraping_demo_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://demo.fingerprint.com/web-scraping",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -202,7 +211,8 @@ async def test_fingerprintjs_web_scraping_demo_headless() -> None:
 
 async def test_device_and_browser_info_behavioral_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://deviceandbrowserinfo.com/are_you_a_bot",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -229,7 +239,8 @@ async def test_device_and_browser_info_behavioral_headless() -> None:
 
 async def test_bot_sannysoft_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://bot.sannysoft.com",
             wait_until="networkidle",
             timeout=60_000,
@@ -254,7 +265,8 @@ async def test_bot_sannysoft_headless() -> None:
 async def test_bot_incolumitas_headless() -> None:
     known_acceptable = {"WEBDRIVER", "connectionRTT"} | _INCOL_HEADLESS_LABELS
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://bot.incolumitas.com",
             wait_until="networkidle",
             timeout=60_000,
@@ -273,7 +285,8 @@ async def test_bot_incolumitas_headless() -> None:
 
 async def test_are_you_headless_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://arh.antoinevastel.com/bots/areyouheadless",
             wait_until="domcontentloaded",
             timeout=60_000,
@@ -300,7 +313,8 @@ _CREEPJS_EVAL = """() => {
 
 async def test_creepjs_headless() -> None:
     async with stealth_headless_page() as page:
-        await page.goto(
+        await goto_or_skip(
+            page,
             "https://abrahamjuliot.github.io/creepjs/",
             wait_until="networkidle",
             timeout=60_000,
