@@ -34,7 +34,8 @@ def test_live_gpu_rejects_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "response", [None, SimpleNamespace(status=200), SimpleNamespace(status=404)]
+    "response",
+    [None, SimpleNamespace(status=200, headers={}), SimpleNamespace(status=404, headers={})],
 )
 def test_goto_or_skip_returns_non_5xx(response) -> None:
     assert asyncio.run(goto_or_skip(_Page(response), "https://example.test")) is response
@@ -42,4 +43,11 @@ def test_goto_or_skip_returns_non_5xx(response) -> None:
 
 def test_goto_or_skip_skips_5xx() -> None:
     with pytest.raises(pytest.skip.Exception, match="HTTP 502"):
-        asyncio.run(goto_or_skip(_Page(SimpleNamespace(status=502)), "https://example.test"))
+        asyncio.run(
+            goto_or_skip(_Page(SimpleNamespace(status=502, headers={})), "https://example.test")
+        )
+
+
+def test_goto_or_skip_keeps_cloudflare_challenge() -> None:
+    response = SimpleNamespace(status=503, headers={"cf-mitigated": "challenge"})
+    assert asyncio.run(goto_or_skip(_Page(response), "https://example.test")) is response
