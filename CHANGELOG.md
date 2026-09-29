@@ -9,6 +9,30 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-09-29
+
+### Added
+
+- `benchmarks.py --mode headed` measures `headless=False` on the current
+  display, next to the default virtual-display mode. Without a display on
+  Linux it exits and suggests `xvfb-run -a`.
+- Live stealth suites read `WEBSKRAP_LIVE_GPU=mesa` to render WebGL through
+  Mesa lavapipe on hosts without a GPU. The live report records the GPU
+  backend and the virtual-display mode.
+
+### Changed
+
+- Live stealth tests skip a demo site that answers with a 5xx status instead
+  of failing. A Cloudflare 503 challenge still fails. Live suites honor
+  `WEBSKRAP_CHROMIUM_SANDBOX=0` and `WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1`.
+- The benchmarks page publishes the September 29 stealth results and a headed
+  vs virtual-display timing comparison.
+
+### Security
+
+- The lockfile pins PyJWT 2.15.1, pulled in by `mcp[crypto]`, which fixes
+  CVE-2026-102274.
+
 ## [2.10.0] - 2026-09-25
 
 ### Added
@@ -572,7 +596,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.10.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.10.1...HEAD
+[2.10.1]: https://github.com/kacigaya/webskrap/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/kacigaya/webskrap/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/kacigaya/webskrap/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/kacigaya/webskrap/compare/v2.7.0...v2.8.0
