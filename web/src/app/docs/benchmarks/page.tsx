@@ -122,7 +122,7 @@ const DETECTION_ROWS: {
     stock: "FAIL",
     cloak: "PASS",
     webskrap: "PASS",
-    notes: "Production sitekey issues a token without interaction",
+    notes: "Production sitekey issued a real token without interaction (3/3 headed, 3/3 headless; rechecked September 30 on macOS)",
   },
   {
     service: "FingerprintJS bot detection",
@@ -368,7 +368,13 @@ export default function BenchmarksPage() {
               17 passed, 1 skipped. Virtual display: 8 passed, 1 skipped. Both skips were
               Are You Headless, which returned 502 Bad Gateway to every client; the suites
               skip a site that answers with a 5xx status. reCAPTCHA v3 returned a score in
-              both suites.
+              both suites. On September 30 the Turnstile check was rerun on macOS 26.1
+              with Google Chrome 151 and Patchright 1.63.0 on a residential connection.
+              The earlier Turnstile demo used a Cloudflare test sitekey, which always
+              returns a dummy token, so it could not show detection. A production
+              sitekey issued real tokens in 3 of 3 headed runs and 3 of 3 headless runs;
+              headed tokens arrived in 3 to 4 seconds. Its managed mode also issued a token in 3 of 3 headed
+              runs, with no clicks.
             </FrameDescription>
           </FrameHeader>
         </Frame>
