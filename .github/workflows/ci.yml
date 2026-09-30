@@ -13,7 +13,7 @@ permissions:
 jobs:
   # Static analysis and packaging do not vary by interpreter, so they run once.
   checks:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       # Pinned exactly: setup-uv publishes no floating v9 major tag.
@@ -42,7 +42,7 @@ jobs:
   # Requirement 1: the package works on every advertised Python version.
   # Browsers are not installed here; the browser job below covers those paths.
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -68,7 +68,7 @@ jobs:
 
   # Browser tests need a Chromium download, so they run on one interpreter.
   browser:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
@@ -96,7 +96,7 @@ jobs:
   # fails this one too and the bar cannot be met by a partial run.
   coverage:
     needs: [test, browser]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
