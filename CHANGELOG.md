@@ -9,6 +9,12 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Security
+
+- Update the documentation site's Next.js and matching ESLint configuration to
+  16.3.6, fixing GHSA-vcvr-r3jv-pc5j in `next/og` and restoring the Pages
+  dependency audit.
+
 ### Added
 
 - MCP `browser_view` returns an inline viewport PNG with CSS coordinate metadata,
