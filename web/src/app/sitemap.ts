@@ -31,6 +31,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     { url: `${SITE_URL}/privacy/`, lastModified: now, changeFrequency: "yearly" as const, priority: 0.3 },
     { url: `${SITE_URL}/cookies/`, lastModified: now, changeFrequency: "yearly" as const, priority: 0.3 },
+    { url: `${SITE_URL}/terms/`, lastModified: now, changeFrequency: "yearly" as const, priority: 0.3 },
+    { url: `${SITE_URL}/legal-notice/`, lastModified: now, changeFrequency: "yearly" as const, priority: 0.3 },
   ];
 
   return [...routes, ...docs];
