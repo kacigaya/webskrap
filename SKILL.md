@@ -1,6 +1,6 @@
 ---
 name: webskrap
-description: Use when writing, debugging, documenting, or reviewing Python scraping, web search, and browser automation code with WebSkrap. Not for ordinary HTTP clients or search APIs.
+description: Use when writing, debugging, documenting, or reviewing Python scraping, web search, and visual browser automation with WebSkrap. Not for ordinary HTTP clients or search APIs.
 ---
 
 # WebSkrap
@@ -54,6 +54,7 @@ refresh that engine's fixture and fix that one extractor.
 | Fetch one known URL | `client.fetch()` | `webskrap fetch` | `stealth_fetch` |
 | Find URLs for a query | `client.search()` | `webskrap search` | `search` |
 | Preserve cookies or storage | `client.session()` | `webskrap browser open` | `browser_open` |
+| See a rendered page or interact with canvas | `browser_session.view()` on a Patchright page | `webskrap browser view` and `mouse` | `browser_view` and `browser_mouse` |
 | Click, fill, wait, or run a flow | Playwright page from a session | `webskrap browser` | `browser_interact` and related tools |
 | Diagnose installation | Inspect raised error | `webskrap doctor` | `doctor` |
 
@@ -69,6 +70,32 @@ Read only the reference needed for the task:
   Linux ARM64 behavior.
 - [MCP](references/mcp.md): tool selection, confined paths, annotations, and
   keeping tool results small.
+
+## Visual browser interaction
+
+Use `browser_view` (MCP) or `webskrap browser view --format json` (CLI) when
+layout, images, canvas, or controls missing from the accessibility tree matter.
+MCP returns an image block directly. CLI saves a PNG; open its returned `path`
+with the agent's image-viewing tool before choosing coordinates. A path or
+base64 text alone does not give a model vision. The client and model must
+support image input.
+
+The view covers the viewport at one PNG pixel per CSS pixel. Coordinates start
+at its top-left; use the original `width` and `height` if the image viewer
+resizes it. Do not add `scroll_x` or `scroll_y` to mouse coordinates. Full-page
+screenshots are for inspection or export and do not map directly to the mouse.
+
+Prefer refs/selectors when they identify a control. Use `browser_mouse` / CLI
+`mouse` for visual targets, then `browser_insert_text` / CLI `insert-text` for
+literal text in the focused control and `browser_press` / CLI `press` for keys.
+Wait for the expected change and take a fresh view after scrolling, navigation,
+or layout changes. Coordinate clicks hit whatever occupies that point.
+Run dependent actions sequentially within a session.
+
+This is the browser's rendered page, available headless without Xvfb. It does
+not show browser chrome, OS dialogs, or a desktop stream. One-shot fetch
+sessions are separate; open a persistent browser to drive a visual flow.
+Read the [CLI](references/cli.md) or [MCP](references/mcp.md) reference for examples.
 
 ## Guardrails
 

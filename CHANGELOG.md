@@ -9,6 +9,23 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- MCP `browser_view` returns an inline viewport PNG with CSS coordinate metadata,
+  without writing a file. CLI `browser view` saves the same image and reports
+  its absolute path and dimensions in JSON.
+- MCP `browser_mouse` and CLI `browser mouse` support coordinate clicks,
+  double-clicks, movement, scrolling, and dragging. Coordinates must be finite
+  and inside the viewport; drag releases the button even when movement fails.
+- MCP `browser_insert_text` and CLI `browser insert-text` insert literal Unicode
+  into the focused control. The skill and guides explain the visual interaction
+  loop, image-client requirements, and coordinate mapping.
+
+### Fixed
+
+- Expected MCP failures retain their error code and recovery hint over the
+  protocol instead of being hidden as unexpected SDK exceptions.
+
 ## [2.11.0] - 2026-09-29
 
 ### Added

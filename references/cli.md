@@ -84,3 +84,50 @@ companions) through `--launch-arg`: those flags are blocked.
 
 Current limitations are one page per session, bundled Chromium only, no tabs,
 network mocking, tracing, or video, and history navigation that reloads.
+
+## Vision and coordinate input
+
+```bash
+webskrap browser open https://example.com -s visual
+webskrap browser view viewport.png -s visual --format json
+# Inspect the PNG with your image-viewing tool before choosing coordinates.
+webskrap browser mouse click 120 80 -s visual
+webskrap browser insert-text "hello 世界" -s visual
+webskrap browser press Enter -s visual
+webskrap browser mouse scroll 400 300 --delta-y 500 -s visual
+webskrap browser view viewport.png -s visual --format json
+# Inspect the new view before choosing the drag points.
+webskrap browser mouse drag 100 150 --end-x 250 --end-y 180 -s visual
+webskrap browser view viewport.png -s visual --format json
+webskrap browser close -s visual
+```
+
+`view` writes a viewport PNG and returns `path` (absolute), `url`, `title`,
+`width`, `height`, `scroll_x`, `scroll_y`, `mime_type`, and `coordinate_system`
+(`viewport-css-pixels`). Omitting the path generates a unique PNG in the current
+directory. JSON contains metadata, not base64 image data: the agent must open
+the file with an image-viewing tool.
+
+One image pixel equals one CSS pixel, even on high-DPI pages. `(0, 0)` is the
+viewport's top-left. Map resized previews back to the original dimensions;
+do not add document scroll offsets. `screenshot --full-page` remains available
+for export, but its coordinates cannot be used directly with `mouse`.
+
+`mouse` accepts `click`, `dblclick`, `move`, `scroll`, or `drag`, with required
+`x y`. `--button` is `left` (default), `middle`, or `right` for click/double-click/
+drag. Drag requires both `--end-x` and `--end-y`. Scroll uses `--delta-x` and
+`--delta-y` over the element under `x y`; positive vertical deltas scroll down,
+including in nested scroll areas. Non-finite, out-of-viewport, and unused
+arguments fail with `usage`. Coordinate input uses direct browser events;
+selector-based `click` and `type` retain their human timing and covered-target
+checks.
+
+`insert-text` inserts literal Unicode into the focused control with an input
+event. It does not interpret `Enter` as a key or emit per-character keydown/
+keyup events. Focus with a click or Tab; use `press` for shortcuts and keys,
+or selector-based `type` for controls that require individual keystrokes.
+
+Take a fresh view after navigation, scrolling, or layout changes. Wheel input
+may return before scrolling finishes; wait for the expected page condition.
+Prefer refs/selectors for known controls, and run dependent session actions
+sequentially. This shows the page viewport, not browser chrome or OS dialogs.
