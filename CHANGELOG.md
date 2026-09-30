@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-09-30
+
 ### Security
 
 - Update the documentation site's Next.js and matching ESLint configuration to
