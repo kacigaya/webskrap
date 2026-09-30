@@ -18,17 +18,20 @@ import asyncio
 import errno
 import json
 import logging
+import math
 import os
 import re
 import shutil
 import signal
+import struct
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for Chromium, never a shell
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, BinaryIO, TypeVar
+from typing import Any, BinaryIO, Literal, TypedDict, TypeVar
 
 from patchright.async_api import Error as PlaywrightError
 from patchright.async_api import Locator, Page
@@ -822,6 +825,175 @@ async def evaluate(page: Page, expression: str) -> Any:
 async def page_state(page: Page) -> dict[str, Any]:
     """Return the page's current ``{"url", "title"}``."""
     return {"url": page.url, "title": await page.title()}
+
+
+class Viewport(TypedDict):
+    """Geometry in CSS pixels, including the document's scroll offset."""
+
+    width: int
+    height: int
+    scroll_x: float
+    scroll_y: float
+
+
+async def viewport(page: Page) -> Viewport:
+    """Read geometry even for CDP pages without an emulated viewport size."""
+    return await page.evaluate(
+        "() => ({width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY})"
+    )
+
+
+@dataclass(frozen=True)
+class BrowserView:
+    """One viewport PNG and its coordinate metadata, without filesystem writes."""
+
+    image: bytes
+    url: str
+    title: str
+    width: int
+    height: int
+    scroll_x: float
+    scroll_y: float
+
+    def metadata(self) -> dict[str, str | int | float]:
+        """Describe the original image's one-to-one CSS coordinate mapping."""
+        return {
+            "url": self.url,
+            "title": self.title,
+            "width": self.width,
+            "height": self.height,
+            "scroll_x": self.scroll_x,
+            "scroll_y": self.scroll_y,
+            "coordinate_system": "viewport-css-pixels",
+            "mime_type": "image/png",
+        }
+
+
+async def view(page: Page) -> BrowserView:
+    """Capture the visible page at one image pixel per CSS pixel.
+
+    Full-page and device-scale screenshots cannot be used directly with mouse
+    coordinates. Read PNG dimensions so metadata describes the actual image.
+    """
+    geometry = await viewport(page)
+    image = await page.screenshot(type="png", full_page=False, scale="css")
+    width, height = struct.unpack(">II", image[16:24])
+    return BrowserView(
+        image=image,
+        url=page.url,
+        title=await page.title(),
+        width=width,
+        height=height,
+        scroll_x=geometry["scroll_x"],
+        scroll_y=geometry["scroll_y"],
+    )
+
+
+def validate_mouse(
+    action: str,
+    x: float,
+    y: float,
+    *,
+    end_x: float | None = None,
+    end_y: float | None = None,
+    delta_x: float = 0,
+    delta_y: float = 0,
+    button: str = "left",
+) -> None:
+    """Reject invalid or ignored mouse arguments before connecting or acting."""
+    reason = None
+    if action not in {"click", "dblclick", "move", "scroll", "drag"}:
+        reason = "mouse action must be click, dblclick, move, scroll, or drag"
+    elif button not in {"left", "middle", "right"}:
+        reason = "button must be left, middle, or right"
+    elif action in {"move", "scroll"} and button != "left":
+        reason = "button is only used with click, dblclick, or drag"
+    elif any(
+        not math.isfinite(value)
+        for value in (x, y, end_x, end_y, delta_x, delta_y)
+        if value is not None
+    ):
+        reason = "mouse coordinates and deltas must be finite"
+    elif x < 0 or y < 0:
+        reason = "mouse coordinates must be non-negative"
+    elif action == "drag" and (end_x is None or end_y is None):
+        reason = "drag requires end_x and end_y"
+    elif action != "drag" and (end_x is not None or end_y is not None):
+        reason = "end_x and end_y are only used with drag"
+    elif action != "scroll" and (delta_x != 0 or delta_y != 0):
+        reason = "delta_x and delta_y are only used with scroll"
+    elif action == "scroll" and delta_x == 0 and delta_y == 0:
+        reason = "scroll requires a non-zero delta_x or delta_y"
+    if reason is not None:
+        raise WebSkrapError(reason, code=ErrorCode.USAGE)
+
+
+async def mouse_action(
+    page: Page,
+    action: str,
+    x: float,
+    y: float,
+    *,
+    end_x: float | None = None,
+    end_y: float | None = None,
+    delta_x: float = 0,
+    delta_y: float = 0,
+    button: str = "left",
+) -> dict[str, Any]:
+    """Send trusted mouse input at viewport CSS coordinates from a fresh view.
+
+    Scroll targets the element under (x, y), including nested scroll areas.
+    Coordinate clicks hit whatever is visible there; prefer element_action
+    when a ref or selector identifies the intended element.
+    """
+    validate_mouse(
+        action,
+        x,
+        y,
+        end_x=end_x,
+        end_y=end_y,
+        delta_x=delta_x,
+        delta_y=delta_y,
+        button=button,
+    )
+    geometry = await viewport(page)
+    points = [(x, y)]
+    if end_x is not None and end_y is not None:
+        points.append((end_x, end_y))
+    if any(not (0 <= px < geometry["width"] and 0 <= py < geometry["height"]) for px, py in points):
+        msg = "mouse coordinates are outside the viewport; take a fresh view before acting"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    # Narrow once for Playwright's literal button contract, without unsafe casts.
+    mouse_button: Literal["left", "middle", "right"]
+    if button == "middle":
+        mouse_button = "middle"
+    elif button == "right":
+        mouse_button = "right"
+    else:
+        mouse_button = "left"
+    if action in {"click", "dblclick"}:
+        await page.mouse.click(
+            x, y, button=mouse_button, click_count=2 if action == "dblclick" else 1
+        )
+    elif action == "move":
+        await page.mouse.move(x, y)
+    elif action == "scroll":
+        await page.mouse.move(x, y)
+        await page.mouse.wheel(delta_x, delta_y)
+    elif action == "drag" and end_x is not None and end_y is not None:
+        await page.mouse.move(x, y)
+        await page.mouse.down(button=mouse_button)
+        try:
+            await page.mouse.move(end_x, end_y, steps=10)
+        finally:
+            await page.mouse.up(button=mouse_button)
+    return await page_state(page)
+
+
+async def insert_text(page: Page, text: str) -> dict[str, Any]:
+    """Insert literal text into the focused control without interpreting keys."""
+    await page.keyboard.insert_text(text)
+    return await page_state(page)
 
 
 async def goto(page: Page, url: str, wait_until: WaitUntil) -> dict[str, Any]:

@@ -58,6 +58,9 @@ python -m webskrap.mcp_server
 | `browser_snapshot` | Aria snapshot of the page with `eN` element refs. |
 | `browser_interact` | Click, fill, type, select, hover, check, or uncheck an element. |
 | `browser_press` | Press a keyboard key on the page. |
+| `browser_view` | Inline viewport PNG and CSS coordinate metadata, without a file write. |
+| `browser_mouse` | Coordinate click, double-click, move, scroll, or drag. |
+| `browser_insert_text` | Literal Unicode text into the focused control. |
 | `browser_screenshot` | Screenshot the current page to a PNG file. |
 | `browser_eval` | Evaluate JavaScript and return the result. |
 | `browser_close` | Close a session (`delete_data` removes its profile). |
@@ -199,6 +202,46 @@ Offsets remain valid only while the text stays unchanged.
 Snapshots are truncated to `max_chars` (default 8000) and report
 `snapshot_truncated`; refs describe the current DOM, so take a fresh snapshot
 after the page changes. Failed actions return a one-line error.
+
+### Vision and coordinate input
+
+`browser_view(session="visual")` returns an inline `image/png` image block,
+a text block with metadata, and the same metadata in `structuredContent`:
+`url`, `title`, `width`, `height`, `scroll_x`, `scroll_y`, `mime_type`, and
+`coordinate_system: "viewport-css-pixels"`. It writes no file. Use it with an
+image-capable model and client; `browser_screenshot` remains the file/export tool.
+
+Open with `browser_open(session="visual", url=...)`, inspect
+`browser_view(session="visual")`, then call:
+
+```json
+{"action": "click", "x": 120, "y": 80, "session": "visual"}
+```
+
+with `browser_mouse`. Choose coordinates from the observed target. For a focused
+input, `browser_insert_text(text="hello 世界", session="visual")` inserts literal
+text; `browser_press(key="Enter", session="visual")` sends a key. Insertion emits
+an input event, not individual keydown/keyup events. Use `browser_interact` with
+`action="type"` when a control requires individual keystrokes.
+
+Mouse actions are `click`, `dblclick`, `move`, `scroll`, and `drag`. All require
+`x` and `y`. `button` is `left` (default), `middle`, or `right`, for click,
+double-click, or drag only. Drag also requires `end_x` and `end_y`. Scroll accepts
+`delta_x` and `delta_y` in CSS pixels, targeting the element under the pointer;
+positive `delta_y` scrolls down. Invalid, non-finite, unused, or out-of-viewport
+arguments return a `usage` error before mouse input is sent.
+
+Use the original PNG dimensions: each image pixel is one CSS pixel, independent
+of device scale. `(0,0)` is the viewport's top-left. Map any resized preview back
+to `width`/`height`, and do not add scroll offsets. Full-page screenshots do not
+share this mouse coordinate mapping.
+
+Prefer refs/selectors for identifiable controls. Coordinate clicks hit whatever
+is visible at the point. After an action, wait for the expected change, then take
+a fresh view before choosing more coordinates. Wheel input can finish after the
+call returns. Run dependent actions sequentially in each session. The image
+shows the page, including canvas and frames, not browser chrome, OS dialogs,
+or a live desktop stream. Headless rendering needs no Xvfb.
 
 ### Screenshot output is confined
 

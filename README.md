@@ -65,6 +65,28 @@ comes back as a `blocked` error, not as zero hits. Switch engine, reuse a
 persistent profile, or change the exit IP. WebSkrap does not retry and does
 not solve CAPTCHAs.
 
+## Visual browser interaction
+
+Agents can see the rendered viewport and interact by coordinates, including
+canvas and controls missing from the accessibility tree. MCP `browser_view`
+returns a PNG image directly; `browser_mouse` clicks, moves, scrolls, or drags.
+`browser_insert_text` inserts literal text into the focused control.
+
+```bash
+webskrap browser open https://example.com
+webskrap browser view viewport.png --format json
+# Open the returned PNG with your agent's image viewer, then choose coordinates.
+webskrap browser mouse click 120 80
+webskrap browser insert-text "hello"
+webskrap browser press Enter
+webskrap browser view viewport.png --format json
+webskrap browser close
+```
+
+Coordinates are CSS pixels from the original image's top-left. Take a fresh
+view after scrolling or page changes. Headless Chromium needs no Xvfb for
+this; the agent's client and model must support image input.
+
 ## Documentation
 
 - [Quickstart](https://kacigaya.github.io/webskrap/docs/getting-started/quickstart/)

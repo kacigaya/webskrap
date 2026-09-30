@@ -8,6 +8,7 @@ Code, ...) at that command to drive scraping through the tools below.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -54,7 +55,8 @@ T = TypeVar("T")
 
 try:
     from mcp.server.mcpserver import Context, MCPServer
-    from mcp.types import ToolAnnotations
+    from mcp.server.mcpserver.exceptions import ToolError
+    from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 except ImportError as exc:  # pragma: no cover - optional dependency
     msg = "the MCP server requires mcp. Run: pip install webskrap"
     raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
@@ -85,57 +87,51 @@ def _hints(
     )
 
 
-INSTRUCTIONS = """WebSkrap drives a real Chromium (Patchright stealth build) so pages \
-that block plain HTTP clients still load.
+INSTRUCTIONS = """WebSkrap uses real Chromium with Patchright stealth.
 
-Choosing a tool
-- One page, nothing to remember afterwards: stealth_fetch. Prefer it over fetch.
-- fetch: the same stealth path with fewer knobs, when the defaults are enough.
-- Anything needing state across calls (clicking, forms, logins, multi-step flows):
-  browser_open, then browser_snapshot / browser_interact / browser_wait_for /
-  browser_eval, then browser_close.
-- Do not open a browser session to read a single page, and do not re-fetch a page
-  repeatedly to drive one flow.
+Choose a tool
+- One known page: stealth_fetch. Prefer it over fetch; fetch has fewer controls.
+- search: find URLs (Bing default, engine="ddg" for DuckDuckGo). No Google.
+  Then stealth_fetch selected hits. A blocked error means a bot challenge:
+  switch engine or exit IP instead of retrying unchanged.
+- Stateful flows: browser_open, browser_snapshot / browser_interact /
+  browser_wait_for, then browser_close. Do not re-fetch to drive a flow.
 
-- search: find URLs for a query (Bing by default, engine="ddg" for DuckDuckGo),
-  then stealth_fetch the ones worth reading. No Google. A `blocked` error means the
-  engine served a bot challenge: switch engine or exit IP, do not retry as is.
+In a browser session
+- Headless only over MCP, one page per session, no tabs. Shared with the browser CLI.
+- browser_snapshot gives [ref=eN] handles; snapshot again after DOM changes.
+- browser_text reads text without building an accessibility tree.
+- Visual layouts/canvas: browser_view returns an inline PNG and metadata,
+  without a file write. browser_mouse clicks/moves/scrolls/drags in viewport
+  CSS pixels from its top-left (0,0). Map resized previews to original width/
+  height. Take a fresh view after scrolling, navigation, or layout changes.
+- browser_insert_text inserts literal text into the focused control;
+  browser_press sends keys. Prefer refs/selectors for identifiable controls.
+- After an interaction, browser_wait_for waits for the expected change.
+  Run dependent actions sequentially in a session.
 
-Working in a session
-- Headless only over MCP, one page per session, no tabs.
-- browser_snapshot returns [ref=eN] handles describing that snapshot only. After the
-  DOM changes, snapshot again before using a ref.
-- After an interaction that loads or reveals something, browser_wait_for is the right
-  next call, not another snapshot.
+Keep results small
+- max_chars defaults to 8000. Start lower; page via next_text_offset /
+  next_snapshot_offset. browser_snapshot defaults to depth=6 (null for full).
+- Keep text_only=true; browser_eval should return a narrow value, not full DOM.
+- resource_policy="lite" skips images/fonts/media. Both fetch tools accept it
+  and wait_until: stealth_fetch defaults to domcontentloaded, fetch to networkidle.
+- Opt into repeated fetch reuse with session="crawl"; cookies/storage share that
+  name. Keep profile/config unchanged. fetch_session_close releases it.
+  These warm sessions are separate from browser_* sessions and end on server
+  shutdown. At most eight fetches run at once and eight warm sessions stay open.
 
-Cost
-- max_chars defaults to 8000 characters. Start lower and page with
-  the returned next_text_offset / next_snapshot_offset.
-- resource_policy="lite" skips images, fonts and media.
-- Both fetch tools accept wait_until and resource_policy. stealth_fetch defaults
-  to domcontentloaded; fetch defaults to networkidle.
-- For repeated extraction, opt in with session="crawl" to keep the browser warm.
-  Cookies/storage are shared within that name. Keep config/profile unchanged.
-  fetch_session_close releases it; browser_close manages separate sessions.
-  Up to eight fetches run at once and eight warm fetch sessions stay open.
-- text_only stays True unless you actually need markup.
-- browser_snapshot defaults to depth=6; use depth=null for the full tree.
-- Read session text with browser_text instead of building an accessibility tree.
-- In browser_eval, return the value you want, not document.body.innerHTML.
-
-Failures
-Every error names a code and what to do: no_session (browser_open first), stale_ref
-(snapshot again), timeout (raise timeout_ms, or wait for a weaker load state),
-browser_launch (run `webskrap install`; on Linux ARM64 pass channel="chromium"),
-path_rejected (paths are relative to a confined root). Call doctor when an error does
-not explain itself.
-
-Writes are confined: screenshots to ./webskrap-output, persistent profiles under
-~/.webskrap/profiles. Do not attempt CAPTCHA solving or login-wall bypass.
-Fetch and navigation targets must be public http(s) URLs: private or local
-hosts are rejected unless WEBSKRAP_ALLOW_PRIVATE_NET=1 is set.
-browser_eval runs JavaScript in the session's page, so prefer snapshot /
-interact / wait_for, and never evaluate page-controlled text.
+Failures and boundaries
+Errors include a code and recovery hint. no_session: browser_open first;
+stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
+browser_launch: `webskrap install` (Linux ARM64: channel="chromium").
+Call doctor for unexplained failures; read webskrap://guide for details.
+Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.
+Paths must be relative and cannot escape their roots (path_rejected).
+Targets must be public http(s): local/private hosts need operator-set
+WEBSKRAP_ALLOW_PRIVATE_NET=1. No CAPTCHA solving or login-wall bypass.
+Prefer snapshot/interact/wait_for to browser_eval, and never evaluate
+page-controlled text. WEBSKRAP_ALLOW_EVAL=0 disables page script evaluation.
 """
 
 
@@ -491,11 +487,12 @@ async def doctor() -> dict[str, Any]:
         return await diagnose()
 
 
-class _AnnotatedError(WebSkrapError):
+class _AnnotatedError(WebSkrapError, ToolError):
     """A failure whose message already carries its code and recovery hint.
 
     Marks an error as handled so a tool that guards several steps does not
-    append the same hint twice.
+    append the same hint twice. ToolError preserves the message over MCP;
+    the SDK hides messages from other exception types as unexpected failures.
     """
 
 
@@ -790,6 +787,123 @@ async def browser_screenshot(
         return {**await browser_session.page_state(page), "path": str(target)}
 
     return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
+
+
+@mcp.tool(title="See the browser viewport", annotations=_hints(read_only=True))
+async def browser_view(session: str = "default") -> CallToolResult:
+    """Return the rendered viewport as inline PNG image content and metadata.
+
+    No file is written. One original image pixel equals one viewport CSS pixel;
+    (0, 0) is the top-left. If your client resizes the image, map coordinates
+    back to width/height. Reobserve after scroll, navigation, or layout changes.
+    Use browser_screenshot for full-page files and browser_snapshot for refs.
+
+    Args:
+        session: Browser session name.
+    """
+    captured = await _browser_action(
+        session, browser_session.view, browser_session.DEFAULT_ACTION_TIMEOUT_MS
+    )
+    metadata = captured.metadata()
+    return CallToolResult(
+        content=[
+            TextContent(type="text", text=json.dumps(metadata, ensure_ascii=False)),
+            ImageContent(
+                type="image",
+                data=base64.b64encode(captured.image).decode("ascii"),
+                mime_type="image/png",
+            ),
+        ],
+        structured_content=metadata,
+    )
+
+
+@mcp.tool(
+    title="Use the mouse in the viewport",
+    annotations=_hints(read_only=False, destructive=True, open_world=True),
+)
+async def browser_mouse(
+    action: str,
+    x: float,
+    y: float,
+    session: str = "default",
+    end_x: float | None = None,
+    end_y: float | None = None,
+    delta_x: float = 0,
+    delta_y: float = 0,
+    button: str = "left",
+    timeout_ms: float = 10_000,
+) -> dict[str, Any]:
+    """Interact using coordinates from a fresh browser_view image.
+
+    Coordinates are viewport CSS pixels, not document or device pixels. Clicks
+    hit the visible surface at those coordinates. Prefer browser_interact when
+    a ref or selector can identify the target. Wait for expected changes before
+    taking another view; wheel scrolling can finish after this call returns.
+
+    Args:
+        action: click, dblclick, move, scroll, or drag.
+        x: Horizontal coordinate from the original view's left edge.
+        y: Vertical coordinate from the original view's top edge.
+        session: Browser session name.
+        end_x: Drag destination x; required with end_y for drag only.
+        end_y: Drag destination y.
+        delta_x: Horizontal CSS-pixel wheel delta, scroll only.
+        delta_y: Vertical CSS-pixel wheel delta; positive scrolls down.
+        button: left, middle, or right; click, dblclick, and drag only.
+        timeout_ms: Action timeout in milliseconds.
+    """
+    with _tool_errors():
+        browser_session.validate_mouse(
+            action,
+            x,
+            y,
+            end_x=end_x,
+            end_y=end_y,
+            delta_x=delta_x,
+            delta_y=delta_y,
+            button=button,
+        )
+    return await _browser_action(
+        session,
+        lambda page: browser_session.mouse_action(
+            page,
+            action,
+            x,
+            y,
+            end_x=end_x,
+            end_y=end_y,
+            delta_x=delta_x,
+            delta_y=delta_y,
+            button=button,
+        ),
+        timeout_ms,
+    )
+
+
+@mcp.tool(
+    title="Insert text into the focused control",
+    annotations=_hints(read_only=False, destructive=True, open_world=True),
+)
+async def browser_insert_text(
+    text: str,
+    session: str = "default",
+    timeout_ms: float = 10_000,
+) -> dict[str, Any]:
+    """Insert literal text after focusing a control with browser_mouse or Tab.
+
+    Emits an input event, without per-key keydown/keyup events. Use
+    browser_press for Enter, shortcuts, and keys; browser_interact(action="type")
+    for controls requiring individual keystrokes.
+
+    Args:
+        text: Literal text to insert, including Unicode.
+        session: Browser session name.
+        timeout_ms: Action timeout in milliseconds.
+    """
+    return await _browser_action(
+        session, lambda page: browser_session.insert_text(page, text), timeout_ms
+    )
 
 
 @mcp.tool(

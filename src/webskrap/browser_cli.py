@@ -492,6 +492,100 @@ def screenshot_command(
     console.print(f"[bold]Screenshot:[/bold] {result['path']}")
 
 
+@browser_app.command("view")
+def view_command(
+    path: Annotated[Path | None, typer.Argument(help="Output viewport PNG path.")] = None,
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Save a viewport image and report its CSS coordinate metadata for vision."""
+    output_format = parse_output_format(format)
+    target = path or Path(f"webskrap-view-{uuid4().hex}.png")
+
+    async def action(page: Page) -> dict[str, str | int | float]:
+        captured = await browser_session.view(page)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(captured.image)
+        return {**captured.metadata(), "path": str(target.resolve())}
+
+    result = _run_page_command(session, action, output_format)
+    if output_format == "json":
+        print_json(result)
+        return
+    console.print(f"[bold]View:[/bold] {result['path']}")
+    typer.echo(f"{result['width']}x{result['height']}; viewport CSS pixels; origin (0, 0)")
+
+
+@browser_app.command("mouse")
+def mouse_command(
+    action: Annotated[str, typer.Argument(help="click, dblclick, move, scroll, or drag.")],
+    x: Annotated[float, typer.Argument(help="Viewport CSS x from the original view.")],
+    y: Annotated[float, typer.Argument(help="Viewport CSS y from the original view.")],
+    session: SessionOption = "default",
+    end_x: Annotated[float | None, typer.Option("--end-x", help="Drag destination x.")] = None,
+    end_y: Annotated[float | None, typer.Option("--end-y", help="Drag destination y.")] = None,
+    delta_x: Annotated[float, typer.Option("--delta-x", help="Horizontal scroll delta.")] = 0,
+    delta_y: Annotated[
+        float, typer.Option("--delta-y", help="Vertical scroll delta (down positive).")
+    ] = 0,
+    button: Annotated[str, typer.Option("--button", help="left, middle, or right.")] = "left",
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    format: FormatOption = "human",
+) -> None:
+    """Use mouse coordinates from a fresh view; reobserve after page changes."""
+    output_format = parse_output_format(format)
+    try:
+        browser_session.validate_mouse(
+            action,
+            x,
+            y,
+            end_x=end_x,
+            end_y=end_y,
+            delta_x=delta_x,
+            delta_y=delta_y,
+            button=button,
+        )
+    except WebSkrapError as exc:
+        fail(exc, output_format)
+    result = _run_page_command(
+        session,
+        lambda page: browser_session.mouse_action(
+            page,
+            action,
+            x,
+            y,
+            end_x=end_x,
+            end_y=end_y,
+            delta_x=delta_x,
+            delta_y=delta_y,
+            button=button,
+        ),
+        output_format,
+        timeout_ms=timeout_ms,
+    )
+    _emit_state(result, output_format)
+
+
+@browser_app.command("insert-text")
+def insert_text_command(
+    text: Annotated[str, typer.Argument(help="Literal text for the focused control.")],
+    session: SessionOption = "default",
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    format: FormatOption = "human",
+) -> None:
+    """Insert literal text after focusing a control; use press for keys."""
+    output_format = parse_output_format(format)
+    _emit_state(
+        _run_page_command(
+            session,
+            lambda page: browser_session.insert_text(page, text),
+            output_format,
+            timeout_ms=timeout_ms,
+        ),
+        output_format,
+    )
+
+
 @browser_app.command("eval")
 def eval_command(
     expression: Annotated[str, typer.Argument(help="JavaScript expression or function.")],
