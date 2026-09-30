@@ -1,4 +1,5 @@
 import { SiteFooter } from "@/components/site-footer";
+import { SiteHeader } from "@/components/site-header";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,6 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CodeBlock } from "@/components/code-block";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { asset } from "@/lib/asset";
 import { DEFAULT_DESCRIPTION, SITE_URL } from "@/lib/seo";
 
@@ -110,34 +110,7 @@ export default function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(SOFTWARE_SCHEMA) }}
       />
-      {/* Nav */}
-      <header className="sticky top-0 z-20 px-4 pt-4">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between rounded-2xl border bg-background/70 px-5 py-3 shadow-sm backdrop-blur-md">
-          <div className="flex items-center gap-2.5">
-            <Image
-              src={asset("/webskrap-logo.png")}
-              alt=""
-              width={642}
-              height={686}
-              className="h-7 w-auto"
-            />
-            <span className="font-semibold tracking-tight">WebSkrap</span>
-          </div>
-          <nav aria-label="Primary" className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button variant="ghost" size="sm" render={<Link href={DOCS_URL} />}>
-              Docs
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              render={<a href={GITHUB_URL} />}
-            >
-              GitHub
-            </Button>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader />
 
       {/* Hero */}
       <section className="mx-auto flex w-full max-w-5xl flex-col items-center px-6 py-24 text-center">
