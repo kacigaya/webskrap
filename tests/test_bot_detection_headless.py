@@ -120,25 +120,26 @@ async def test_recaptcha_v3_headless() -> None:
     assert score is not None, "could not extract reCAPTCHA v3 score"
 
 
-async def test_cloudflare_turnstile_headless_loads() -> None:
+async def test_cloudflare_turnstile_headless() -> None:
+    # Production sitekey; Cloudflare test sitekeys always return a dummy token.
     async with stealth_headless_page() as page:
         await goto_or_skip(
             page,
-            "https://2captcha.com/demo/cloudflare-turnstile",
+            "https://peet.ws/turnstile-test/non-interactive.html",
             wait_until="domcontentloaded",
             timeout=60_000,
         )
-        await page.wait_for_timeout(10_000)
-        result = await page.evaluate(
+        await page.wait_for_function(
             """() => {
-                const response = document.querySelector(
-                    'input[name="cf-turnstile-response"]'
-                );
-                const iframe = document.querySelector('iframe[src*="turnstile"]');
-                return {hasSurface: Boolean(response || iframe)};
-            }"""
+                const el = document.querySelector('input[name="cf-turnstile-response"]');
+                return Boolean(el && el.value);
+            }""",
+            timeout=45_000,
         )
-    assert result["hasSurface"], "Turnstile surface did not render"
+        token = await page.evaluate(
+            """() => document.querySelector('input[name="cf-turnstile-response"]').value"""
+        )
+    assert "DUMMY" not in token, "Turnstile returned a test-sitekey dummy token"
 
 
 async def test_browserscan_bot_detection_headless() -> None:

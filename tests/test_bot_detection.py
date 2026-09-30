@@ -166,38 +166,26 @@ async def test_recaptcha_v3() -> None:
 
 
 async def test_cloudflare_turnstile_demo() -> None:
-    # Verify the public demo renders the Turnstile surface. WebSkrap does not
-    # solve or submit CAPTCHA challenges.
+    # A production sitekey must issue a token without interaction. Demos using
+    # Cloudflare test sitekeys (1x/2x/3x...) always return a dummy token.
     async with stealth_page() as page:
         await goto_or_skip(
             page,
-            "https://2captcha.com/demo/cloudflare-turnstile",
+            "https://peet.ws/turnstile-test/non-interactive.html",
             wait_until="domcontentloaded",
             timeout=60_000,
         )
         await page.wait_for_function(
             """() => {
-                const widget = document.querySelector('.cf-turnstile');
-                const el = document.querySelector(
-                    'input[name="cf-turnstile-response"]'
-                );
-                return Boolean(widget || el);
+                const el = document.querySelector('input[name="cf-turnstile-response"]');
+                return Boolean(el && el.value);
             }""",
             timeout=45_000,
         )
-        result = await page.evaluate(
-            """() => {
-                const widget = document.querySelector('.cf-turnstile');
-                const response = document.querySelector(
-                    'input[name="cf-turnstile-response"]'
-                );
-                const iframe = document.querySelector('iframe[src*="turnstile"]');
-                return {
-                    hasSurface: Boolean(widget || response || iframe),
-                };
-            }"""
+        token = await page.evaluate(
+            """() => document.querySelector('input[name="cf-turnstile-response"]').value"""
         )
-    assert result["hasSurface"], "Turnstile surface did not render"
+    assert "DUMMY" not in token, "Turnstile returned a test-sitekey dummy token"
 
 
 async def test_browserscan_bot_detection() -> None:

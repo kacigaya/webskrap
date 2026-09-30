@@ -72,7 +72,7 @@ const FEATURE_ROWS: { feature: string; values: string[] }[] = [
   },
   {
     feature: "Cloudflare Turnstile",
-    values: ["Fail", "Sometimes", "Sometimes", "Pass", "Pass", "Renders challenge surface"],
+    values: ["Fail", "Sometimes", "Sometimes", "Pass", "Pass", "Pass (non-interactive token)"],
   },
   {
     feature: "Patch level",
@@ -122,7 +122,7 @@ const DETECTION_ROWS: {
     stock: "FAIL",
     cloak: "PASS",
     webskrap: "PASS",
-    notes: "Public demo renders the challenge surface",
+    notes: "Production sitekey issues a token without interaction",
   },
   {
     service: "FingerprintJS bot detection",
