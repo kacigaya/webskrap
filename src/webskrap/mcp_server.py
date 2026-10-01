@@ -125,6 +125,8 @@ Failures and boundaries
 Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
 browser_launch: `webskrap install` (Linux ARM64: channel="chromium").
+Known DataDome/Cloudflare challenge pages return blocked; stop automatic retries.
+Fetch tools accept ready_selector to verify visible content before extraction.
 Call doctor for unexplained failures; read webskrap://guide for details.
 Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.
 Paths must be relative and cannot escape their roots (path_rejected).
@@ -161,6 +163,7 @@ async def _run_fetch(
     max_links: int,
     session: str | None,
     ctx: Context | None,
+    ready_selector: str | None = None,
 ) -> FetchResult:
     if ctx is None:
         if session is not None:
@@ -177,6 +180,7 @@ async def _run_fetch(
                 include_links=include_links,
                 max_links=max_links,
                 decline_cookies=config.decline_cookies,
+                ready_selector=ready_selector,
             )
     runtime = ctx.request_context.lifespan_context
     if not isinstance(runtime, FetchRuntime):
@@ -190,6 +194,7 @@ async def _run_fetch(
             include_links=include_links,
             max_links=max_links,
             decline_cookies=config.decline_cookies,
+            ready_selector=ready_selector,
         )
 
 
@@ -208,6 +213,7 @@ async def fetch(
     max_links: int = 50,
     decline_cookies: bool = True,
     *,
+    ready_selector: str | None = None,
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -239,6 +245,8 @@ async def fetch(
         max_links: How many links to return; links_total counts them all.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
+        ready_selector: Optional Playwright selector that must be visible before
+            extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -265,6 +273,7 @@ async def fetch(
             max_links=max_links,
             session=session,
             ctx=ctx,
+            ready_selector=ready_selector,
         )
         return shape_fetch_result(result, max_chars, offset)
 
@@ -291,6 +300,7 @@ async def stealth_fetch(
     max_links: int = 50,
     decline_cookies: bool = True,
     *,
+    ready_selector: str | None = None,
     wait_until: str = "domcontentloaded",
     resource_policy: str = "all",
     session: str | None = None,
@@ -334,6 +344,8 @@ async def stealth_fetch(
             load, so the banner does not bury the page text.
         wait_until: commit, domcontentloaded (default), load, or networkidle.
         resource_policy: all, lite (block images/fonts/media), or documents.
+        ready_selector: Optional Playwright selector that must be visible before
+            extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -368,6 +380,7 @@ async def stealth_fetch(
             max_links=max_links,
             session=session,
             ctx=ctx,
+            ready_selector=ready_selector,
         )
         return shape_fetch_result(result, max_chars, offset)
 

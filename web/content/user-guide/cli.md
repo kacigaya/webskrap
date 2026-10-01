@@ -52,6 +52,17 @@ webskrap fetch https://example.com --format json --max-chars 12000
 JSON output includes `url`, `final_url`, `status`, `ok`, `title`, `headers`,
 `text`, `text_length`, `text_truncated`, and `elapsed_ms`.
 
+Wait for deferred content with a visible Playwright selector:
+
+```bash
+webskrap fetch https://example.com --ready-selector '#content' --format json
+```
+
+`--timeout-ms` applies separately to navigation and this readiness wait, which
+starts after consent dismissal. A missing selector exits 3 (`timeout`). Known
+DataDome and Cloudflare challenges exit 11 (`blocked`) without retrying, even
+when served with HTTP 200. Ordinary HTTP errors still return `ok: false`.
+
 ## Search the web
 
 ```bash

@@ -15,6 +15,7 @@ from mcp.shared.memory import create_client_server_memory_streams
 
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient, browser_session, mcp_server
 from webskrap.client import lavapipe_available
+from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.fetch_runtime import FetchRuntime
 
 pytestmark = pytest.mark.browser
@@ -47,6 +48,7 @@ async def test_mcp_protocol_reuses_fetch_sessions_and_keeps_unnamed_calls_isolat
                     "decline_cookies": False,
                     "wait_until": "load",
                     "timeout_ms": 60_000,
+                    "ready_selector": "body",
                 }
                 result = await client.call_tool(
                     "fetch", {"url": f"{test_server}/set-cookie", "session": "crawl", **common}
@@ -74,6 +76,23 @@ async def test_mcp_protocol_reuses_fetch_sessions_and_keeps_unnamed_calls_isolat
                 )
                 assert not result.is_error
                 assert "webskrap_test" not in result.structured_content["text"]
+                result = await client.call_tool(
+                    "stealth_fetch", {"url": f"{test_server}/cf-challenge", **common}
+                )
+                assert result.is_error
+                assert "[code: blocked]" in result.content[0].text
+                result = await client.call_tool(
+                    "fetch",
+                    {
+                        "url": test_server,
+                        "channel": "chromium",
+                        "decline_cookies": False,
+                        "timeout_ms": 250,
+                        "ready_selector": "#missing",
+                    },
+                )
+                assert result.is_error
+                assert "[code: timeout]" in result.content[0].text
                 result = await client.call_tool("fetch_session_close", {"session": "crawl"})
                 assert not result.is_error
                 assert result.structured_content == {"closed": True}
@@ -126,6 +145,41 @@ setTimeout(() => {
 
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
+        if self.path == "/cf-challenge":
+            self.send_response(200)
+            self.send_header("cf-mitigated", "challenge")
+            self.end_headers()
+            self.wfile.write(b"<html><body>Verify your browser</body></html>")
+            return
+
+        if self.path == "/datadome-challenge":
+            self.send_response(403)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b'<html><body><script src="https://ct.captcha-delivery.com/c.js"></script>'
+                b"</body></html>"
+            )
+            return
+
+        if self.path == "/forbidden":
+            self.send_response(403)
+            self.end_headers()
+            self.wfile.write(b"<html><body>Forbidden</body></html>")
+            return
+
+        if self.path == "/ready":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b'<html><body><div id="quote" hidden>Quote form ready</div>'
+                b'<script>addEventListener("load", async () => {'
+                b'await fetch("/ready-data"); document.getElementById("quote").hidden = false;'
+                b"});</script></body></html>"
+            )
+            return
+
         if self.path == "/set-cookie":
             self.send_response(200)
             self.send_header("Set-Cookie", "webskrap_test=1; Path=/")
@@ -196,6 +250,30 @@ async def test_fetch_local_page(test_server: str, sandbox_supported: bool) -> No
     assert result.title == "Hello"
     assert "WebSkrap" in result.text
     assert result.cookie_notice_declined is None
+
+
+@pytest.mark.parametrize("driver", ["playwright", "patchright"])
+async def test_fetch_challenge_readiness_and_http_errors(test_server, sandbox_supported, driver):
+    config = SessionConfig(driver=driver, channel="chromium", chromium_sandbox=sandbox_supported)
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("quote")
+        original_pages = set(session.context.pages)
+        await session.context.route(
+            "https://*.captcha-delivery.com/**", lambda route: route.abort()
+        )
+        result = await session.fetch(
+            f"{test_server}/ready", ready_selector="#quote", text_only=True
+        )
+        assert result.text == "Quote form ready"
+        for path in ("datadome-challenge", "cf-challenge"):
+            with pytest.raises(WebSkrapError) as error:
+                await session.fetch(f"{test_server}/{path}", ready_selector="#quote")
+            assert error.value.code is ErrorCode.BLOCKED
+            assert set(session.context.pages) == original_pages
+        result = await session.fetch(f"{test_server}/forbidden", text_only=True)
+        assert result.status == 403
+        assert not result.ok
+        assert result.text == "Forbidden"
 
 
 @pytest.mark.asyncio

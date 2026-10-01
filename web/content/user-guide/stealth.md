@@ -11,6 +11,35 @@ Patchright is a CDP-leak-free Playwright fork. WebSkrap does not inject
 JavaScript fingerprint patches; it relies on real browser behavior, persistent
 contexts, and coherent profile settings instead.
 
+## Establish a baseline
+
+Check `webskrap doctor --format json` and the MCP `doctor` result before comparing
+configurations. Compare package versions and executable paths: a connected MCP
+process can run a different installation from the checkout being edited. Restart
+that process using the intended installation before testing a code change.
+
+Keep the browser version, persistent profile, and network stable during a
+comparison. Start with all resources enabled and native surfaces:
+`resource_policy="all"`, `mask_headless_user_agent=False`, and
+`reduce_fingerprint_surface=False`. On Linux with Xvfb, compare that headless
+baseline with `virtual_display=True`. Keep languages and timezone consistent
+with the actual browsing environment. These controls already exist; they do not
+guarantee access to a particular site.
+
+If Chromium reports a sandbox error, check user namespaces and any AppArmor
+policy for its actual executable path before testing stealth. A policy for a
+system Chrome binary may not cover downloaded Chromium. Restore sandbox support
+instead of changing fingerprint options. WebSkrap does not disable the sandbox
+automatically.
+
+Fetches raise `blocked` for known DataDome and Cloudflare challenge pages,
+including HTTP 200 challenges. Stop automatic retries on that outcome. Pass
+`ready_selector` to require a visible content element before extraction; a
+successful HTTP status alone does not establish that the intended page loaded.
+Detection uses known provider markers and headers, not a complete challenge
+catalog. It does not solve CAPTCHAs or distinguish fingerprint causes from
+network reputation.
+
 ## Patchright
 
 Use Patchright for CDP-aware detection surfaces. `pip install webskrap` includes

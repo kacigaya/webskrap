@@ -76,6 +76,32 @@ def _fake_client(monkeypatch: Any) -> None:
     monkeypatch.setattr(cli, "WebSkrapClient", _FakeClient)
 
 
+def test_fetch_ready_selector_is_forwarded(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    result = runner.invoke(
+        cli.app, ["fetch", "https://example.test", "--ready-selector", "#quote", "--format", "json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert _FakeClient.calls[0]["ready_selector"] == "#quote"
+
+
+def test_fetch_challenge_exits_blocked_without_retry(monkeypatch: Any) -> None:
+    from webskrap.errors import ErrorCode, WebSkrapError
+
+    calls = []
+
+    class BlockedClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            calls.append(url)
+            raise WebSkrapError("DataDome served a bot challenge", code=ErrorCode.BLOCKED)
+
+    monkeypatch.setattr(cli, "WebSkrapClient", BlockedClient)
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--format", "json"])
+    assert result.exit_code == 11
+    assert json.loads(result.output)["code"] == "blocked"
+    assert calls == ["https://example.test"]
+
+
 def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> None:
     _fake_client(monkeypatch)
 

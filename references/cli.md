@@ -27,6 +27,12 @@ webskrap fetch https://example.com --quiet --output page.html
 Use `--offset` with the previous result's next offset to continue reading a
 long page. Do not re-fetch with an ever larger limit.
 
+Pass `--ready-selector '#content'` to wait for visible content after consent
+dismissal. `--timeout-ms` applies separately to navigation and the readiness wait.
+A missing selector exits 3 (`timeout`). A known DataDome or Cloudflare challenge
+exits 11 (`blocked`) without retrying, including a challenge served with HTTP 200.
+Ordinary HTTP error pages still return a result with `ok: false`.
+
 `webskrap search` loads a results page through the same stealth path and
 prints the organic hits. `--engine` is `bing` (default) or `ddg`.
 

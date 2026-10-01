@@ -26,10 +26,11 @@ from anyio import CancelScope
 from playwright.async_api import Browser, BrowserContext, Page
 
 from webskrap import human as humanize
+from webskrap.challenges import raise_for_challenge
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.display import VirtualDisplay
-from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError, is_sandbox_failure
+from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError, classify, is_sandbox_failure
 from webskrap.models import (
     BrowserProfile,
     FetchResult,
@@ -222,6 +223,7 @@ class WebSkrapSession:
         include_links: bool = False,
         max_links: int = 50,
         decline_cookies: bool | None = None,
+        ready_selector: str | None = None,
     ) -> FetchResult:
         """Open ``url`` in a new page, read it, and close the page.
 
@@ -244,16 +246,21 @@ class WebSkrapSession:
             max_links: How many links to keep. ``FetchResult.links_total``
                 reports how many there were before the cap.
             decline_cookies: Per-call consent override; None uses the config.
+            ready_selector: Optional Playwright selector that must become visible
+                after consent dismissal. Uses the navigation timeout separately.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
             status, so a 404 returns normally with ``ok=False``.
 
         Raises:
-            WebSkrapError: If the session is closed.
+            WebSkrapError: If the session is closed, the readiness selector is
+                blank (``usage``), or a known challenge is detected (``blocked``).
         """
         self._ensure_open()
         url = validate_url(url)
+        if ready_selector is not None and not ready_selector.strip():
+            raise WebSkrapError("ready_selector cannot be blank", code=ErrorCode.USAGE)
         started = time.perf_counter()
         page = await self.context.new_page()
         try:
@@ -262,9 +269,32 @@ class WebSkrapSession:
                 wait_until=wait_until,
                 timeout=timeout_ms or self.config.navigation_timeout_ms,
             )
+            headers = dict(response.headers) if response else {}
+            await raise_for_challenge(page, headers)
             declined = await self._decline_after_navigation(
                 page, wait_until, decline_cookies=decline_cookies
             )
+            if ready_selector is not None:
+                try:
+                    await page.locator(ready_selector).wait_for(
+                        state="visible", timeout=timeout_ms or self.config.navigation_timeout_ms
+                    )
+                except Exception as exc:
+                    # A challenge can replace the page while readiness is pending.
+                    # Both drivers' timeout classes use the shared error taxonomy.
+                    if classify(exc) is ErrorCode.TIMEOUT:
+                        try:
+                            await raise_for_challenge(page, headers)
+                        except Exception as probe_error:
+                            if (
+                                isinstance(probe_error, WebSkrapError)
+                                and probe_error.code is ErrorCode.BLOCKED
+                            ):
+                                raise
+                            # Navigation may destroy the execution context. Keep
+                            # the original timeout when the diagnostic cannot run.
+                    raise
+            await raise_for_challenge(page, headers)
             title = await page.title()
             text = await page.locator("body").inner_text() if text_only else await page.content()
             links, links_total = await _collect_links(
@@ -275,7 +305,6 @@ class WebSkrapSession:
             cookies = [dict(cookie) for cookie in await self.context.cookies()]
             elapsed_ms = (time.perf_counter() - started) * 1000
             status = response.status if response else None
-            headers = dict(response.headers) if response else {}
             return FetchResult(
                 url=url,
                 final_url=page.url,
@@ -625,6 +654,7 @@ class WebSkrapClient:
         include_links: bool = False,
         max_links: int = 50,
         decline_cookies: bool | None = None,
+        ready_selector: str | None = None,
     ) -> FetchResult:
         """Fetch one URL in a throwaway session.
 
@@ -643,6 +673,8 @@ class WebSkrapClient:
             include_links: Also collect the page's outbound links.
             max_links: How many links to keep.
             decline_cookies: Per-call consent override; None uses the config.
+            ready_selector: Optional selector to wait for; see
+                :meth:`WebSkrapSession.fetch`.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`.
@@ -662,6 +694,7 @@ class WebSkrapClient:
                 include_links=include_links,
                 max_links=max_links,
                 decline_cookies=decline_cookies,
+                ready_selector=ready_selector,
             )
         finally:
             await session.close()

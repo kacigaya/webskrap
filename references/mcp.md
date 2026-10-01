@@ -68,9 +68,16 @@ snapshot, interact, and wait_for, never evaluate page-controlled text, and set
 
 ## Failures
 
-A fetch with an HTTP error status returns normally with `ok: false`. A raised
-failure includes `code` and `hint` and arrives as an MCP tool error. Read
+A known DataDome or Cloudflare challenge arrives as a `blocked` tool error,
+including challenges served with HTTP 200. Ordinary HTTP error pages return
+normally with `ok: false`. A raised failure includes `code` and `hint`. Read
 `src/webskrap/errors.py` for the current catalog rather than duplicating it.
+
+Both fetch tools accept `ready_selector`, a Playwright selector that must be
+visible after consent dismissal. The wait uses `timeout_ms` separately from
+navigation; a missing selector returns a `timeout` tool error. It may vary between
+calls in a warm session. These checks do not establish that later interactions
+will remain free of challenges.
 
 ## Vision and coordinate input
 

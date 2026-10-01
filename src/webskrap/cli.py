@@ -251,9 +251,13 @@ def fetch_command(
         str,
         typer.Option("--wait-until", help="commit, domcontentloaded, load, or networkidle."),
     ] = "domcontentloaded",
+    ready_selector: Annotated[
+        str | None,
+        typer.Option("--ready-selector", help="Wait for this Playwright selector to be visible."),
+    ] = None,
     timeout_ms: Annotated[
         float,
-        typer.Option("--timeout-ms", min=1, help="Navigation timeout."),
+        typer.Option("--timeout-ms", min=1, help="Timeout for navigation and each readiness wait."),
     ] = 30_000,
     resource_policy: Annotated[
         ResourcePolicy,
@@ -362,6 +366,7 @@ def fetch_command(
             max_links=max_links,
             quiet=quiet,
             wait_until=wait_until,
+            ready_selector=ready_selector,
             timeout_ms=timeout_ms,
             resource_policy=resource_policy,
             decline_cookies=decline_cookies,
@@ -396,6 +401,7 @@ async def _fetch(
     max_links: int,
     quiet: bool,
     wait_until: str,
+    ready_selector: str | None,
     timeout_ms: float,
     resource_policy: ResourcePolicy,
     decline_cookies: bool,
@@ -439,6 +445,7 @@ async def _fetch(
             url=url,
             profile=selected_profile,
             wait_until=_parse_wait_until(wait_until),
+            ready_selector=ready_selector,
             screenshot=screenshot or False,
             timeout_ms=timeout_ms,
             text_only=text_only,

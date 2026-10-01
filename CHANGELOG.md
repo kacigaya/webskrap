@@ -9,6 +9,27 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Python fetches, CLI `fetch --ready-selector`, and MCP fetch tools can wait for
+  a visible Playwright selector before extracting content. Readiness uses a
+  separate navigation-timeout budget after consent dismissal.
+
+### Fixed
+
+- Known DataDome and Cloudflare challenge pages raise `blocked` instead of
+  returning challenge content, including challenges served with HTTP 200.
+  Fetches check before consent, before extraction, and after a readiness
+  timeout. Ordinary HTTP error pages still return a result with `ok=False`.
+- Live stealth checks fail known challenge pages before skipping service errors.
+- Sandbox recovery hints include executable-specific AppArmor policy checks.
+
+### Migration
+
+- Callers that previously inspected raw challenge content from a fetch should
+  handle `WebSkrapError` with `code=ErrorCode.BLOCKED`. Use a manually driven
+  session page for diagnostics; fetches no longer return recognized challenges.
+
 ## [2.12.0] - 2026-09-30
 
 ### Security
