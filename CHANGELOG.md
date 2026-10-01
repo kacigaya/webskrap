@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-10-01
+
 ### Added
 
 - Python fetches, CLI `fetch --ready-selector`, and MCP fetch tools can wait for
@@ -682,7 +684,9 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.11.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.13.0...HEAD
+[2.13.0]: https://github.com/kacigaya/webskrap/compare/v2.12.0...v2.13.0
+[2.12.0]: https://github.com/kacigaya/webskrap/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/kacigaya/webskrap/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/kacigaya/webskrap/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/kacigaya/webskrap/compare/v2.9.0...v2.10.0

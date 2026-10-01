@@ -7,7 +7,7 @@ patch release on top of the latest minor; older minors are not backported.
 
 | Version                                   | Supported |
 | ----------------------------------------- | --------- |
-| Latest minor (2.11.x as of 2026-09-30)    | Yes       |
+| Latest minor (2.13.x as of 2026-10-01)       | Yes       |
 | Older minors                              | No        |
 
 ## Reporting a vulnerability
