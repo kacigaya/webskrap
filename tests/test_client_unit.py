@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from anyio import CancelScope, sleep
+from patchright.async_api import TimeoutError as PatchrightTimeoutError
 from playwright.async_api import BrowserContext
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from webskrap.client import (
     WebSkrapClient,
@@ -262,6 +264,9 @@ class _FetchPage:
         self.content_called = True
         return "<html><body>Visible body</body></html>"
 
+    async def evaluate(self, _script: str) -> None:
+        return None
+
     def locator(self, selector: str) -> _BodyLocator:
         self.locators.append(selector)
         return _BodyLocator()
@@ -329,6 +334,119 @@ async def test_fetch_text_only_uses_body_inner_text() -> None:
     assert page.content_called is False
     assert page.closed is True
     assert result.cookie_notice_declined is None
+
+
+@pytest.mark.parametrize("provider", ["DataDome", "Cloudflare"])
+async def test_fetch_blocks_challenges_before_consent_or_extraction(provider, monkeypatch) -> None:
+    page = _FetchPage()
+    page.evaluate = AsyncMock(return_value=provider)
+    decline = AsyncMock()
+    monkeypatch.setattr("webskrap.client._decline_cookies", decline)
+    session = WebSkrapSession(
+        name="blocked",
+        context=_FetchContext(page),  # type: ignore[arg-type]
+        config=SessionConfig(decline_cookies=True),
+        profile=get_profile(None),
+    )
+    with pytest.raises(WebSkrapError) as error:
+        await session.fetch("https://example.test", ready_selector="#quote")
+    assert error.value.code is ErrorCode.BLOCKED
+    assert provider in str(error.value)
+    decline.assert_not_awaited()
+    assert page.locators == []
+    assert not page.content_called
+    assert page.closed
+
+
+async def test_fetch_waits_for_visible_selector_before_extracting() -> None:
+    page = _FetchPage()
+    locator = MagicMock()
+    locator.wait_for = AsyncMock()
+    locator.inner_text = AsyncMock(return_value="Ready quote form")
+    page.locator = MagicMock(return_value=locator)
+    session = WebSkrapSession(
+        name="ready",
+        context=_FetchContext(page),  # type: ignore[arg-type]
+        config=SessionConfig(),
+        profile=get_profile(None),
+    )
+    result = await session.fetch(
+        "https://example.test", ready_selector="#quote", timeout_ms=4321, text_only=True
+    )
+    locator.wait_for.assert_awaited_once_with(state="visible", timeout=4321)
+    assert page.locator.call_args_list[0].args == ("#quote",)
+    assert result.text == "Ready quote form"
+    assert page.closed
+
+
+@pytest.mark.parametrize("timeout_type", [PlaywrightTimeoutError, PatchrightTimeoutError])
+@pytest.mark.parametrize("provider", [None, "DataDome"])
+async def test_readiness_timeout_rechecks_challenge_and_closes_page(timeout_type, provider) -> None:
+    page = _FetchPage()
+    page.evaluate = AsyncMock(side_effect=[None, provider])
+    locator = MagicMock()
+    locator.wait_for = AsyncMock(side_effect=timeout_type("Timeout waiting for #quote"))
+    page.locator = MagicMock(return_value=locator)
+    session = WebSkrapSession(
+        name="late",
+        context=_FetchContext(page),  # type: ignore[arg-type]
+        config=SessionConfig(),
+        profile=get_profile(None),
+    )
+    with pytest.raises(WebSkrapError if provider else timeout_type) as error:
+        await session.fetch("https://example.test", ready_selector="#quote")
+    if provider:
+        assert error.value.code is ErrorCode.BLOCKED
+    assert not page.content_called
+    assert page.closed
+
+
+async def test_fetch_rechecks_challenge_after_consent(monkeypatch) -> None:
+    page = _FetchPage()
+    page.evaluate = AsyncMock(side_effect=[None, "DataDome"])
+    monkeypatch.setattr("webskrap.client._decline_cookies", AsyncMock(return_value="cmp"))
+    session = WebSkrapSession(
+        name="late",
+        context=_FetchContext(page),  # type: ignore[arg-type]
+        config=SessionConfig(decline_cookies=True),
+        profile=get_profile(None),
+    )
+    with pytest.raises(WebSkrapError) as error:
+        await session.fetch("https://example.test")
+    assert error.value.code is ErrorCode.BLOCKED
+    assert page.closed
+
+
+async def test_readiness_keeps_timeout_when_challenge_probe_loses_context() -> None:
+    page = _FetchPage()
+    page.evaluate = AsyncMock(side_effect=[None, RuntimeError("Execution context was destroyed")])
+    locator = MagicMock()
+    timeout = PlaywrightTimeoutError("Timeout waiting for #quote")
+    locator.wait_for = AsyncMock(side_effect=timeout)
+    page.locator = MagicMock(return_value=locator)
+    session = WebSkrapSession(
+        name="navigation",
+        context=_FetchContext(page),  # type: ignore[arg-type]
+        config=SessionConfig(),
+        profile=get_profile(None),
+    )
+    with pytest.raises(PlaywrightTimeoutError) as error:
+        await session.fetch("https://example.test", ready_selector="#quote")
+    assert error.value is timeout
+    assert page.closed
+
+
+@pytest.mark.parametrize("selector", ["", "  "])
+async def test_fetch_rejects_blank_readiness_without_opening_page(selector) -> None:
+    context = MagicMock(spec=BrowserContext)
+    context.new_page = AsyncMock()
+    session = WebSkrapSession(
+        name="invalid", context=context, config=SessionConfig(), profile=get_profile(None)
+    )
+    with pytest.raises(WebSkrapError) as error:
+        await session.fetch("https://example.test", ready_selector=selector)
+    assert error.value.code is ErrorCode.USAGE
+    context.new_page.assert_not_awaited()
 
 
 @pytest.mark.asyncio

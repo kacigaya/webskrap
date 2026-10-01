@@ -68,7 +68,8 @@ RECOVERY_HINTS: dict[ErrorCode, str] = {
         "channel='chromium'."
     ),
     ErrorCode.SANDBOX: (
-        "Chromium's OS sandbox could not start. Enable unprivileged user namespaces, or accept "
+        "Chromium's OS sandbox could not start. Check user namespaces and any AppArmor policy "
+        "for the actual browser executable. Restore sandbox support, or explicitly accept "
         "weaker renderer isolation with --no-sandbox (`webskrap fetch`, `search`, "
         "`browser open`), SessionConfig(chromium_sandbox=False), or "
         "WEBSKRAP_CHROMIUM_SANDBOX=0 (MCP server)."

@@ -7,14 +7,19 @@ import pytest
 from live_stealth_helpers import goto_or_skip, live_gpu
 
 from webskrap import GpuBackend
+from webskrap.errors import ErrorCode, WebSkrapError
 
 
 class _Page:
-    def __init__(self, response) -> None:
+    def __init__(self, response, provider=None) -> None:
         self.response = response
+        self.provider = provider
 
     async def goto(self, url: str, **kwargs):
         return self.response
+
+    async def evaluate(self, script: str):
+        return self.provider
 
 
 def test_live_gpu_defaults_to_auto(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,6 +53,16 @@ def test_goto_or_skip_skips_5xx() -> None:
         )
 
 
-def test_goto_or_skip_keeps_cloudflare_challenge() -> None:
+def test_goto_or_skip_fails_cloudflare_challenge() -> None:
     response = SimpleNamespace(status=503, headers={"cf-mitigated": "challenge"})
-    assert asyncio.run(goto_or_skip(_Page(response), "https://example.test")) is response
+    with pytest.raises(WebSkrapError) as error:
+        asyncio.run(goto_or_skip(_Page(response), "https://example.test"))
+    assert error.value.code is ErrorCode.BLOCKED
+
+
+@pytest.mark.parametrize("status", [200, 403, 503])
+def test_goto_or_skip_fails_datadome_instead_of_skipping(status: int) -> None:
+    response = SimpleNamespace(status=status, headers={})
+    with pytest.raises(WebSkrapError) as error:
+        asyncio.run(goto_or_skip(_Page(response, "DataDome"), "https://example.test"))
+    assert error.value.code is ErrorCode.BLOCKED

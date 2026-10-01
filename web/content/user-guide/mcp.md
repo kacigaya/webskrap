@@ -86,7 +86,8 @@ leave the notice in place.
 | `channel` | `chrome` | Browser channel; use `chromium` on Linux ARM64. |
 | `wait_until` | `networkidle` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
 | `resource_policy` | `all` | `all`, `lite`, or `documents`. |
-| `timeout_ms` | `60000` | Navigation timeout. |
+| `timeout_ms` | `60000` | Timeout applied separately to navigation and readiness. |
+| `ready_selector` | `null` | Playwright selector that must become visible after consent dismissal. |
 | `max_chars` | `8000` | Maximum returned text characters. |
 | `text_only` | `true` | Return clean visible text; set `false` for raw HTML. |
 | `decline_cookies` | `true` | Click a cookie consent notice's reject button after load. |
@@ -121,6 +122,13 @@ plus Patchright options:
   "webrtc_ip_handling_policy": null
 }
 ```
+
+Both fetch tools check known DataDome and Cloudflare challenge pages and return
+a `blocked` tool error, including challenges served with HTTP 200. Ordinary
+HTTP error pages still return `ok: false`. With `ready_selector` set, a missing
+element returns `timeout`; if a known challenge replaced the page while waiting,
+the error is `blocked`. Detection does not identify every challenge or guarantee
+that later interactions will succeed.
 
 When `user_data_dir` is set, it must be relative to
 `~/.webskrap/profiles`. Set `WEBSKRAP_MCP_PROFILE_DIR` in the MCP server

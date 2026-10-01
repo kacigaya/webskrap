@@ -69,6 +69,31 @@ def _fake_client(monkeypatch: Any) -> None:
     monkeypatch.setattr(mcp_server, "WebSkrapClient", _FakeClient)
 
 
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_ready_selector_is_forwarded(tool, monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    asyncio.run(tool("https://example.test", ready_selector="#quote"))
+    assert _FakeClient.calls[0]["ready_selector"] == "#quote"
+
+
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_challenge_carries_blocked_code_and_hint(tool, monkeypatch: Any) -> None:
+    calls = []
+
+    class BlockedClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            calls.append(url)
+            raise WebSkrapError("DataDome served a bot challenge", code=ErrorCode.BLOCKED)
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", BlockedClient)
+    with pytest.raises(WebSkrapError) as error:
+        asyncio.run(tool("https://example.test"))
+    assert error.value.code is ErrorCode.BLOCKED
+    assert "[code: blocked]" in str(error.value)
+    assert RECOVERY_HINTS[ErrorCode.BLOCKED] in str(error.value)
+    assert calls == ["https://example.test"]
+
+
 def test_fetch_defaults_to_clean_text(monkeypatch: Any) -> None:
     _fake_client(monkeypatch)
 

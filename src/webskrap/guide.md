@@ -33,6 +33,14 @@ to skip images/fonts/media or `documents` to also skip stylesheets. Earlier
 load states can read before deferred page content arrives. Routing disables
 the browser's HTTP cache and does not intercept service-worker-owned requests.
 
+Pass `ready_selector="#content"` to either fetch tool when the requested content
+arrives later. It must become visible after consent dismissal; the wait uses
+`timeout_ms` separately from navigation and may vary between warm-session calls.
+Known DataDome and Cloudflare challenge pages return `blocked`, including HTTP 200
+challenges. Ordinary HTTP errors still return `ok: false`. Detection checks known
+provider markers and headers; it cannot identify every challenge or guarantee
+that later interactions will succeed. Stop automatic retries on `blocked`.
+
 `search` loads Bing's results page (`engine="bing"`, the default) or
 DuckDuckGo's HTML page (`engine="ddg"`) in the same stealth browser and
 returns the organic hits with their click-tracking unwrapped. Google is not offered. Some exit
@@ -132,7 +140,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `timeout` | Raise `timeout_ms`, weaken `wait_until`, or `browser_wait_for` first. |
 | `navigation` | Check the URL and that the host resolves. |
 | `browser_launch` | Run `webskrap install`; on Linux ARM64 pass `channel="chromium"`. |
-| `sandbox` | Set `WEBSKRAP_CHROMIUM_SANDBOX=0` only where the sandbox cannot start. |
+| `sandbox` | Check user namespaces and AppArmor for the browser executable; restore sandbox support. |
 | `path_rejected` | Paths are relative to a confined root. |
 | `blocked` | The site served a bot challenge. Switch engine or exit IP; no CAPTCHA solving. |
 | `usage` | Re-read the argument's documented values. |

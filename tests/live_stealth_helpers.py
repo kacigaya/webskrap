@@ -5,6 +5,7 @@ import os
 import pytest
 
 from webskrap import GpuBackend, ProxyConfig
+from webskrap.challenges import raise_for_challenge
 
 
 def live_proxy() -> ProxyConfig | None:
@@ -25,14 +26,11 @@ def live_gpu() -> GpuBackend:
 
 
 async def goto_or_skip(page, url: str, **kwargs):
-    # A 5xx is the demo site being down, not a detection verdict. Cloudflare
-    # can serve its bot challenge as a 503; that is a verdict and must fail.
+    # Known challenges are detection verdicts even when served with a 5xx.
+    # Only skip a service error once the provider checks have ruled them out.
     response = await page.goto(url, **kwargs)
-    if (
-        response is not None
-        and response.status >= 500
-        and response.headers.get("cf-mitigated") != "challenge"
-    ):
+    await raise_for_challenge(page, response.headers if response is not None else {})
+    if response is not None and response.status >= 500:
         pytest.skip(f"{url} returned HTTP {response.status}")
     return response
 

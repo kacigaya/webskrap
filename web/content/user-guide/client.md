@@ -64,6 +64,26 @@ Use `client.session()` when you want to keep browser state or keep a headed brow
 For pages with long-polling or analytics requests, `networkidle` can be slower
 or less reliable than `domcontentloaded` plus an explicit page wait in a session.
 
+For deferred content, fetches can wait for a visible Playwright selector:
+
+```python
+result = await client.fetch(
+    "https://example.com",
+    ready_selector="#content",
+    timeout_ms=30_000,
+)
+```
+
+The readiness wait starts after consent dismissal and gets its own `timeout_ms`
+budget, or the configured navigation timeout. A missing selector raises a
+timeout; a blank selector is a usage error. `session.fetch()` accepts it too.
+
+Known DataDome and Cloudflare challenge pages raise `WebSkrapError` with code
+`blocked`, including challenges served with HTTP 200. They are checked before
+consent and extraction, and after a readiness timeout. Ordinary HTTP error pages
+still return `ok=False`. Detection uses known provider markers and headers and
+does not identify every challenge or solve verification widgets.
+
 ### Screenshots and output
 
 The Python API returns page HTML in `result.text` by default. Pass

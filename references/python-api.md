@@ -43,6 +43,16 @@ config = SessionConfig(
 
 ## Consent and links
 
+`client.fetch()` and `session.fetch()` accept `ready_selector`, an optional
+Playwright selector that must become visible after consent dismissal and before
+extraction. Its wait uses `timeout_ms` or `navigation_timeout_ms` separately from
+navigation. A missing selector raises a timeout. A blank selector is a usage error.
+
+Known DataDome and Cloudflare challenge pages raise `WebSkrapError` with
+`code=ErrorCode.BLOCKED`, even when served with HTTP 200. Ordinary HTTP errors
+still return `FetchResult(ok=False)`. Detection uses active provider markers and
+headers; it does not identify every challenge or solve verification widgets.
+
 Cookie rejection is opt-in for Python callers. The CLI and MCP server enable it
 by default.
 
