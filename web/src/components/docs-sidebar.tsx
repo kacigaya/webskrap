@@ -7,6 +7,13 @@ import { useRef } from "react";
 import { NAV } from "@/lib/docs-nav";
 import { cn } from "@/lib/utils";
 
+// The export uses trailingSlash, so usePathname returns "/docs/x/" while the nav
+// declares "/docs/x". Compare both without the trailing slash.
+function samePath(left: string, right: string) {
+  const trim = (value: string) => (value.length > 1 ? value.replace(/\/$/, "") : value);
+  return trim(left) === trim(right);
+}
+
 export function DocsSidebar() {
   const pathname = usePathname();
 
@@ -20,7 +27,7 @@ export function DocsSidebar() {
             </p>
           )}
           {section.items.map((item) => {
-            const active = pathname === item.href;
+            const active = samePath(pathname, item.href);
             return (
               <Link
                 key={item.href}
@@ -56,7 +63,7 @@ export function MobileDocsMenu() {
         details.current.querySelector("summary")?.focus();
       }}
     >
-      <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border hover:bg-accent [&::-webkit-details-marker]:hidden">
+      <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background [&::-webkit-details-marker]:hidden">
         <Menu aria-hidden="true" className="size-4" />
         <span className="sr-only">Open documentation menu</span>
       </summary>

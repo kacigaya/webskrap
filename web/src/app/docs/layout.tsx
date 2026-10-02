@@ -19,7 +19,9 @@ export default function DocsLayout({
             <DocsSidebar />
           </div>
         </aside>
-        <main className="min-w-0 flex-1 py-10">{children}</main>
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 py-10">
+          {children}
+        </main>
       </div>
       <SiteFooter />
     </div>

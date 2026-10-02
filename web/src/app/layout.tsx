@@ -69,6 +69,12 @@ export default function RootLayout({
       )}
     >
       <body className="min-h-full">
+        <a
+          href="#main-content"
+          className="fixed left-[max(1rem,env(safe-area-inset-left))] top-[max(1rem,env(safe-area-inset-top))] z-50 -translate-y-20 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-sm ring-2 ring-ring transition-transform focus:translate-y-0 motion-reduce:transition-none"
+        >
+          Skip to content
+        </a>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           {children}
         </ThemeProvider>
