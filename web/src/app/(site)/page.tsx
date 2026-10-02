@@ -1,5 +1,6 @@
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CodeBlock } from "@/components/code-block";
+import { asset } from "@/lib/asset";
 import { DEFAULT_DESCRIPTION, SITE_URL } from "@/lib/seo";
 
 const DOCS_URL = "/docs";
@@ -113,40 +115,50 @@ export default function Home() {
         />
 
         {/* Hero */}
-        <section className="mx-auto grid w-full max-w-6xl grid-cols-1 items-center gap-10 px-6 py-16 sm:py-24 lg:grid-cols-2 lg:gap-12">
-          <div className="flex flex-col items-start">
-            <Badge variant="secondary" className="mb-6">
-              Async-first · Playwright · Patchright · MCP
-            </Badge>
-            <h1 className="text-balance font-heading text-4xl font-bold tracking-tight sm:text-5xl">
-              Python Web Scraping with Playwright and Patchright
-            </h1>
-            <p className="mt-6 max-w-2xl text-pretty text-lg text-muted-foreground">
-              WebSkrap is an async-first Python web scraping and browser automation
-              toolkit for scraping JavaScript-heavy pages, managing persistent
-              browser sessions, and exposing clean page text to LLM agents through
-              MCP.
-            </p>
-            <p className="mt-4 max-w-2xl text-pretty text-base text-muted-foreground">
-              Fetch a page in one call, or keep a browser open across calls and
-              drive it with snapshots, clicks, and form fills from the CLI or an MCP
-              client.
-            </p>
-            <div className="mt-8 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-              <Button size="xl" render={<Link href={DOCS_URL} />}>
-                View Documentation
-              </Button>
-              <Button size="xl" variant="outline" render={<a href={GITHUB_URL} />}>
-                Star on GitHub
-              </Button>
-            </div>
+        <section className="mx-auto flex w-full max-w-5xl flex-col items-center px-6 py-24 text-center">
+          <Image
+            src={asset("/webskrap-logo.png")}
+            alt=""
+            width={642}
+            height={686}
+            className="mb-8 h-24 w-auto"
+            loading="eager"
+          />
+          <Badge variant="secondary" className="mb-6">
+            Async-first · Playwright · Patchright · MCP
+          </Badge>
+          <h1 className="text-balance font-heading text-5xl font-bold tracking-tight sm:text-6xl">
+            Python Web Scraping with Playwright and Patchright
+          </h1>
+          <p className="mt-6 max-w-2xl text-pretty text-lg text-muted-foreground">
+            WebSkrap is an async-first Python web scraping and browser automation
+            toolkit for scraping JavaScript-heavy pages, managing persistent
+            browser sessions, and exposing clean page text to LLM agents through
+            MCP.
+          </p>
+          <p className="mt-4 max-w-2xl text-pretty text-base text-muted-foreground">
+            Fetch a page in one call, or keep a browser open across calls and
+            drive it with snapshots, clicks, and form fills from the CLI or an MCP
+            client.
+          </p>
+          <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+            <Button size="xl" render={<Link href={DOCS_URL} />}>
+              View Documentation
+            </Button>
+            <Button size="xl" variant="outline" render={<a href={GITHUB_URL} />}>
+              Star on GitHub
+            </Button>
           </div>
+        </section>
+
+        {/* Install */}
+        <section className="mx-auto w-full max-w-3xl px-6 pb-24">
           <CodeBlock code={INSTALL} lang="bash" />
         </section>
 
         {/* Features */}
-        <section className="mx-auto w-full max-w-6xl px-6 pb-24">
-          <h2 className="mb-8 text-balance font-heading text-3xl font-bold tracking-tight">
+        <section className="mx-auto w-full max-w-5xl px-6 pb-24">
+          <h2 className="mb-10 text-balance text-center font-heading text-3xl font-bold tracking-tight">
             Browser automation ready for agents and scripts
           </h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -154,7 +166,7 @@ export default function Home() {
               <Card key={feature.title}>
                 <CardHeader>
                   <CardTitle render={<h3 />}>{feature.title}</CardTitle>
-                  <CardDescription render={<p />} className="text-pretty">
+                  <CardDescription render={<p />}>
                     {feature.description}
                   </CardDescription>
                 </CardHeader>
@@ -164,16 +176,15 @@ export default function Home() {
         </section>
 
         {/* Quickstart */}
-        <section className="mx-auto w-full max-w-6xl px-6 pb-24">
-          <h2 className="mb-6 text-balance font-heading text-3xl font-bold tracking-tight">
+        <section className="mx-auto w-full max-w-3xl px-6 pb-24">
+          <h2 className="mb-6 text-balance text-center font-heading text-3xl font-bold tracking-tight">
             Quickstart
           </h2>
-          <div className="max-w-3xl">
-            <CodeBlock code={QUICKSTART} lang="python" />
-          </div>
+          <CodeBlock code={QUICKSTART} lang="python" />
         </section>
       </main>
 
+      {/* Footer */}
       <SiteFooter />
     </>
   );
