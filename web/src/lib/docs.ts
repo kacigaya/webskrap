@@ -12,11 +12,77 @@ export { getDocSlugs } from "@/lib/docs-nav";
 
 const CONTENT_DIR = path.join(process.cwd(), "content");
 
+interface HastNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+
+export interface TocItem {
+  id: string;
+  title: string;
+  depth: 2 | 3;
+}
+
+declare module "vfile" {
+  interface DataMap {
+    toc: TocItem[];
+  }
+}
+
+function textOf(node: HastNode): string {
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(textOf).join("");
+}
+
+function containsLink(node: HastNode): boolean {
+  return (node.children ?? []).some(
+    (child) => child.tagName === "a" || containsLink(child),
+  );
+}
+
+/**
+ * Collect h2/h3 for the "On this page" outline and turn each heading into a
+ * link to itself. Runs after rehype-slug so every heading already has an id.
+ */
+function rehypeHeadingLinks() {
+  return (tree: HastNode, file: { data: { toc?: TocItem[] } }) => {
+    const toc: TocItem[] = [];
+    const walk = (node: HastNode) => {
+      for (const child of node.children ?? []) {
+        const depth = child.tagName === "h2" ? 2 : child.tagName === "h3" ? 3 : 0;
+        const id = child.properties?.id;
+        if (child.type !== "element" || !depth || typeof id !== "string") {
+          walk(child);
+          continue;
+        }
+        toc.push({ id, title: textOf(child), depth });
+        // A heading that already holds a link cannot wrap another one.
+        if (!containsLink(child)) {
+          child.children = [
+            {
+              type: "element",
+              tagName: "a",
+              properties: { href: `#${id}`, className: ["heading-anchor"] },
+              children: child.children ?? [],
+            },
+          ];
+        }
+      }
+    };
+    walk(tree);
+    file.data.toc = toc;
+  };
+}
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkRehype)
   .use(rehypeSlug)
+  .use(rehypeHeadingLinks)
   .use(rehypePrettyCode, {
     theme: { light: "github-light", dark: "github-dark" },
     keepBackground: false,
@@ -26,6 +92,7 @@ const processor = unified()
 export interface RenderedDoc {
   html: string;
   title: string;
+  toc: TocItem[];
   description?: string;
 }
 
@@ -74,10 +141,11 @@ export async function getDoc(slug: string[]): Promise<RenderedDoc | null> {
 
   const { body, frontmatter } = parseFrontmatter(raw);
   const title = frontmatter.title ?? body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? "WebSkrap Docs";
-  let html = String(await processor.process(body));
+  const file = await processor.process(body);
+  let html = String(file);
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
   if (basePath) {
     html = html.replaceAll('href="/', `href="${basePath}/`);
   }
-  return { html, title, description: frontmatter.description };
+  return { html, title, toc: file.data.toc ?? [], description: frontmatter.description };
 }

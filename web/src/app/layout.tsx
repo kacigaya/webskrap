@@ -39,14 +39,14 @@ export const metadata: Metadata = {
     images: [
       {
         url: SOCIAL_IMAGE_URL,
-        width: 642,
-        height: 686,
-        alt: "WebSkrap logo",
+        width: 1200,
+        height: 630,
+        alt: "WebSkrap documentation",
       },
     ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: DEFAULT_TITLE,
     description: DEFAULT_DESCRIPTION,
     images: [SOCIAL_IMAGE_URL],

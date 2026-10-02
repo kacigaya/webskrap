@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
+import { DocsPager } from "@/components/docs-pager";
 import { Frame, FrameHeader, FrameTitle, FrameDescription } from "@/components/ui/frame";
 import {
   Table,
@@ -33,14 +34,14 @@ export const metadata: Metadata = {
     images: [
       {
         url: SOCIAL_IMAGE_URL,
-        width: 642,
-        height: 686,
-        alt: "WebSkrap logo",
+        width: 1200,
+        height: 630,
+        alt: "WebSkrap documentation",
       },
     ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: `Benchmarks | ${SITE_NAME}`,
     description: DESCRIPTION,
     images: [SOCIAL_IMAGE_URL],
@@ -554,6 +555,7 @@ export default function BenchmarksPage() {
         </a>{" "}
         for methodology.
       </p>
+      <DocsPager href="/docs/benchmarks" />
     </div>
   );
 }
