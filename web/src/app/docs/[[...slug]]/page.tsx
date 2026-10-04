@@ -95,7 +95,7 @@ export default async function DocPage(props: DocPageProps) {
             </details>
           )}
           <article
-            className="prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-headings:text-balance prose-p:text-pretty prose-pre:rounded-lg prose-pre:border prose-pre:bg-card prose-pre:p-6 prose-a:text-brand"
+            className="prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-mt-24 prose-headings:text-balance prose-p:text-pretty prose-pre:rounded-lg prose-pre:border prose-pre:bg-card prose-pre:p-6 prose-a:text-brand prose-code:wrap-break-word prose-table:block prose-table:overflow-x-auto"
             dangerouslySetInnerHTML={{ __html: doc.html }}
           />
           <DocsPager href={href} />
