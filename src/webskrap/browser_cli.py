@@ -30,12 +30,12 @@ from webskrap.browser_session import (
 from webskrap.cli_output import (
     OutputFormat,
     fail,
+    parse_cli_value,
     parse_output_format,
     print_json,
     stderr_console,
 )
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import ElementState, LoadState, WaitUntil
 from webskrap.parsing import (
     parse_element_state,
     parse_load_state,
@@ -65,27 +65,6 @@ _ELEMENT_COMMAND_HELP = {
     "type": "Type text into an element key by key.",
     "select": "Select option value(s) in a <select>.",
 }
-
-
-def _parse_wait_until(value: str) -> WaitUntil:
-    try:
-        return parse_wait_until(value)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
-
-
-def _parse_load_state(value: str) -> LoadState:
-    try:
-        return parse_load_state(value)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
-
-
-def _parse_element_state(value: str) -> ElementState:
-    try:
-        return parse_element_state(value)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
 
 
 def _run(coroutine: Coroutine[Any, Any, T], output_format: OutputFormat) -> T:
@@ -175,12 +154,11 @@ def open_command(
     running session with a different one is refused.
     """
     output_format = parse_output_format(format)
-    try:
-        policy = parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy)
-    except ValueError as exc:
-        raise typer.BadParameter(
-            str(exc).partition(" must ")[2], param_hint="--webrtc-ip-handling-policy"
-        ) from exc
+    policy = parse_cli_value(
+        webrtc_ip_handling_policy,
+        parse_webrtc_ip_handling_policy,
+        param_hint="--webrtc-ip-handling-policy",
+    )
     payload = _run(
         browser_session.open_session(
             session,
@@ -288,7 +266,7 @@ def goto_command(
 ) -> None:
     """Navigate the current page."""
     output_format = parse_output_format(format)
-    parsed_wait_until = _parse_wait_until(wait_until)
+    parsed_wait_until = parse_cli_value(wait_until, parse_wait_until)
     state = _run_page_command(
         session,
         lambda page: browser_session.goto(page, url, parsed_wait_until),
@@ -440,8 +418,10 @@ def wait_command(
 ) -> None:
     """Wait for one condition on the page (text, selector, or load state)."""
     output_format = parse_output_format(format)
-    parsed_state = _parse_element_state(state)
-    parsed_load_state = _parse_load_state(load_state) if load_state is not None else None
+    parsed_state = parse_cli_value(state, parse_element_state)
+    parsed_load_state = (
+        parse_cli_value(load_state, parse_load_state) if load_state is not None else None
+    )
     try:
         # Fail before connecting when the conditions do not add up to exactly one.
         browser_session.wait_condition(text, text_gone, selector, parsed_load_state)

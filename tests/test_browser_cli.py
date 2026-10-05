@@ -125,7 +125,22 @@ def test_goto_rejects_invalid_wait_until(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 2
-    assert "commit" in result.output
+    assert "beoneof:commit,domcontentloaded,load,networkidle" in "".join(
+        result.output.replace("│", "").split()
+    )
+
+
+def test_wait_rejects_invalid_element_state(tmp_path: Path) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["browser", "wait", "--selector", "#status", "--state", "ready"],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == 2
+    assert "beoneof:attached,detached,visible,hidden" in "".join(
+        result.output.replace("│", "").split()
+    )
 
 
 def test_close_all_and_list_ignore_non_session_directories(tmp_path: Path) -> None:
@@ -318,7 +333,9 @@ def test_wait_rejects_a_load_state_that_cannot_be_awaited(tmp_path: Path) -> Non
     )
 
     assert result.exit_code == 2
-    assert "domcontentloaded" in "".join(result.output.split())
+    assert "beoneof:domcontentloaded,load,networkidle" in "".join(
+        result.output.replace("│", "").split()
+    )
 
 
 @pytest.mark.browser
@@ -523,6 +540,10 @@ def test_open_rejects_an_unknown_webrtc_policy(
     )
 
     assert result.exit_code == 2
+    plain = "".join(result.output.replace("│", "").split())
+    assert "Invalidvaluefor--webrtc-ip-handling-policy" in plain
+    assert "beoneof:default,default_public_and_private_interfaces," in plain
+    assert "default_public_interface_only,disable_non_proxied_udp" in plain
     assert calls == []
 
 

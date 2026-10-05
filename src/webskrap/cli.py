@@ -26,6 +26,7 @@ from webskrap.browser_session import sandbox_enabled
 from webskrap.cli_output import (
     OutputFormat,
     fail,
+    parse_cli_value,
     parse_output_format,
     print_json,
     stderr_console,
@@ -40,8 +41,6 @@ from webskrap.models import (
     SearchEngine,
     SearchResult,
     SessionConfig,
-    WaitUntil,
-    WebRtcIPHandlingPolicy,
     shape_fetch_result,
     shape_search_result,
 )
@@ -435,7 +434,9 @@ async def _fetch(
         gpu=gpu,
         fake_media_devices=fake_media_devices,
         launch_args=launch_args,
-        webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+        webrtc_ip_handling_policy=parse_cli_value(
+            webrtc_ip_handling_policy, parse_webrtc_ip_handling_policy
+        ),
     )
 
     try:
@@ -444,7 +445,7 @@ async def _fetch(
             parsed_output_format,
             url=url,
             profile=selected_profile,
-            wait_until=_parse_wait_until(wait_until),
+            wait_until=parse_cli_value(wait_until, parse_wait_until),
             ready_selector=ready_selector,
             screenshot=screenshot or False,
             timeout_ms=timeout_ms,
@@ -687,7 +688,9 @@ async def _search(
         gpu=gpu,
         fake_media_devices=fake_media_devices,
         launch_args=launch_args,
-        webrtc_ip_handling_policy=_parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+        webrtc_ip_handling_policy=parse_cli_value(
+            webrtc_ip_handling_policy, parse_webrtc_ip_handling_policy
+        ),
     )
 
     try:
@@ -800,22 +803,6 @@ async def _fetch_with_channel_fallback(
     return await _with_channel_fallback(
         lambda resolved: _run_fetch(resolved, **kwargs), config, output_format
     )
-
-
-def _parse_wait_until(value: str) -> WaitUntil:
-    try:
-        return parse_wait_until(value)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
-
-
-def _parse_webrtc_ip_handling_policy(
-    value: str | None,
-) -> WebRtcIPHandlingPolicy | None:
-    try:
-        return parse_webrtc_ip_handling_policy(value)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc).partition(" must ")[2]) from exc
 
 
 def _run_install_command(command: tuple[str, ...]) -> InstallResult:

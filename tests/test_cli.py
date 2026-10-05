@@ -731,6 +731,7 @@ def test_search_human_output_does_not_render_page_text_as_markup(monkeypatch: An
         pytest.param("--engine", "google", "is not one of 'ddg', 'bing'", id="engine"),
         pytest.param("--format", "yaml", "human, json", id="output-format"),
         pytest.param("--max-results", "-1", "x>=0", id="max-results"),
+        pytest.param("--webrtc-ip-handling-policy", "off", "disable_non_proxied_udp", id="webrtc"),
     ],
 )
 def test_search_rejects_invalid_option_values(option: str, value: str, expected: str) -> None:

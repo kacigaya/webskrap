@@ -18,7 +18,8 @@ is reporting a negative result -- ``doctor`` on a host with no browser -- exits
 from __future__ import annotations
 
 import json
-from typing import Any, Literal, NoReturn
+from collections.abc import Callable
+from typing import Any, Literal, NoReturn, TypeVar
 
 import typer
 from rich.console import Console
@@ -26,8 +27,22 @@ from rich.console import Console
 from webskrap.errors import error_payload, exit_code
 
 OutputFormat = Literal["human", "json"]
+T = TypeVar("T")
+R = TypeVar("R")
 
 stderr_console = Console(stderr=True, highlight=False)
+
+
+def parse_cli_value(value: T, parser: Callable[[T], R], *, param_hint: str | None = None) -> R:
+    """Parse an option, presenting shared validation failures as CLI usage errors.
+
+    Raises:
+        typer.BadParameter: If the parser rejects the value.
+    """
+    try:
+        return parser(value)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc).partition(" must ")[2], param_hint=param_hint) from exc
 
 
 def parse_output_format(value: str) -> OutputFormat:
