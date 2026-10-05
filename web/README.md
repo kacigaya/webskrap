@@ -35,13 +35,24 @@ Run the same site checks used by GitHub Actions:
 ```bash
 bun install --frozen-lockfile
 bun audit
+bun run test
 bun run lint
+bun run typecheck
 NEXT_PUBLIC_BASE_PATH=/webskrap bun run build
 ```
 
 The production build writes the static site to `out/`. Set
 `NEXT_PUBLIC_BASE_PATH` when serving the export below a subpath. GitHub Pages
 uses `/webskrap`; a root-hosted deployment can leave it unset.
+
+The `fast-glob` override reuses `tinyglobby` to remove `braces`, which has no
+patched release for [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm).
+Next.js's ESLint plugin is patched to disable automatic directory expansion,
+so literal root-directory settings still match only that directory. The override
+relies on the plugin using only `globSync` with `onlyDirectories`. The tests check
+that dependency chain and root-directory settings. Revisit the override and patch
+when the plugin stops depending on vulnerable `braces`; check its glob calls and
+the patch when upgrading Next.js.
 
 ## Deployment
 

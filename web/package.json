@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
     "typescript": "^5.9.3"
   },
   "overrides": {
+    "fast-glob": "npm:tinyglobby@0.2.17",
     "brace-expansion": "5.0.12",
     "minimatch": "10.2.6",
     "postcss": "8.5.25",
@@ -58,5 +60,8 @@
   "trustedDependencies": [
     "sharp",
     "unrs-resolver"
-  ]
+  ],
+  "patchedDependencies": {
+    "@next/eslint-plugin-next@16.3.6": "patches/@next%2Feslint-plugin-next@16.3.6.patch"
+  }
 }
