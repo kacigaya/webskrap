@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from click import unstyle
+from typer import rich_utils
 from typer.testing import CliRunner
 
 from webskrap import browser_session, cli
@@ -126,7 +128,7 @@ def test_goto_rejects_invalid_wait_until(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert "beoneof:commit,domcontentloaded,load,networkidle" in "".join(
-        result.output.replace("│", "").split()
+        unstyle(result.output).replace("│", "").split()
     )
 
 
@@ -139,7 +141,7 @@ def test_wait_rejects_invalid_element_state(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert "beoneof:attached,detached,visible,hidden" in "".join(
-        result.output.replace("│", "").split()
+        unstyle(result.output).replace("│", "").split()
     )
 
 
@@ -334,7 +336,7 @@ def test_wait_rejects_a_load_state_that_cannot_be_awaited(tmp_path: Path) -> Non
 
     assert result.exit_code == 2
     assert "beoneof:domcontentloaded,load,networkidle" in "".join(
-        result.output.replace("│", "").split()
+        unstyle(result.output).replace("│", "").split()
     )
 
 
@@ -528,9 +530,12 @@ def test_open_names_the_proxy_in_human_output(
     assert "Proxy: http://proxy.test:8080" in result.output
 
 
+@pytest.mark.parametrize("colored", [False, True])
 def test_open_rejects_an_unknown_webrtc_policy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, colored: bool
 ) -> None:
+    monkeypatch.setattr(rich_utils, "FORCE_TERMINAL", True)
+    monkeypatch.setattr(rich_utils, "COLOR_SYSTEM", "standard" if colored else None)
     calls = _capture_open(monkeypatch)
 
     result = runner.invoke(
@@ -540,7 +545,8 @@ def test_open_rejects_an_unknown_webrtc_policy(
     )
 
     assert result.exit_code == 2
-    plain = "".join(result.output.replace("│", "").split())
+    assert ("\x1b[" in result.output) is colored
+    plain = "".join(unstyle(result.output).replace("│", "").split())
     assert "Invalidvaluefor--webrtc-ip-handling-policy" in plain
     assert "beoneof:default,default_public_and_private_interfaces," in plain
     assert "default_public_interface_only,disable_non_proxied_udp" in plain
