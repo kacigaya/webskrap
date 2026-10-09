@@ -154,7 +154,7 @@ def _clean(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip()
 
 
-# --- DuckDuckGo ---------------------------------------------------------------
+# DuckDuckGo
 
 
 def _ddg_unwrap(href: str) -> str:
@@ -190,7 +190,7 @@ def _ddg_hits(root: _Element) -> Iterator[SearchHit]:
         )
 
 
-# --- Bing -----------------------------------------------------------------------
+# Bing
 
 
 def _bing_unwrap(href: str) -> str:
@@ -233,7 +233,7 @@ def _bing_hits(root: _Element) -> Iterator[SearchHit]:
         )
 
 
-# --- Registry -------------------------------------------------------------------
+# Registry
 
 
 @dataclass(frozen=True, slots=True)

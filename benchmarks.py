@@ -50,7 +50,7 @@ from webskrap.browser_session import sandbox_enabled
 from webskrap.fetch_runtime import FetchRuntime
 from webskrap.profiles import get_profile
 
-# --- tunables -------------------------------------------------------------
+# Tunables
 
 ASSET_DELAY_S = 0.015  # simulated per-resource latency
 N_IMAGES = 40
@@ -60,7 +60,7 @@ WARMUP = 2
 REPEAT = 20  # navigations averaged per benchmark
 CONCURRENCY = 8  # pages for the concurrency benchmark
 
-# --- synthetic target page ------------------------------------------------
+# Synthetic target page
 
 _PIXEL_PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
@@ -131,7 +131,7 @@ class LocalServer:
         self._httpd.server_close()
 
 
-# --- benchmark harness ----------------------------------------------------
+# Benchmark harness
 
 
 def benchmark(func):
@@ -221,7 +221,6 @@ async def main() -> None:
     global URL
     with LocalServer() as URL:
         async with WebSkrapClient() as client:
-            # 1. Resource routing
             policy_results: dict[str, float] = {}
             for label, policy in (
                 ("ALL", ResourcePolicy.ALL),
@@ -237,7 +236,6 @@ async def main() -> None:
                 "ALL",
             )
 
-            # 2. Session reuse
             warm = await client.session("warm", config=_config(ResourcePolicy.LITE))
             reuse_results = {
                 "cold launch / fetch": await bench_cold_launch(client),
@@ -246,7 +244,6 @@ async def main() -> None:
             display("Session reuse", reuse_results, "warm session reuse")
             await warm.close()
 
-            # 3. Concurrency
             conc = await client.session("conc", config=_config(ResourcePolicy.LITE))
             per_page = round(await bench_concurrent(conc) / CONCURRENCY, 2)
             print(f"Concurrency: {CONCURRENCY} pages/batch, {per_page} ms per page\n")

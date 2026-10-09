@@ -55,7 +55,7 @@ def test_search_url_rejects_a_blank_query(query: str) -> None:
     assert excinfo.value.code is ErrorCode.USAGE
 
 
-# --- DuckDuckGo ---------------------------------------------------------------
+# DuckDuckGo
 
 
 def test_ddg_hits_are_unwrapped_deduplicated_and_ad_free() -> None:
@@ -130,7 +130,7 @@ def test_ddg_unwrap(href: str, expected: str) -> None:
     assert _ddg_unwrap(href) == expected
 
 
-# --- Bing -----------------------------------------------------------------------
+# Bing
 
 
 def test_bing_hits_are_decoded_deduplicated_and_ad_free() -> None:
@@ -207,7 +207,7 @@ def test_bing_unwrap(href: str, expected: str) -> None:
     assert _bing_unwrap(href) == expected
 
 
-# --- Shared normalisation -------------------------------------------------------
+# Shared normalisation
 
 
 def test_non_http_destinations_are_dropped() -> None:
