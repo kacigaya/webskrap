@@ -139,7 +139,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `stale_ref` | Snapshot again; refs belong to one snapshot. |
 | `timeout` | Raise `timeout_ms`, weaken `wait_until`, or `browser_wait_for` first. |
 | `navigation` | Check the URL and that the host resolves. |
-| `browser_launch` | Run `webskrap install`; on Linux ARM64 pass `channel="chromium"`. |
+| `browser_launch` | Run `webskrap install`. Fetch and search already fall back from `chrome` to Edge and bundled Chromium. |
 | `sandbox` | Check user namespaces and AppArmor for the browser executable; restore sandbox support. |
 | `path_rejected` | Paths are relative to a confined root. |
 | `blocked` | The site served a bot challenge. Switch engine or exit IP; no CAPTCHA solving. |

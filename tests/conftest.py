@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from webskrap import browser_session
+from webskrap import browser_session, client
 from webskrap.client import WebSkrapError
 
 
@@ -54,3 +54,11 @@ def persistent_session_env(
     else:
         monkeypatch.setenv(browser_session.SANDBOX_ENV, "0")
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _forget_resolved_channels() -> None:
+    # The channel fallback memo is process-wide; one test's fallback must not
+    # skip another test's first launch attempt.
+    client._resolved_channels.clear()
+    client._resolution_locks.clear()

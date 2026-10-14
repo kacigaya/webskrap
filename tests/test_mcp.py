@@ -4,14 +4,18 @@ import asyncio
 import inspect
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from playwright.async_api import BrowserContext
 
 from webskrap import browser_session, diagnostics, mcp_server
-from webskrap.client import WebSkrapError
+from webskrap.client import WebSkrapError, WebSkrapSession
 from webskrap.errors import RECOVERY_HINTS, ErrorCode
-from webskrap.models import FetchResult, Link, SearchEngine, SearchHit, SearchResult
+from webskrap.fetch_runtime import FetchRuntime
+from webskrap.models import FetchResult, Link, SearchEngine, SearchHit, SearchResult, SessionConfig
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 from webskrap.profiles import list_profiles
 
@@ -829,3 +833,120 @@ def test_browser_open_rejects_an_unknown_webrtc_policy() -> None:
 def test_browser_open_takes_no_proxy_from_the_model() -> None:
     # Page text can steer a model; a model-chosen proxy could reroute traffic.
     assert "proxy" not in " ".join(inspect.signature(mcp_server.browser_open).parameters)
+
+
+class _ChromeMissingClient(_FakeClient):
+    """Fails like Playwright does on hosts with no Chrome build (Linux ARM64)."""
+
+    attempts: list[str | None] = []
+
+    def _launch(self, config: Any) -> None:
+        self.attempts.append(config.channel)
+        if config.channel != "chromium":
+            raise RuntimeError(
+                "BrowserType.launch_persistent_context: Chromium distribution "
+                f"'{config.channel}' is not found at /opt/google/chrome/chrome"
+            )
+
+    async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+        self._launch(kwargs["config"])
+        return await super().fetch(url, **kwargs)
+
+    async def search(self, query: str, **kwargs: Any) -> SearchResult:
+        self._launch(kwargs["config"])
+        return await super().search(query, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("tool", "arg"),
+    [
+        (mcp_server.fetch, "https://example.test"),
+        (mcp_server.stealth_fetch, "https://example.test"),
+        (mcp_server.search, "example"),
+    ],
+)
+def test_tools_fall_back_to_chromium_when_chrome_is_missing(monkeypatch: Any, tool, arg) -> None:
+    _FakeClient.calls = []
+    _ChromeMissingClient.attempts = []
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _ChromeMissingClient)
+
+    first = asyncio.run(tool(arg))
+    second = asyncio.run(tool(arg))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    # The second call starts from the channel that launched.
+    assert _ChromeMissingClient.attempts == ["chrome", "msedge", "chromium", "chromium"]
+
+
+async def test_warm_session_survives_the_channel_fallback(monkeypatch: Any) -> None:
+    runtime = FetchRuntime()
+    monkeypatch.setattr(runtime.client, "start", AsyncMock())
+    launched: list[str | None] = []
+
+    async def create(name, config, profile):
+        launched.append(config.channel)
+        if config.channel != "chromium":
+            raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
+        context = MagicMock(spec=BrowserContext)
+        context.close = AsyncMock()
+        return WebSkrapSession(name=name, config=config, profile=profile, context=context)
+
+    monkeypatch.setattr(runtime.client, "_create_session", create)
+    monkeypatch.setattr(WebSkrapSession, "fetch", AsyncMock(return_value="page"))
+    ctx = SimpleNamespace(request_context=SimpleNamespace(lifespan_context=runtime))
+    options: dict[str, Any] = {
+        "config": SessionConfig(channel="chrome"),
+        "profile": list_profiles()[0],
+        "wait_until": "domcontentloaded",
+        "timeout_ms": 1000,
+        "text_only": True,
+        "include_links": False,
+        "max_links": 0,
+        "session": "crawl",
+        "ctx": ctx,
+    }
+
+    assert await mcp_server._run_fetch("https://example.com", **options) == "page"
+    # Same requested config again: must reuse the session, not report changed options.
+    assert await mcp_server._run_fetch("https://example.com", **options) == "page"
+    assert launched == ["chrome", "msedge", "chromium"]
+    await runtime.close()
+
+
+async def test_concurrent_first_calls_on_one_session_share_the_fallback(monkeypatch: Any) -> None:
+    runtime = FetchRuntime()
+    monkeypatch.setattr(runtime.client, "start", AsyncMock())
+    launched: list[str | None] = []
+
+    async def create(name, config, profile):
+        launched.append(config.channel)
+        await asyncio.sleep(0)
+        if config.channel != "chromium":
+            raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
+        context = MagicMock(spec=BrowserContext)
+        context.close = AsyncMock()
+        return WebSkrapSession(name=name, config=config, profile=profile, context=context)
+
+    monkeypatch.setattr(runtime.client, "_create_session", create)
+    monkeypatch.setattr(WebSkrapSession, "fetch", AsyncMock(return_value="page"))
+    ctx = SimpleNamespace(request_context=SimpleNamespace(lifespan_context=runtime))
+    options: dict[str, Any] = {
+        "config": SessionConfig(channel="chrome"),
+        "profile": list_profiles()[0],
+        "wait_until": "domcontentloaded",
+        "timeout_ms": 1000,
+        "text_only": True,
+        "include_links": False,
+        "max_links": 0,
+        "session": "crawl",
+        "ctx": ctx,
+    }
+
+    results = await asyncio.gather(
+        *(mcp_server._run_fetch("https://example.com", **options) for _ in range(3))
+    )
+
+    assert results == ["page", "page", "page"]
+    assert launched == ["chrome", "msedge", "chromium"]
+    await runtime.close()

@@ -9,6 +9,14 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP `fetch`, `stealth_fetch`, and `search` fall back to Edge, then bundled
+  Chromium, when the default `chrome` channel cannot launch, matching the CLI.
+  On Linux ARM64 these tools failed with `browser_launch` on every call unless
+  the caller passed `channel="chromium"`. The working channel is remembered for
+  the process, so warm fetch sessions keep a stable config.
+
 ## [2.13.0] - 2026-10-01
 
 ### Added

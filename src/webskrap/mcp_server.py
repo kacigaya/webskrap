@@ -21,7 +21,7 @@ from typing import Any, TypeVar
 from patchright.async_api import Page
 
 from webskrap import browser_session
-from webskrap.client import WebSkrapClient, WebSkrapError
+from webskrap.client import WebSkrapClient, WebSkrapError, with_channel_fallback
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
 from webskrap.fetch_runtime import FetchRuntime
@@ -29,6 +29,7 @@ from webskrap.models import (
     BrowserProfile,
     FetchResult,
     GpuBackend,
+    SearchResult,
     SessionConfig,
     WaitUntil,
     shape_fetch_result,
@@ -124,7 +125,7 @@ Keep results small
 Failures and boundaries
 Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
-browser_launch: `webskrap install` (Linux ARM64: channel="chromium").
+browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
 Known DataDome/Cloudflare challenge pages return blocked; stop automatic retries.
 Fetch tools accept ready_selector to verify visible content before extraction.
 Call doctor for unexplained failures; read webskrap://guide for details.
@@ -151,6 +152,10 @@ mcp = MCPServer(
 )
 
 
+def _log_channel_retry(failed: str | None, retry: str | None) -> None:
+    logger.warning("channel %r did not launch; retrying with %r", failed, retry)
+
+
 async def _run_fetch(
     url: str,
     *,
@@ -165,37 +170,32 @@ async def _run_fetch(
     ctx: Context | None,
     ready_selector: str | None = None,
 ) -> FetchResult:
-    if ctx is None:
-        if session is not None:
-            raise WebSkrapError("fetch sessions require the MCP lifespan", code=ErrorCode.USAGE)
-        # Direct Python tool calls retain their one-shot lifecycle.
-        async with WebSkrapClient() as client:
-            return await client.fetch(
-                url,
-                config=config,
-                profile=profile,
-                wait_until=wait_until,
-                timeout_ms=timeout_ms,
-                text_only=text_only,
-                include_links=include_links,
-                max_links=max_links,
-                decline_cookies=config.decline_cookies,
-                ready_selector=ready_selector,
-            )
-    runtime = ctx.request_context.lifespan_context
-    if not isinstance(runtime, FetchRuntime):
+    if ctx is None and session is not None:
+        raise WebSkrapError("fetch sessions require the MCP lifespan", code=ErrorCode.USAGE)
+    runtime = None if ctx is None else ctx.request_context.lifespan_context
+    if ctx is not None and not isinstance(runtime, FetchRuntime):
         raise WebSkrapError("fetch runtime is unavailable", code=ErrorCode.USAGE)
-    async with runtime.use(session, config, profile) as target:
-        return await target.fetch(
-            url,
-            wait_until=wait_until,
-            timeout_ms=timeout_ms,
-            text_only=text_only,
-            include_links=include_links,
-            max_links=max_links,
-            decline_cookies=config.decline_cookies,
-            ready_selector=ready_selector,
-        )
+
+    async def attempt(resolved: SessionConfig) -> FetchResult:
+        fetch_options: dict[str, Any] = {
+            "wait_until": wait_until,
+            "timeout_ms": timeout_ms,
+            "text_only": text_only,
+            "include_links": include_links,
+            "max_links": max_links,
+            "decline_cookies": resolved.decline_cookies,
+            "ready_selector": ready_selector,
+        }
+        if not isinstance(runtime, FetchRuntime):
+            # Direct Python tool calls retain their one-shot lifecycle.
+            async with WebSkrapClient() as client:
+                return await client.fetch(url, config=resolved, profile=profile, **fetch_options)
+        async with runtime.use(session, resolved, profile) as target:
+            return await target.fetch(url, **fetch_options)
+
+    return await with_channel_fallback(
+        attempt, config, on_retry=_log_channel_retry, exclusive=session is not None
+    )
 
 
 @mcp.tool(title="Fetch a page", annotations=_hints(read_only=True, open_world=True))
@@ -230,7 +230,8 @@ async def fetch(
     Args:
         url: The URL to load.
         profile: Profile label; native Patchright defaults remain authoritative.
-        channel: Browser channel, e.g. chrome. Use chromium on Linux ARM64.
+        channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
+            ARM64 has no build), Edge and then bundled Chromium are tried.
         wait_until: commit, domcontentloaded, load, or networkidle.
         resource_policy: all, lite (block images/fonts/media), or documents.
         timeout_ms: Navigation timeout in milliseconds.
@@ -316,7 +317,8 @@ async def stealth_fetch(
     Args:
         url: The URL to load.
         profile: Bundled profile applied when patchright_context_profile is set.
-        channel: Browser channel, e.g. chrome.
+        channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
+            ARM64 has no build), Edge and then bundled Chromium are tried.
         headless: Run headless. Headed is more robust against detection.
         user_data_dir: Persistent browser profile directory, relative to the
             MCP profile root.
@@ -436,7 +438,8 @@ async def search(
         engine: bing (default) or ddg (DuckDuckGo).
         max_results: How many hits to return; hits_total counts them all.
         profile: Bundled profile applied when patchright_context_profile is set.
-        channel: Browser channel, e.g. chrome. Use chromium on Linux ARM64.
+        channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
+            ARM64 has no build), Edge and then bundled Chromium are tried.
         headless: Run headless. Headed is more robust against detection.
         user_data_dir: Persistent browser profile directory, relative to the
             MCP profile root.
@@ -474,15 +477,21 @@ async def search(
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             decline_cookies=decline_cookies,
         )
-        async with WebSkrapClient() as client:
-            result = await client.search(
-                query,
-                engine=parse_engine(engine),
-                max_results=max_results,
-                profile=get_profile(profile),
-                config=config,
-                timeout_ms=timeout_ms,
-            )
+        selected_engine = parse_engine(engine)
+        selected_profile = get_profile(profile)
+
+        async def attempt(resolved: SessionConfig) -> SearchResult:
+            async with WebSkrapClient() as client:
+                return await client.search(
+                    query,
+                    engine=selected_engine,
+                    max_results=max_results,
+                    profile=selected_profile,
+                    config=resolved,
+                    timeout_ms=timeout_ms,
+                )
+
+        result = await with_channel_fallback(attempt, config, on_retry=_log_channel_retry)
         return shape_search_result(result)
 
 

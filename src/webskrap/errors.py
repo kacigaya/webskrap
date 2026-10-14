@@ -199,6 +199,23 @@ def is_sandbox_failure(exc: BaseException) -> bool:
     return any(marker in text for marker in SANDBOX_FAILURE_MARKERS)
 
 
+#: Text Playwright prints when a browser channel cannot be started at all, as
+#: opposed to a page or navigation failing once it is running.
+LAUNCH_FAILURE_MARKERS: tuple[str, ...] = (
+    "executable doesn't exist",
+    "is not found at",
+    "playwright install",
+    "failed to launch",
+    "browsertype.launch",
+)
+
+
+def is_launch_failure(exc: BaseException) -> bool:
+    """True when ``exc`` says the browser itself did not start."""
+    text = str(exc).lower()
+    return any(marker in text for marker in LAUNCH_FAILURE_MARKERS)
+
+
 # Matches embedded credentials (scheme://user:pass@host) so error text handed
 # to models and terminals never carries them.
 _USERINFO_PATTERN = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s@]+@")

@@ -17,6 +17,7 @@ from webskrap.client import (
     _resource_route_handler,
     browser_doctor,
     lavapipe_available,
+    with_channel_fallback,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
@@ -1316,3 +1317,110 @@ async def test_human_click_hit_tests_the_exact_click_point() -> None:
     await _session().human_click(page, "#go", position={"x": 7, "y": 5})  # type: ignore[arg-type]
 
     assert locator.hit_tests == [[7, 5]]
+
+
+def _launcher(missing: set[str | None], attempts: list[str | None]):
+    async def run(config: SessionConfig) -> str | None:
+        attempts.append(config.channel)
+        if config.channel in missing:
+            raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
+        return config.channel
+
+    return run
+
+
+async def test_channel_fallback_remembers_the_channel_that_launched() -> None:
+    attempts: list[str | None] = []
+    run = _launcher({"chrome", "msedge"}, attempts)
+    retries: list[tuple[str | None, str | None]] = []
+
+    first = await with_channel_fallback(
+        run, SessionConfig(channel="chrome"), on_retry=lambda *pair: retries.append(pair)
+    )
+    second = await with_channel_fallback(run, SessionConfig(channel="chrome"))
+
+    assert (first, second) == ("chromium", "chromium")
+    assert attempts == ["chrome", "msedge", "chromium", "chromium"]
+    assert retries == [("chrome", "msedge"), ("msedge", "chromium")]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("BrowserType.launch: No usable sandbox!"),
+        RuntimeError("net::ERR_NAME_NOT_RESOLVED"),
+    ],
+)
+async def test_channel_fallback_does_not_retry_sandbox_or_page_failures(error) -> None:
+    attempts: list[str | None] = []
+
+    async def run(config: SessionConfig) -> None:
+        attempts.append(config.channel)
+        raise error
+
+    with pytest.raises(RuntimeError) as raised:
+        await with_channel_fallback(run, SessionConfig(channel="chrome"))
+    assert raised.value is error
+    assert attempts == ["chrome"]
+
+
+async def test_channel_fallback_raises_the_last_launch_failure() -> None:
+    attempts: list[str | None] = []
+    with pytest.raises(RuntimeError, match="'chromium' is not found"):
+        await with_channel_fallback(
+            _launcher({"chrome", "msedge", "chromium"}, attempts), SessionConfig(channel="chrome")
+        )
+    assert attempts == ["chrome", "msedge", "chromium"]
+
+
+@pytest.mark.parametrize("exclusive", [False, True])
+async def test_channel_fallback_lets_calls_overlap_after_resolution(exclusive) -> None:
+    gates = [asyncio.Event() for _ in range(3)]
+    started: list[int] = []
+    active: list[int] = []
+
+    async def run(config: SessionConfig) -> None:
+        if config.channel == "chrome":
+            raise RuntimeError("Chromium distribution 'chrome' is not found at /opt/x")
+        gate = gates[len(started)]
+        started.append(1)
+        active.append(1)
+        await gate.wait()
+        active.pop()
+
+    async def settle() -> None:
+        for _ in range(10):
+            await sleep(0)
+
+    calls = [
+        asyncio.ensure_future(
+            with_channel_fallback(run, SessionConfig(channel="chrome"), exclusive=exclusive)
+        )
+        for _ in range(3)
+    ]
+    await settle()
+    # Exclusive cold-start callers wait for the first; others never wait.
+    assert len(active) == (1 if exclusive else 3)
+    if exclusive:
+        gates[0].set()
+        await settle()
+        # Once the channel is known, queued callers run together.
+        assert len(active) == 2
+    for gate in gates:
+        gate.set()
+    await asyncio.gather(*calls)
+
+
+async def test_channel_fallback_remembers_a_channel_whose_page_failed() -> None:
+    attempts: list[str | None] = []
+
+    async def run(config: SessionConfig) -> None:
+        attempts.append(config.channel)
+        if config.channel == "chrome":
+            raise RuntimeError("Chromium distribution 'chrome' is not found at /opt/x")
+        raise RuntimeError("net::ERR_NAME_NOT_RESOLVED")
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="ERR_NAME_NOT_RESOLVED"):
+            await with_channel_fallback(run, SessionConfig(channel="chrome"), exclusive=True)
+    assert attempts == ["chrome", "msedge", "msedge"]
