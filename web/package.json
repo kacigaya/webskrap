@@ -17,7 +17,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.28.0",
     "morphicons": "^1.7.1",
-    "next": "16.3.6",
+    "next": "16.4.2",
     "next-themes": "^0.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -38,7 +38,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "eslint": "^10.11.0",
-    "eslint-config-next": "16.3.6",
+    "eslint-config-next": "16.4.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3"
   },
@@ -47,11 +47,13 @@
     "brace-expansion": "5.0.12",
     "minimatch": "10.2.6",
     "postcss": "8.5.25",
-    "sharp": "0.35.4",
+    "sharp": "0.35.5",
     "nanoid": "^3.3.18",
     "js-yaml": "^4.3.2",
     "browserslist": "^4.28.9",
-    "baseline-browser-mapping": "^2.11.22"
+    "baseline-browser-mapping": "^2.11.22",
+    "source-map-js": "1.2.2",
+    "postcss-selector-parser": "7.1.6"
   },
   "ignoreScripts": [
     "sharp",
@@ -62,6 +64,6 @@
     "unrs-resolver"
   ],
   "patchedDependencies": {
-    "@next/eslint-plugin-next@16.3.6": "patches/@next%2Feslint-plugin-next@16.3.6.patch"
+    "@next/eslint-plugin-next@16.4.2": "patches/@next%2Feslint-plugin-next@16.4.2.patch"
   }
 }

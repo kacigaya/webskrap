@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Security
+
+- Update the documentation site's Next.js and matching ESLint configuration to
+  16.4.2, and pin `sharp` 0.35.5, `source-map-js` 1.2.2, and
+  `postcss-selector-parser` 7.1.6. This fixes the Next.js, librsvg, and
+  denial-of-service advisories that failed the Pages dependency audit.
+
 ## [2.13.1] - 2026-10-14
 
 ### Fixed
