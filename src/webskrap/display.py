@@ -162,6 +162,11 @@ class VirtualDisplay:
 
 def _read_display_number(fd: int, process: subprocess.Popen[bytes]) -> int:
     """Wait for Xvfb to write its display number to ``fd`` (it does when ready)."""
+    if sys.platform == "win32":
+        # VirtualDisplay.start already refuses non-Linux; this guard lets type
+        # checkers see it.
+        msg = "virtual display needs Linux with Xvfb"
+        raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
     os.set_blocking(fd, False)
     deadline = time.monotonic() + START_TIMEOUT_S
     received = b""

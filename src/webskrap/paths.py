@@ -13,6 +13,7 @@ Two concerns live here:
 from __future__ import annotations
 
 import os
+import sys
 from contextlib import suppress
 from pathlib import Path
 from uuid import uuid4
@@ -252,6 +253,9 @@ def _chmod_no_follow(path: Path) -> None:
     alone rather than modified through the link, as is one owned by somebody
     else: neither is worth aborting a session over.
     """
+    if sys.platform == "win32":
+        # Callers already skip Windows; this guard lets type checkers see it.
+        return
     try:
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     except OSError:
