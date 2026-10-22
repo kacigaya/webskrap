@@ -54,6 +54,12 @@ that dependency chain and root-directory settings. Revisit the override and patc
 when the plugin stops depending on vulnerable `braces`; check its glob calls and
 the patch when upgrading Next.js.
 
+The `postcss-selector-parser` override moves `@tailwindcss/typography` from its
+pinned 6.0.10 to 7.1.6, because 6.x has no patched release for
+[GHSA-rj75-hqrm-r3gf](https://github.com/advisories/GHSA-rj75-hqrm-r3gf).
+The generated typography CSS is the same with both versions. Remove the override
+when the plugin depends on a patched release.
+
 ## Deployment
 
 The [Pages workflow](../.github/workflows/pages.yml) builds and deploys the
