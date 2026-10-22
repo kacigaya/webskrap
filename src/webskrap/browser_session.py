@@ -312,14 +312,13 @@ def _windows_session_running(pid: int, created_at: str | None) -> bool:
     Reading another process's command line needs undocumented NT calls, so a
     recycled PID is detected by its start time instead: the session browser
     started at most ``LAUNCH_TIMEOUT_S`` before ``created_at`` was recorded.
-    A state without ``created_at`` (an internal liveness poll) checks only that
-    the PID is alive.
+    A state without ``created_at`` cannot be matched, so it never counts.
     """
+    if created_at is None:
+        return False
     started = _windows_process_start(pid)
     if started is None:
         return False
-    if created_at is None:
-        return True
     try:
         recorded = datetime.fromisoformat(created_at)
     except ValueError:
@@ -725,7 +724,7 @@ def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
         directory = session_dir(name)
         state = read_state(directory)
         if state is not None and session_running(directory, state):
-            _terminate(directory, state["pid"])
+            _terminate(directory, state)
         state_path(directory).unlink(missing_ok=True)
         if delete_data:
             try:
@@ -737,11 +736,13 @@ def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
     return {"session": name, "deleted_data": delete_data}
 
 
-def _terminate(directory: Path, pid: int) -> None:
+def _terminate(directory: Path, state: dict[str, Any]) -> None:
+    pid = state["pid"]
     kill_browser(pid, force=False)
     deadline = time.monotonic() + CLOSE_TIMEOUT_S
     while time.monotonic() < deadline:
-        if not session_running(directory, {"pid": pid, "port": 0}):
+        # The full state keeps the recycled-PID check active while polling.
+        if not session_running(directory, state):
             return
         time.sleep(0.05)
     kill_browser(pid, force=True)

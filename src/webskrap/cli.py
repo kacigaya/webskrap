@@ -490,10 +490,10 @@ async def _fetch(
     if links:
         console.print(f"[bold]Links:[/bold] {len(result.links)} of {result.links_total}")
     if result.screenshot_path:
-        console.print(f"[bold]Screenshot:[/bold] {result.screenshot_path}")
+        console.print(f"[bold]Screenshot:[/bold] {result.screenshot_path}", soft_wrap=True)
     if output:
         label = "Text" if text_only else "HTML"
-        console.print(f"[bold]{label}:[/bold] {output}")
+        console.print(f"[bold]{label}:[/bold] {output}", soft_wrap=True)
 
 
 @app.command("search")
@@ -840,10 +840,10 @@ def _print_doctor_details(result: dict[str, Any]) -> None:
         installed = ", ".join(f"{name} {value or 'missing'}" for name, value in versions.items())
         console.print(f"[bold]Versions:[/bold] {installed}")
     if executable := result.get("executable_path"):
-        console.print(f"[bold]Chromium:[/bold] {executable}")
+        console.print(f"[bold]Chromium:[/bold] {executable}", soft_wrap=True)
     if paths := result.get("paths"):
         for label, path in paths.items():
-            console.print(f"[bold]{label}:[/bold] {path}")
+            console.print(f"[bold]{label}:[/bold] {path}", soft_wrap=True)
     if environment := result.get("environment"):
         overrides = {name: value for name, value in environment.items() if value is not None}
         console.print(f"[bold]Environment:[/bold] {overrides or 'defaults'}")

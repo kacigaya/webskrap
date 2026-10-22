@@ -815,7 +815,7 @@ def test_windows_session_running_rejects_recycled_pid(monkeypatch: pytest.Monkey
     monkeypatch.setattr(browser_session, "_windows_process_start", lambda _pid: start[0])
 
     assert browser_session._windows_session_running(1, created_at)
-    assert browser_session._windows_session_running(1, None)
+    assert not browser_session._windows_session_running(1, None)
     assert not browser_session._windows_session_running(1, "not a date")
     start[0] = recorded + timedelta(minutes=5)
     assert not browser_session._windows_session_running(1, created_at)
