@@ -25,11 +25,12 @@ import shutil
 import signal
 import struct
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for Chromium, never a shell
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO, Literal, TypedDict, TypeVar
 
@@ -61,6 +62,8 @@ SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
 DEVTOOLS_PORT_FILE = "DevToolsActivePort"
 LAUNCH_TIMEOUT_S = 20.0
 CLOSE_TIMEOUT_S = 5.0
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_STILL_ACTIVE = 259
 DEFAULT_ACTION_TIMEOUT_MS = 10_000.0
 DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000.0
 SANDBOX_ENV = "WEBSKRAP_CHROMIUM_SANDBOX"
@@ -257,6 +260,8 @@ def session_running(directory: Path, state: dict[str, Any] | None) -> bool:
     if state is None:
         return False
     pid = state["pid"]
+    if sys.platform == "win32":
+        return _windows_session_running(pid, state.get("created_at"))
     try:
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
     except FileNotFoundError:
@@ -301,13 +306,85 @@ async def chromium_executable() -> str:
     raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
 
-def signal_group(pid: int, sig: signal.Signals) -> None:
-    """Signal the browser's whole process group; a vanished group is fine.
+def _windows_session_running(pid: int, created_at: str | None) -> bool:
+    """Windows form of :func:`session_running`, without ``/proc``.
 
-    The browser is launched with ``start_new_session=True``, so its PID is the
-    group leader. Signalling only the leader (e.g. SIGKILL) would orphan
-    renderer children that keep holding the profile's SingletonLock.
+    Reading another process's command line needs undocumented NT calls, so a
+    recycled PID is detected by its start time instead: the session browser
+    started at most ``LAUNCH_TIMEOUT_S`` before ``created_at`` was recorded.
+    A state without ``created_at`` (an internal liveness poll) checks only that
+    the PID is alive.
     """
+    started = _windows_process_start(pid)
+    if started is None:
+        return False
+    if created_at is None:
+        return True
+    try:
+        recorded = datetime.fromisoformat(created_at)
+    except ValueError:
+        return False
+    # created_at is truncated to whole seconds, so allow one second after it.
+    earliest = recorded - timedelta(seconds=LAUNCH_TIMEOUT_S + 5)
+    return earliest <= started <= recorded + timedelta(seconds=1)
+
+
+def _windows_process_start(pid: int) -> datetime | None:
+    """Return when a live Windows process started, or None if it is gone."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return None
+        if exit_code.value != _STILL_ACTIVE:
+            return None
+        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            return None
+    finally:
+        kernel32.CloseHandle(handle)
+    ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
+    # FILETIME counts 100 ns intervals since 1601-01-01 UTC.
+    return datetime(1601, 1, 1, tzinfo=UTC) + timedelta(microseconds=ticks // 10)
+
+
+def kill_browser(pid: int, *, force: bool) -> None:
+    """Stop the browser and its child processes; a vanished browser is fine.
+
+    On POSIX the browser is launched with ``start_new_session=True``, so its
+    PID is the group leader. Signalling only the leader (e.g. SIGKILL) would
+    orphan renderer children that keep holding the profile's SingletonLock.
+    Windows has no process groups: ``taskkill /T`` stops the child tree, and
+    ``/F`` is always needed because a headless browser has no window to close.
+    """
+    if sys.platform == "win32":
+        taskkill = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
+        # Fixed argv, no shell; the PID is an int this module recorded.
+        subprocess.run(  # nosec B603  # noqa: S603
+            [str(taskkill), "/PID", str(pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
+    sig = signal.SIGKILL if force else signal.SIGTERM
     try:
         os.killpg(pid, sig)
     except ProcessLookupError:
@@ -456,7 +533,7 @@ def launch_browser(
     except BaseException:
         # Ctrl-C or a startup failure must not orphan a detached browser that
         # holds the profile lock with no state file pointing at it.
-        signal_group(process.pid, signal.SIGKILL)
+        kill_browser(process.pid, force=True)
         raise
 
 
@@ -591,7 +668,7 @@ async def open_session(
             except BaseException:
                 # Without a state file the running browser would be unreachable
                 # and would hold the profile lock against the next open.
-                signal_group(pid, signal.SIGKILL)
+                kill_browser(pid, force=True)
                 raise
 
         return {
@@ -661,13 +738,13 @@ def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
 
 
 def _terminate(directory: Path, pid: int) -> None:
-    signal_group(pid, signal.SIGTERM)
+    kill_browser(pid, force=False)
     deadline = time.monotonic() + CLOSE_TIMEOUT_S
     while time.monotonic() < deadline:
         if not session_running(directory, {"pid": pid, "port": 0}):
             return
         time.sleep(0.05)
-    signal_group(pid, signal.SIGKILL)
+    kill_browser(pid, force=True)
 
 
 def list_session_names() -> list[str]:

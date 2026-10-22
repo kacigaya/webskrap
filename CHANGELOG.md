@@ -9,6 +9,15 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Persistent browser sessions now close on Windows. `os.killpg` and
+  `signal.SIGKILL` do not exist there, so `browser close` and launch cleanup
+  raised `AttributeError`. Windows now stops the browser tree with `taskkill`.
+  The liveness check read `/proc`, so a running session always looked closed.
+  It now asks Windows whether the PID is alive and uses its start time to reject
+  a recycled PID.
+
 ## [2.13.1] - 2026-10-14
 
 ### Fixed

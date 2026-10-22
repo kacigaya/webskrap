@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import stat
 import subprocess
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +52,7 @@ def _capture_launch(
         return _FakeProcess(exited)
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(browser_session, "signal_group", lambda *_args: None)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(browser_session, "LAUNCH_TIMEOUT_S", 0.05)
     return commands
 
@@ -802,3 +804,33 @@ def test_type_action_uses_human_typing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert typed == [("hello", {"description": "#q"})]
     assert locator.calls == []  # no press_sequentially
+
+
+def test_windows_session_running_rejects_recycled_pid(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Windows has no /proc command line, so a reused PID is told apart by its
+    # start time relative to the recorded launch.
+    created_at = "2026-01-01T12:00:00+00:00"
+    recorded = datetime.fromisoformat(created_at)
+    start: list[datetime | None] = [recorded - timedelta(seconds=3)]
+    monkeypatch.setattr(browser_session, "_windows_process_start", lambda _pid: start[0])
+
+    assert browser_session._windows_session_running(1, created_at)
+    assert browser_session._windows_session_running(1, None)
+    assert not browser_session._windows_session_running(1, "not a date")
+    start[0] = recorded + timedelta(minutes=5)
+    assert not browser_session._windows_session_running(1, created_at)
+    start[0] = recorded - timedelta(hours=1)
+    assert not browser_session._windows_session_running(1, created_at)
+    start[0] = None
+    assert not browser_session._windows_session_running(1, None)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX process groups")
+def test_kill_browser_signals_the_process_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: sent.append((pid, sig)))
+
+    browser_session.kill_browser(7, force=False)
+    browser_session.kill_browser(7, force=True)
+
+    assert sent == [(7, signal.SIGTERM), (7, signal.SIGKILL)]
