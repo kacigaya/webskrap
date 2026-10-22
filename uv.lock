@@ -1259,7 +1259,7 @@ wheels = [
 
 [[package]]
 name = "webskrap"
-version = "2.13.1"
+version = "2.13.2"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },

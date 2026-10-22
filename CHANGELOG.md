@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [2.13.2] - 2026-10-22
+
 ### Fixed
 
 - Persistent browser sessions now close on Windows. `os.killpg` and
@@ -714,7 +716,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.13.1...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.13.2...HEAD
+[2.13.2]: https://github.com/kacigaya/webskrap/compare/v2.13.1...v2.13.2
 [2.13.1]: https://github.com/kacigaya/webskrap/compare/v2.13.0...v2.13.1
 [2.13.0]: https://github.com/kacigaya/webskrap/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/kacigaya/webskrap/compare/v2.11.0...v2.12.0
