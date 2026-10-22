@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -563,3 +565,32 @@ def test_open_reports_a_credentialed_proxy_as_usage(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
     assert "cannot authenticate" in result.output
     assert "pw@" not in result.output
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows matches PIDs by start time")
+def test_session_running_matches_the_session_command_line(tmp_path: Path) -> None:
+    # Linux reads /proc and macOS asks ps; both must find the user-data path.
+    session_dir = tmp_path / "default"
+    child = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",
+            f"--user-data-dir={session_dir / 'user-data'}",
+        ]
+    )
+    try:
+        assert browser_session.session_running(session_dir, {"pid": child.pid, "port": 1})
+    finally:
+        child.kill()
+        child.wait()
+    assert not browser_session.session_running(session_dir, {"pid": child.pid, "port": 1})
+
+
+def test_ps_command_reports_missing_pid() -> None:
+    if not Path("/bin/ps").exists():
+        pytest.skip("needs /bin/ps")
+    assert browser_session._ps_command(2**22 - 1) is None
+    command = browser_session._ps_command(os.getpid())
+    assert command is not None
+    assert b"python" in command.lower()

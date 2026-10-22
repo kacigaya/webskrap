@@ -265,7 +265,11 @@ def session_running(directory: Path, state: dict[str, Any] | None) -> bool:
     try:
         cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
     except FileNotFoundError:
-        return False
+        if Path("/proc/self").exists():
+            return False  # Linux: the PID is gone.
+        # No /proc (macOS, BSD): ask ps for the command line instead.
+        command = _ps_command(pid)
+        return command is not None and str(directory / "user-data").encode() in command
     except OSError:
         # No /proc (non-Linux): fall back to a liveness-only check.
         try:
@@ -274,6 +278,17 @@ def session_running(directory: Path, state: dict[str, Any] | None) -> bool:
             return False
         return True
     return str(directory / "user-data").encode() in cmdline
+
+
+def _ps_command(pid: int) -> bytes | None:
+    """Return a process's full command line from ``ps``, or None if it is gone."""
+    # Fixed argv, no shell; the PID is an int this module recorded.
+    result = subprocess.run(  # nosec B603  # noqa: S603
+        ["/bin/ps", "-ww", "-o", "command=", "-p", str(pid)],
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else None
 
 
 def is_session_dir(path: Path) -> bool:
