@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -579,12 +580,17 @@ def test_session_running_matches_the_session_command_line(tmp_path: Path) -> Non
             f"--user-data-dir={session_dir / 'user-data'}",
         ]
     )
+    state = {"pid": child.pid, "port": 1}
     try:
-        assert browser_session.session_running(session_dir, {"pid": child.pid, "port": 1})
+        # The child can be read before its own arguments are visible, so wait.
+        deadline = time.monotonic() + 5
+        while not browser_session.session_running(session_dir, state):
+            assert time.monotonic() < deadline, "child command line never matched"
+            time.sleep(0.05)
     finally:
         child.kill()
         child.wait()
-    assert not browser_session.session_running(session_dir, {"pid": child.pid, "port": 1})
+    assert not browser_session.session_running(session_dir, state)
 
 
 def test_ps_command_reports_missing_pid() -> None:
