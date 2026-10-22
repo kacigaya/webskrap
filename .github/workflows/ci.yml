@@ -26,6 +26,12 @@ jobs:
         run: uv run --extra dev ruff format --check .
       - name: Type check
         run: uvx --from pyright==1.1.411 pyright --pythonpath .venv/bin/python src/webskrap
+      # Platform branches (msvcrt, ctypes.WinDLL) are only checked when pyright
+      # targets that platform, so check the other two as well.
+      - name: Type check (Windows, macOS)
+        run: |
+          uvx --from pyright==1.1.411 pyright --pythonplatform Windows --pythonpath .venv/bin/python src/webskrap
+          uvx --from pyright==1.1.411 pyright --pythonplatform Darwin --pythonpath .venv/bin/python src/webskrap
       - name: Security scan
         # Ruff's S rules already run above. Bandit is a second, independent
         # implementation and reads the `# nosec` markers Ruff ignores.
@@ -39,14 +45,22 @@ jobs:
       - name: Check package metadata
         run: uv run --with twine twine check "$PACKAGE_DIR"/*
 
-  # Requirement 1: the package works on every advertised Python version.
+  # Requirement 1: the package works on every advertised Python version and
+  # operating system. Linux runs every version; Windows and macOS run one,
+  # because their failures come from the OS, not the interpreter.
   # Browsers are not installed here; the browser job below covers those paths.
   test:
-    runs-on: ubuntu-26.04
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-26.04]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
@@ -58,7 +72,9 @@ jobs:
         env:
           COVERAGE_FILE: .coverage.unit.${{ matrix.python-version }}
         run: uv run --extra dev pytest -q -m "not browser and not live" --cov
-      - uses: actions/upload-artifact@v7
+      # The coverage gate reads Linux runs only, so the bar stays comparable.
+      - if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-unit-${{ matrix.python-version }}
           path: .coverage.unit.*
@@ -67,23 +83,31 @@ jobs:
           if-no-files-found: error
 
   # Browser tests need a Chromium download, so they run on one interpreter.
+  # Every OS runs them: process control and profile locks differ per platform.
   browser:
-    runs-on: ubuntu-26.04
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
         with:
           enable-cache: true
           python-version: "3.13"
-      - name: Install browsers
-        run: |
-          uv run playwright install --with-deps chromium
-          uv run patchright install chromium
+      # One command per step: Windows runs steps in PowerShell, which does not
+      # stop on the first failing line of a multi-line script.
+      - name: Install Playwright Chromium
+        run: uv run playwright install --with-deps chromium
+      - name: Install Patchright Chromium
+        run: uv run patchright install chromium
       - name: Test
         env:
           COVERAGE_FILE: .coverage.browser
         run: uv run --extra dev pytest -q -m "browser and not live" --cov
-      - uses: actions/upload-artifact@v7
+      - if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-browser
           path: .coverage.browser

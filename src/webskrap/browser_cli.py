@@ -469,7 +469,7 @@ def screenshot_command(
     if output_format == "json":
         print_json(result)
         return
-    console.print(f"[bold]Screenshot:[/bold] {result['path']}")
+    console.print(f"[bold]Screenshot:[/bold] {result['path']}", soft_wrap=True)
 
 
 @browser_app.command("view")

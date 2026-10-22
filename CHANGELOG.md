@@ -9,6 +9,19 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Persistent browser sessions now close on Windows. `os.killpg` and
+  `signal.SIGKILL` do not exist there, so `browser close` and launch cleanup
+  raised `AttributeError`. Windows now stops the browser tree with `taskkill`.
+  The liveness check read `/proc`, so a running session always looked closed.
+  It now asks Windows whether the PID is alive and uses its start time to reject
+  a recycled PID.
+- macOS has no `/proc` either, so a running session also looked closed there.
+  Reopening it launched a second browser on the locked profile and failed. The
+  check now reads the command line from `ps` when `/proc` is missing.
+- CLI output no longer splits a long file path across two lines.
+
 ### Security
 
 - Update the documentation site's Next.js and matching ESLint configuration to

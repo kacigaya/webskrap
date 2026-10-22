@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,10 @@ def _sandbox_launches() -> bool:
     except WebSkrapError:
         return False
     else:
-        browser_session._terminate(directory, pid)
+        browser_session._terminate(
+            directory,
+            {"pid": pid, "created_at": datetime.now(UTC).isoformat(timespec="seconds")},
+        )
         return True
     finally:
         shutil.rmtree(directory, ignore_errors=True)
