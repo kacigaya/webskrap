@@ -9,6 +9,11 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Agent skill folders under `.agents/skills/webskrap`, `.claude/skills/webskrap`,
+  and `.codex/skills/webskrap`. Each links to the shared skill and references.
+
 ## [2.13.3] - 2026-10-22
 
 ### Fixed

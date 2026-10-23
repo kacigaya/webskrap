@@ -95,6 +95,7 @@ this; the agent's client and model must support image input.
 
 ## Documentation
 
+- [Agent skill](.agents/skills/webskrap/SKILL.md)
 - [Quickstart](https://kacigaya.github.io/webskrap/docs/getting-started/quickstart/)
 - [Python API](https://kacigaya.github.io/webskrap/docs/api-reference/)
 - [CLI](https://kacigaya.github.io/webskrap/docs/user-guide/cli/)
@@ -102,6 +103,12 @@ this; the agent's client and model must support image input.
 - [Stealth](https://kacigaya.github.io/webskrap/docs/user-guide/stealth/)
 - [Benchmarks](https://kacigaya.github.io/webskrap/docs/benchmarks/)
 - [Development](https://kacigaya.github.io/webskrap/docs/development/)
+
+The agent skill is available at `.agents/skills/webskrap/SKILL.md`,
+`.claude/skills/webskrap/SKILL.md`, and `.codex/skills/webskrap/SKILL.md`.
+Each folder links to the root `SKILL.md` and `references/` to keep one copy.
+The checkout must support symbolic links. On Windows, enable Developer Mode
+and Git's `core.symlinks` before cloning.
 
 ## Security
 
