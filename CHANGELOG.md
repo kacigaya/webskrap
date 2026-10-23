@@ -9,6 +9,21 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Experimental CDP driver: `webskrap fetch --driver cdp` and
+  `webskrap.cdp_fetch.fetch()`. WebSkrap drives Chromium over its debugging
+  pipe with no Playwright, Patchright, or Node.js process. It never sends
+  `Runtime.enable` and runs page scripts in isolated worlds. Linux and macOS
+  only. See `docs/design/cdp-driver.md` for limits and measured results.
+- `scripts/compare_drivers.py` compares automation signals and fetch time of
+  the Patchright and CDP drivers on a local probe page.
+
+### Changed
+
+- `raise_for_challenge` accepts any object with an `evaluate` method, so both
+  drivers share one challenge check.
+
 ## [2.14.0] - 2026-10-23
 
 ### Added

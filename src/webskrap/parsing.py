@@ -11,6 +11,7 @@ from typing import cast, get_args
 
 from webskrap.models import (
     ElementState,
+    FetchDriver,
     LoadState,
     ResourcePolicy,
     SearchEngine,
@@ -46,6 +47,15 @@ def parse_wait_until(value: str) -> WaitUntil:
         ValueError: If ``value`` is not a valid load state.
     """
     return cast(WaitUntil, parse_literal(value, WaitUntil, "wait_until"))
+
+
+def parse_fetch_driver(value: str) -> FetchDriver:
+    """Parse a fetch driver name.
+
+    Raises:
+        ValueError: If ``value`` is not ``patchright`` or ``cdp``.
+    """
+    return cast(FetchDriver, parse_literal(value, FetchDriver, "driver"))
 
 
 def parse_load_state(value: str) -> LoadState:

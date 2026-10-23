@@ -48,6 +48,14 @@ On Linux ARM64, the `chrome` channel may be unavailable. `fetch` retries a
 failed launch with bundled Chromium. Pass `--channel chromium` to avoid the
 first attempt.
 
+`fetch --driver cdp` uses WebSkrap's own experimental CDP driver instead of
+Patchright. It needs Linux or macOS. It takes CSS ready selectors only and does
+not dismiss cookie notices. Unsupported options exit 2 (`usage`).
+
+```bash
+webskrap fetch https://example.com --driver cdp --channel chromium --text-only --stdout
+```
+
 ## Persistent browser
 
 `webskrap browser open` launches detached Chromium. Later commands reconnect

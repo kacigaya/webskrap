@@ -61,7 +61,7 @@ T = TypeVar("T")
 # returns the first ``max`` of them plus the unique total. Deduplicating in the
 # page keeps a nav bar repeated in a footer from filling the whole budget, and
 # `a.href` (not getAttribute) resolves relative paths against the final URL.
-_LINKS_SCRIPT = """(max) => {
+LINKS_SCRIPT = """(max) => {
   const seen = new Set();
   const links = [];
   for (const anchor of document.querySelectorAll('a[href]')) {
@@ -977,7 +977,7 @@ class WebSkrapClient:
         display = None
         try:
             if config.gpu is GpuBackend.MESA and config.browser == "chromium":
-                _require_lavapipe()
+                require_lavapipe()
             if config.uses_virtual_display():
                 screen = config.virtual_screen()
                 display = await VirtualDisplay.start(screen.width, screen.height)
@@ -1082,9 +1082,12 @@ def lavapipe_available() -> bool:
     )
 
 
-def _require_lavapipe() -> None:
-    # Without the driver Chromium does not fall back: WebGL just disappears,
-    # which is not what a caller asking for Mesa wanted.
+def require_lavapipe() -> None:
+    """Raise ``browser_launch`` unless Mesa's lavapipe driver is installed.
+
+    Without the driver Chromium does not fall back: WebGL just disappears,
+    which is not what a caller asking for Mesa wanted.
+    """
     if not lavapipe_available():
         msg = (
             "gpu='mesa' needs Linux with Mesa's lavapipe Vulkan driver. "
@@ -1126,5 +1129,5 @@ async def _collect_links(page: Page, max_links: int | None) -> tuple[list[Link],
     """
     if max_links is None:
         return [], 0
-    collected = await page.evaluate(_LINKS_SCRIPT, max_links)
+    collected = await page.evaluate(LINKS_SCRIPT, max_links)
     return [Link(**link) for link in collected["links"]], int(collected["total"])
