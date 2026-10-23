@@ -48,6 +48,7 @@ EventHandler = Callable[[dict[str, Any]], None]
 MAX_MESSAGE_BYTES = 256 * 1024 * 1024
 CLOSE_TIMEOUT_S = 5.0
 _LOG_TAIL_BYTES = 4096
+_POSIX_ONLY = "the CDP driver needs Linux or macOS (posix_spawn with pipe descriptors)"
 # Runs a caller's script the way Playwright's evaluate does, in one round trip.
 # The parse check (new Function only compiles) decides between a single
 # expression, whose function value is called with the argument, and statements
@@ -357,6 +358,9 @@ class CDPBrowser:
 
 def _reap(pid: int, timeout_s: float) -> None:
     """Wait for ``pid`` to exit, killing its process group after ``timeout_s``."""
+    if sys.platform == "win32":
+        # launch() already refuses Windows; this guard lets type checkers see it.
+        raise WebSkrapError(_POSIX_ONLY, code=ErrorCode.BROWSER_LAUNCH)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         try:
@@ -379,6 +383,9 @@ def _high_fd(fd: int) -> int:
     out of the 0-4 range first means no action overwrites a later one's source,
     and no source already sits on its target, where dup2 would keep close-on-exec.
     """
+    if sys.platform == "win32":
+        # launch() already refuses Windows; this guard lets type checkers see it.
+        raise WebSkrapError(_POSIX_ONLY, code=ErrorCode.BROWSER_LAUNCH)
     # Imported here: fcntl does not exist on Windows, and importing this module
     # must not break the CLI there.
     import fcntl
@@ -440,9 +447,8 @@ async def launch(
         WebSkrapError: ``browser_launch`` or ``sandbox`` when Chromium does not
             start or answer in time.
     """
-    if not sys.platform.startswith(("linux", "darwin")):
-        msg = "the CDP driver needs Linux or macOS (posix_spawn with pipe descriptors)"
-        raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
+    if sys.platform == "win32":
+        raise WebSkrapError(_POSIX_ONLY, code=ErrorCode.BROWSER_LAUNCH)
     executable = Path(executable)
     if not executable.is_file():
         msg = f"Chromium executable is not found at {executable}. Run: webskrap install"
