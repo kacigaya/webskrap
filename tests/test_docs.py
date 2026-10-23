@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+SKILL_DIR = ROOT / ".agents" / "skills" / "webskrap"
+SKILL = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
 
 
 def test_skill_routes_to_existing_references() -> None:
@@ -15,7 +16,14 @@ def test_skill_routes_to_existing_references() -> None:
         "references/mcp.md",
     ):
         assert f"]({relative_path})" in SKILL
-        assert (ROOT / relative_path).is_file()
+        assert (SKILL_DIR / relative_path).is_file()
+
+
+def test_agent_skill_folders_share_one_copy() -> None:
+    for agent in (".claude", ".codex"):
+        folder = ROOT / agent / "skills" / "webskrap"
+        assert (folder / "SKILL.md").resolve() == (SKILL_DIR / "SKILL.md").resolve()
+        assert (folder / "references").resolve() == (ROOT / "references").resolve()
 
 
 def test_skill_routes_dynamic_contracts_to_their_sources() -> None:

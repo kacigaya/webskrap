@@ -106,7 +106,8 @@ this; the agent's client and model must support image input.
 
 The agent skill is available at `.agents/skills/webskrap/SKILL.md`,
 `.claude/skills/webskrap/SKILL.md`, and `.codex/skills/webskrap/SKILL.md`.
-Each folder links to the root `SKILL.md` and `references/` to keep one copy.
+The file lives in `.agents/skills/webskrap/`. The `.claude` and `.codex`
+folders link to it, and every folder links to the root `references/`.
 The checkout must support symbolic links. On Windows, enable Developer Mode
 and Git's `core.symlinks` before cloning.
 

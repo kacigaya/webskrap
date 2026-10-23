@@ -1,1 +1,1 @@
-../../../SKILL.md
+../../../.agents/skills/webskrap/SKILL.md

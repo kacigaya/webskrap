@@ -20,6 +20,12 @@ history, so they summarize each release rather than list every change.
   user agent says `Chrome`. Some detectors score this as a weak bot signal.
   Real Chromium users send the same header, so WebSkrap does not fake the brand.
 
+### Changed
+
+- `SKILL.md` moved from the repository root to `.agents/skills/webskrap/SKILL.md`.
+  The `.claude` and `.codex` skill folders link to it. Update any tool that
+  loads the skill from the root path.
+
 ## [2.13.3] - 2026-10-22
 
 ### Fixed
