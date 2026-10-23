@@ -112,6 +112,15 @@ async def diagnose() -> dict[str, Any]:
             "timezone that matches your exit IP (patchright_context_profile / "
             "--patchright-context-profile) or set TZ."
         )
+    if probe.get("channel") == "chromium":
+        # Bare Chromium is honest, but its Sec-CH-UA names only "Chromium" and
+        # a GREASE brand while its user agent says "Chrome". Faking the brand
+        # needs a per-page CDP override, which leaks to workers and is avoided.
+        warnings.append(
+            "Browser is bare Chromium: Sec-CH-UA lists no vendor brand such as "
+            '"Google Chrome", which some detectors score as a weak bot signal. '
+            "Install Google Chrome or Microsoft Edge where available."
+        )
     return {
         **probe,
         "versions": {

@@ -13,6 +13,10 @@ history, so they summarize each release rather than list every change.
 
 - Agent skill folders under `.agents/skills/webskrap`, `.claude/skills/webskrap`,
   and `.codex/skills/webskrap`. Each links to the shared skill and references.
+- `doctor` warns when the browser is bare Chromium. Its `Sec-CH-UA` header
+  lists only `Chromium` and a GREASE brand, with no `Google Chrome`, while the
+  user agent says `Chrome`. Some detectors score this as a weak bot signal.
+  Real Chromium users send the same header, so WebSkrap does not fake the brand.
 
 ## [2.13.3] - 2026-10-22
 

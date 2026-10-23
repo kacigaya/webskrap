@@ -250,6 +250,21 @@ headers come back empty, which a real Chrome never does. Prefer
 `virtual_display` is set, and it is off by default so headless stays honestly
 headless unless you opt in.
 
+### Client hint brands
+
+The `Sec-CH-UA` header and `navigator.userAgentData.brands` name the browser
+vendor. Chrome sends `Google Chrome`, Edge sends `Microsoft Edge`, and bare
+Chromium sends only `Chromium` and a GREASE brand such as `Not_A Brand`. The
+user agent says `Chrome` in all three. Some detectors score a missing vendor
+brand as a weak bot signal. Real Chromium users send the same header, so the
+signal is weak.
+
+WebSkrap does not fake the brand. A fake brand needs a per-page CDP override.
+That override does not reach every worker, so pages can compare the two values.
+To send a vendor brand, install Google Chrome or Microsoft Edge and keep
+`channel="chrome"`. Google Chrome has no Linux ARM64 build, so ARM64 Linux hosts
+fall back to Chromium. `webskrap doctor` warns when it resolves to Chromium.
+
 ### WebGL renderer
 
 Without a usable GPU, headless Chrome renders WebGL with SwiftShader, and

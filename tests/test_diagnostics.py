@@ -167,3 +167,13 @@ def test_doctor_probes_with_the_one_shot_sandbox_setting(
     asyncio.run(diagnostics.diagnose())
 
     assert seen == [expected]
+
+
+def test_bare_chromium_is_a_warning(monkeypatch: Any) -> None:
+    _stub_probe(monkeypatch, channel="chromium")
+    monkeypatch.setenv("TZ", "Europe/Paris")
+
+    report = asyncio.run(diagnostics.diagnose())
+
+    assert len(report["warnings"]) == 1
+    assert "Sec-CH-UA" in report["warnings"][0]
