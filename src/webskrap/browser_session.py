@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import http.client
 import json
 import logging
 import math
@@ -543,7 +544,9 @@ def launch_browser(
             start_new_session=True,
         )
     try:
-        return process.pid, _wait_for_devtools_port(port_file, process, log_path)
+        port = _wait_for_devtools_port(port_file, process, log_path)
+        _wait_for_startup_page(port, process, log_path)
+        return process.pid, port
     except BaseException:
         # Ctrl-C or a startup failure must not orphan a detached browser that
         # holds the profile lock with no state file pointing at it.
@@ -589,6 +592,40 @@ def _wait_for_devtools_port(
         time.sleep(0.05)
     msg = f"browser did not report a DevTools port within {LAUNCH_TIMEOUT_S:.0f}s"
     raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
+
+
+def _wait_for_startup_page(port: int, process: subprocess.Popen[bytes], log_path: Path) -> None:
+    # Chromium can report its DevTools port before it creates the startup tab,
+    # most often on Windows. An attach in that gap finds no page and opens a
+    # second one, and later commands may then pick the blank startup tab.
+    deadline = time.monotonic() + LAUNCH_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            msg = f"browser exited during startup; see {log_path}{_sandbox_hint(log_path)}"
+            raise WebSkrapError(msg)
+        if _has_page_target(port):
+            return
+        time.sleep(0.05)
+    msg = f"browser did not open its startup page within {LAUNCH_TIMEOUT_S:.0f}s"
+    raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
+
+
+def _has_page_target(port: int) -> bool:
+    """True when the DevTools endpoint on ``port`` lists at least one page."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
+    try:
+        connection.request("GET", "/json/list")
+        response = connection.getresponse()
+        if response.status != 200:
+            return False
+        targets = json.loads(response.read())
+    except (OSError, http.client.HTTPException, ValueError):
+        return False
+    finally:
+        connection.close()
+    return isinstance(targets, list) and any(
+        isinstance(target, dict) and target.get("type") == "page" for target in targets
+    )
 
 
 async def open_session(

@@ -26,6 +26,14 @@ history, so they summarize each release rather than list every change.
   The `.claude` and `.codex` skill folders link to it. Update any tool that
   loads the skill from the root path.
 
+### Fixed
+
+- Persistent sessions no longer work on a blank tab after `browser open`.
+  Chromium could report its DevTools port before it opened the startup tab,
+  most often on Windows. `open` then created a second page, and later commands
+  could pick the blank one, so waits timed out and snapshots came back empty.
+  Launch now waits for the startup tab.
+
 ## [2.13.3] - 2026-10-22
 
 ### Fixed

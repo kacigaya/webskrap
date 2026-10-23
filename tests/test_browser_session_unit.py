@@ -120,6 +120,47 @@ def test_launch_timeout_reports_the_deadline(
         browser_session.launch_browser(tmp_path, executable="/bin/chromium", headless=True)
 
 
+def _launch_with_port(monkeypatch: pytest.MonkeyPatch, page_checks: list[bool]) -> list[int]:
+    """Start a fake browser that reports port 9222; ``page_checks`` answers each poll."""
+    _capture_launch(monkeypatch, exited=False)
+    port_file_name = browser_session.DEVTOOLS_PORT_FILE
+    real_popen = subprocess.Popen
+
+    def fake_popen(command: list[str], **kwargs: Any) -> Any:
+        user_data = next(a for a in command if a.startswith("--user-data-dir="))
+        (Path(user_data.split("=", 1)[1]) / port_file_name).write_text("9222\n")
+        return real_popen(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    polled: list[int] = []
+
+    def has_page(port: int) -> bool:
+        polled.append(port)
+        return page_checks.pop(0) if page_checks else False
+
+    monkeypatch.setattr(browser_session, "_has_page_target", has_page)
+    return polled
+
+
+def test_launch_waits_for_the_startup_page(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    polled = _launch_with_port(monkeypatch, [False, True])
+    monkeypatch.setattr(browser_session, "LAUNCH_TIMEOUT_S", 5.0)
+
+    _pid, port = browser_session.launch_browser(tmp_path, executable="/bin/chromium", headless=True)
+
+    assert port == 9222
+    assert polled == [9222, 9222]
+
+
+def test_launch_fails_without_a_startup_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _launch_with_port(monkeypatch, [])
+
+    with pytest.raises(WebSkrapError, match="startup page"):
+        browser_session.launch_browser(tmp_path, executable="/bin/chromium", headless=True)
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
