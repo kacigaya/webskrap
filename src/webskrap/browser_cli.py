@@ -17,7 +17,6 @@ from typing import Annotated, Any, TypeVar
 from uuid import uuid4
 
 import typer
-from patchright.async_api import Page
 from rich.console import Console
 from rich.table import Table
 
@@ -26,6 +25,7 @@ from webskrap.browser_session import (
     DEFAULT_ACTION_TIMEOUT_MS,
     DEFAULT_NAVIGATION_TIMEOUT_MS,
     ELEMENT_ACTIONS,
+    SessionPage,
 )
 from webskrap.cli_output import (
     OutputFormat,
@@ -38,6 +38,7 @@ from webskrap.cli_output import (
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.parsing import (
     parse_element_state,
+    parse_fetch_driver,
     parse_load_state,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
@@ -81,7 +82,7 @@ def _run(coroutine: Coroutine[Any, Any, T], output_format: OutputFormat) -> T:
 
 def _run_page_command(
     session: str,
-    action: Callable[[Page], Awaitable[T]],
+    action: Callable[[SessionPage], Awaitable[T]],
     output_format: OutputFormat,
     *,
     timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
@@ -140,6 +141,16 @@ def open_command(
         bool,
         typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
     ] = False,
+    driver: Annotated[
+        str | None,
+        typer.Option(
+            "--driver",
+            help=(
+                "How later commands attach: patchright (default) or cdp, WebSkrap's own "
+                "experimental driver. Fixed for the session's lifetime."
+            ),
+        ),
+    ] = None,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -159,6 +170,11 @@ def open_command(
         parse_webrtc_ip_handling_policy,
         param_hint="--webrtc-ip-handling-policy",
     )
+    selected_driver = (
+        None
+        if driver is None
+        else parse_cli_value(driver, parse_fetch_driver, param_hint="--driver")
+    )
     payload = _run(
         browser_session.open_session(
             session,
@@ -169,6 +185,7 @@ def open_command(
             proxy_server=proxy,
             webrtc_ip_handling_policy=policy,
             fake_media_devices=fake_media_devices,
+            driver=selected_driver,
         ),
         output_format,
     )
@@ -285,9 +302,8 @@ def _navigation_command(name: str, help_text: str, method: str) -> None:
     ) -> None:
         output_format = parse_output_format(format)
 
-        async def action(page: Page) -> dict[str, Any]:
-            await getattr(page, method)()
-            return await browser_session.page_state(page)
+        async def action(page: SessionPage) -> dict[str, Any]:
+            return await browser_session.history(page, method)
 
         _emit_state(
             _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
@@ -359,7 +375,7 @@ def _register_element_command(name: str, help_text: str) -> None:
         except WebSkrapError as exc:
             fail(exc, output_format)
 
-        async def action(page: Page) -> dict[str, Any]:
+        async def action(page: SessionPage) -> dict[str, Any]:
             await browser_session.element_action(page, name, target, values)
             return await browser_session.page_state(page)
 
@@ -383,9 +399,8 @@ def press_command(
     """Press a key on the page."""
     output_format = parse_output_format(format)
 
-    async def action(page: Page) -> dict[str, Any]:
-        await page.keyboard.press(key)
-        return await browser_session.page_state(page)
+    async def action(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.press(page, key)
 
     _emit_state(
         _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
@@ -460,10 +475,9 @@ def screenshot_command(
     output_format = parse_output_format(format)
     target = path or Path(f"webskrap-{uuid4().hex}.png")
 
-    async def action(page: Page) -> dict[str, Any]:
+    async def action(page: SessionPage) -> dict[str, Any]:
         target.parent.mkdir(parents=True, exist_ok=True)
-        await page.screenshot(path=str(target), full_page=full_page)
-        return {**await browser_session.page_state(page), "path": str(target)}
+        return await browser_session.screenshot(page, target, full_page=full_page)
 
     result = _run_page_command(session, action, output_format)
     if output_format == "json":
@@ -482,7 +496,7 @@ def view_command(
     output_format = parse_output_format(format)
     target = path or Path(f"webskrap-view-{uuid4().hex}.png")
 
-    async def action(page: Page) -> dict[str, str | int | float]:
+    async def action(page: SessionPage) -> dict[str, str | int | float]:
         captured = await browser_session.view(page)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(captured.image)
@@ -579,7 +593,7 @@ def eval_command(
     """Evaluate JavaScript on the current page and print the JSON result."""
     output_format = parse_output_format(format)
 
-    async def action(page: Page) -> Any:
+    async def action(page: SessionPage) -> Any:
         return await browser_session.evaluate(page, expression)
 
     payload = browser_session.shape_eval_result(

@@ -18,9 +18,8 @@ from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
 
-from patchright.async_api import Page
-
 from webskrap import browser_session
+from webskrap.browser_session import SessionPage
 from webskrap.client import WebSkrapClient, WebSkrapError, with_channel_fallback
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
@@ -536,7 +535,7 @@ def _tool_errors() -> Iterator[None]:
 
 async def _browser_action(
     session: str,
-    action: Callable[[Page], Awaitable[T]],
+    action: Callable[[SessionPage], Awaitable[T]],
     timeout_ms: float,
 ) -> T:
     """Run a page action, reporting failures as code-tagged one-liners."""
@@ -703,7 +702,7 @@ async def browser_interact(
     with _tool_errors():
         browser_session.element_arguments(action, resolved_values)
 
-    async def run(page: Page) -> dict[str, Any]:
+    async def run(page: SessionPage) -> dict[str, Any]:
         await browser_session.element_action(page, action, target, resolved_values)
         return await browser_session.page_state(page)
 
@@ -726,9 +725,8 @@ async def browser_press(
         timeout_ms: Action timeout in milliseconds.
     """
 
-    async def run(page: Page) -> dict[str, Any]:
-        await page.keyboard.press(key)
-        return await browser_session.page_state(page)
+    async def run(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.press(page, key)
 
     return await _browser_action(session, run, timeout_ms)
 
@@ -804,9 +802,8 @@ async def browser_screenshot(
     with _tool_errors():
         target = resolve_output_path(path)
 
-    async def run(page: Page) -> dict[str, Any]:
-        await page.screenshot(path=str(target), full_page=full_page)
-        return {**await browser_session.page_state(page), "path": str(target)}
+    async def run(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.screenshot(page, target, full_page=full_page)
 
     return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
 

@@ -18,11 +18,20 @@ history, so they summarize each release rather than list every change.
   only. See `docs/design/cdp-driver.md` for limits and measured results.
 - `scripts/compare_drivers.py` compares automation signals and fetch time of
   the Patchright and CDP drivers on a local probe page.
+- `webskrap browser open --driver cdp`: persistent sessions on the CDP driver.
+  Later commands attach over a built-in WebSocket client. Navigation,
+  history, `eval`, `view`, `screenshot`, `press`, `insert-text`, `mouse` and
+  `wait` work; `snapshot` and element actions do not yet.
+- `scripts/driver_parity.py` runs both drivers on Cloudflare, Turnstile,
+  reCAPTCHA v3 and DataDome test pages, with screenshots and an opt-in
+  Turnstile checkbox click.
 
 ### Changed
 
 - `raise_for_challenge` accepts any object with an `evaluate` method, so both
   drivers share one challenge check.
+- Session state records the driver. `browser open` refuses to reuse a running
+  session with a different driver, because snapshot refs do not carry over.
 
 ## [2.14.0] - 2026-10-23
 

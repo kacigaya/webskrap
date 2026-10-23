@@ -85,6 +85,19 @@ Snapshot refs become stale when the DOM changes. Take another snapshot before
 retrying. `wait` accepts one condition. Do not guess when callers provide more
 than one.
 
+`browser open --driver cdp` makes every later command attach with WebSkrap's
+own experimental CDP driver instead of Patchright. The driver is fixed while
+the session runs; reopening with the other one exits 2 (`usage`). It needs
+Linux or macOS and takes CSS selectors only. `snapshot` and element actions
+(`click`, `fill`, `type`, ...) are not available on it yet; use `mouse`,
+`press`, `insert-text`, `wait` and `eval` instead.
+
+```bash
+webskrap browser open https://example.com --driver cdp
+webskrap browser wait --selector "h1"
+webskrap browser press Tab
+```
+
 Sessions default to the name `default`. Profiles live below
 `~/.webskrap/browser/<name>/`, unless `WEBSKRAP_BROWSER_DIR` changes the root.
 They contain cookies and logins and must remain mode `0700`.

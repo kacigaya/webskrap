@@ -18,6 +18,7 @@ from webskrap.cdp import (
     CDPError,
     CDPPage,
     EventRecorder,
+    PipeTransport,
     find_executable,
 )
 from webskrap.cdp_fetch import launch_args
@@ -44,7 +45,7 @@ class _Writer:
 def _connection() -> tuple[CDPConnection, asyncio.StreamReader, _Writer]:
     reader = asyncio.StreamReader()
     writer = _Writer()
-    connection = CDPConnection(reader, writer)  # type: ignore[arg-type]
+    connection = CDPConnection(PipeTransport(reader, writer))  # type: ignore[arg-type]
     connection.start()
     return connection, reader, writer
 

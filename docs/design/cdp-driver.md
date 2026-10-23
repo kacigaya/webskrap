@@ -20,11 +20,45 @@ Reasons:
 
 1. CDP core and a one-shot fetch backend. **Done on this branch.**
 2. Measure against Patchright on the same host and IP. **Done; see below.**
-3. Port persistent browser sessions: DOM and accessibility snapshot refs, and
-   input through `Input.dispatch*` events.
+3. Port persistent browser sessions. **In progress; see the stage 3 plan.**
 4. Make Playwright optional after full parity. Remove it in a major version.
 
 Stop at the first stage that does not match Patchright on detection.
+
+## Stage 3 plan
+
+`webskrap browser open` already starts Chromium itself with
+`--remote-debugging-port`. Each later command is a new process that attaches,
+acts on the current page, and detaches. Only the attach step and the page
+operations change. The launch, profile, and session state stay as they are.
+
+A new process cannot reattach to a pipe, so sessions use a WebSocket on the
+loopback port. The browser already listens there today. The client is a small
+RFC 6455 implementation on `asyncio` streams. It sends no `Origin` header, so
+`--remote-allow-origins` stays unset.
+
+The driver is chosen at `browser open --driver cdp` and stored in the session
+state. Every later action uses that driver, because snapshot refs from one
+driver do not resolve in the other. Patchright stays the default.
+
+1. **3a: attach and page operations. Done.** WebSocket transport. Attach to the
+   last page target. Navigation, history, reload, text, main-world `eval`,
+   view, screenshot, key press, text insertion, mouse, and waits for text,
+   CSS selectors, and load states. Raw Patchright calls in `browser_cli.py`
+   and `mcp_server.py` move into `browser_session` functions, so call sites
+   do not depend on the driver.
+2. **3b: snapshot and element actions.** Build the snapshot from
+   `Accessibility.getFullAXTree`, so Chromium computes roles and names. Refs
+   are `e<backendDOMNodeId>`. They stay valid while the node lives and across
+   connections, with no marker written into the page. Port the element
+   actions, including the human cursor path and keystroke timing from
+   `human.py`, to `Input.dispatch*` events.
+3. **3c: MCP and search.** Add a `driver` option to the MCP `browser_open`
+   tool and to `search`. Run `scripts/driver_parity.py` again with sessions.
+
+Each step ends with tests, the full pipeline, and a commit. Measure
+`Accessibility.getFullAXTree` for detection before 3b ships, because neither
+Patchright nor Playwright uses that domain.
 
 ## Design
 
@@ -128,8 +162,26 @@ the same.
   browser's native identity.
 - `PLAYWRIGHT_BROWSERS_PATH` is honored, including `0` (package-local
   browsers). The driver finds Chromium without starting Playwright.
-- `webskrap fetch --driver cdp` is the only CLI entry point. The MCP server,
-  `search`, and `WebSkrapClient` still use Patchright.
+- CLI entry points: `webskrap fetch --driver cdp` and
+  `webskrap browser open --driver cdp`. The MCP server, `search`, and
+  `WebSkrapClient` still use Patchright. On a `cdp` session, `snapshot` and
+  element actions raise `usage` until stage 3b.
+- Session waits take CSS selectors only. A `networkidle` wait on an already
+  loaded page means 500 ms with no request in flight that the command saw
+  start and no new resource-timing entry, because the live lifecycle event
+  fired before the command attached. A request that began earlier and still
+  runs is invisible until it ends. Patchright has the same limit, because it
+  also attaches fresh for each command.
+- Each command acts on the newest open page, as Patchright's `pages[-1]`
+  does. CDP lists targets in no defined order, so the session directory
+  keeps the creation order in `cdp-pages.json` (target ids only). Pages that
+  a command opens are recorded in creation order while it is attached.
+  Several pages opened while no command runs have no known order, as with
+  Patchright.
+- `eval` runs with a user gesture, as Playwright's does, so it can open one
+  popup per call.
+- `eval` results follow Patchright's shapes: `ref: <Window>`, `ref: <Node>`,
+  and `[Circular]` where Patchright rebuilds the cycle.
 
 ## Conditions for more work
 

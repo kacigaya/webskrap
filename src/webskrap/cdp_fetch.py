@@ -18,7 +18,6 @@ instead of being silently ignored; see :data:`UNSUPPORTED_FIELDS`.
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 import time
 from pathlib import Path
@@ -66,13 +65,6 @@ _BLOCKED_TYPES: dict[ResourcePolicy, tuple[str, ...]] = {
     ResourcePolicy.ALL: (),
     ResourcePolicy.LITE: ("Image", "Font", "Media"),
     ResourcePolicy.DOCUMENTS: ("Image", "Font", "Media", "Stylesheet"),
-}
-
-#: CDP lifecycle event name for each load state.
-_LIFECYCLE_EVENTS: dict[str, str] = {
-    "domcontentloaded": "DOMContentLoaded",
-    "load": "load",
-    "networkidle": "networkIdle",
 }
 
 # Matches Playwright's page.content(): doctype plus the serialized document.
@@ -217,9 +209,6 @@ async def _fetch_page(
     ready_selector: str | None,
     started: float,
 ) -> FetchResult:
-    await page.send("Page.enable")
-    await page.send("Page.setLifecycleEventsEnabled", {"enabled": True})
-    await page.send("Network.enable")
     blocked = _BLOCKED_TYPES[config.resource_policy]
     if blocked:
         _route_blocked(page)
@@ -228,47 +217,7 @@ async def _fetch_page(
             {"patterns": [{"urlPattern": "*", "resourceType": kind} for kind in blocked]},
         )
 
-    events = page.record("Page.lifecycleEvent", "Network.responseReceived")
-    # Navigation and its load wait share one budget, as in Playwright's goto.
-    deadline = time.monotonic() + timeout_s
-    try:
-        navigation = await page.send("Page.navigate", {"url": url}, timeout_s=timeout_s)
-        if navigation.get("errorText"):
-            msg = f"{navigation['errorText']} at {url}"
-            raise WebSkrapError(msg, code=ErrorCode.NAVIGATION)
-        loader_id = navigation.get("loaderId")
-        response: dict[str, Any] = {}
-        if loader_id:
-            if wait_until in _LIFECYCLE_EVENTS:
-                name = _LIFECYCLE_EVENTS[wait_until]
-                await events.wait(
-                    lambda method, params: (
-                        method == "Page.lifecycleEvent"
-                        and params.get("loaderId") == loader_id
-                        and params.get("name") == name
-                    ),
-                    timeout_s=max(0.0, deadline - time.monotonic()),
-                    what=f"{wait_until} on {url}",
-                )
-            try:
-                document = await events.wait(
-                    lambda method, params: (
-                        method == "Network.responseReceived"
-                        and params.get("loaderId") == loader_id
-                        and params.get("type") == "Document"
-                    ),
-                    # The response usually arrives before navigate returns.
-                    # A load without a network response (about:, data:) has none.
-                    timeout_s=min(timeout_s, 5.0),
-                    what="the document response",
-                )
-                response = document.get("response", {})
-            except WebSkrapError as exc:
-                if exc.code is not ErrorCode.TIMEOUT:
-                    raise
-    finally:
-        events.stop()
-
+    response = await page.goto(url, wait_until=wait_until, timeout_s=timeout_s)
     headers = {str(key).lower(): str(value) for key, value in response.get("headers", {}).items()}
     status = response.get("status")
     status = int(status) if isinstance(status, int | float) else None
@@ -353,18 +302,9 @@ async def _screenshot(page: CDPPage, screenshot: bool | str | Path) -> Path | No
     if not screenshot:
         return None
     path = Path(f"webskrap-{uuid4().hex}.png") if screenshot is True else Path(screenshot)
-    metrics = await page.send("Page.getLayoutMetrics")
-    size = metrics.get("cssContentSize") or metrics["contentSize"]
-    shot = await page.send(
-        "Page.captureScreenshot",
-        {
-            "format": "png",
-            "captureBeyondViewport": True,
-            "clip": {"x": 0, "y": 0, "width": size["width"], "height": size["height"], "scale": 1},
-        },
-    )
+    image = await page.screenshot(full_page=True)
     path.parent.mkdir(parents=True, exist_ok=True)
-    await asyncio.to_thread(path.write_bytes, base64.b64decode(shot["data"]))
+    await asyncio.to_thread(path.write_bytes, image)
     return path
 
 

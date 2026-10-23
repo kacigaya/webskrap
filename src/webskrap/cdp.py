@@ -19,13 +19,16 @@ out-of-process iframes or workers.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import hashlib
 import importlib.util
 import json
 import logging
 import os
 import shutil
 import signal
+import struct
 import sys
 import tempfile
 import time
@@ -33,7 +36,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import count
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from webskrap.errors import SANDBOX_FAILURE_MARKERS, ErrorCode, WebSkrapError
@@ -69,14 +72,24 @@ class CDPError(WebSkrapError):
     """A CDP command returned an error object instead of a result."""
 
 
-class CDPConnection:
-    """Routes commands, replies and events over one pipe pair.
+class Transport(Protocol):
+    """Carries whole CDP messages; the pipe and a WebSocket both qualify."""
 
-    Commands get increasing ids and resolve when the matching reply arrives.
-    Events go to handlers registered per ``(session_id, method)``; the browser
-    target uses session id None. When the pipe closes, every pending command
-    fails with the error given to :meth:`close`.
-    """
+    async def read_message(self) -> bytes:
+        """Return the next message; raise ``ConnectionError`` once closed."""
+        ...
+
+    def write_message(self, data: bytes) -> None:
+        """Queue one message for sending."""
+        ...
+
+    async def close(self) -> None:
+        """Release the transport. Idempotent."""
+        ...
+
+
+class PipeTransport:
+    """Chromium's debugging pipe: NUL-terminated JSON in each direction."""
 
     def __init__(
         self,
@@ -84,10 +97,173 @@ class CDPConnection:
         writer: asyncio.WriteTransport,
         read_transport: asyncio.BaseTransport | None = None,
     ) -> None:
-        """Wrap an open reader and writer; call :meth:`start` to begin reading."""
+        """Wrap the reader and writer :func:`launch` connected to fds 3 and 4."""
         self._reader = reader
         self._writer = writer
         self._read_transport = read_transport
+
+    async def read_message(self) -> bytes:
+        """Return the next message without its NUL terminator."""
+        try:
+            raw = await self._reader.readuntil(b"\0")
+        except asyncio.IncompleteReadError as exc:
+            raise ConnectionError("the browser closed the CDP pipe") from exc
+        return raw[:-1]
+
+    def write_message(self, data: bytes) -> None:
+        """Write ``data`` followed by the NUL terminator."""
+        self._writer.write(data + b"\0")
+
+    async def close(self) -> None:
+        """Close both pipe ends."""
+        self._writer.close()
+        if self._read_transport is not None:
+            self._read_transport.close()
+
+
+#: Fixed by RFC 6455 for the Sec-WebSocket-Accept proof.
+_WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+_OPCODE_TEXT, _OPCODE_CLOSE, _OPCODE_PING, _OPCODE_PONG = 0x1, 0x8, 0x9, 0xA
+
+
+def _mask(payload: bytes, key: bytes) -> bytes:
+    """XOR ``payload`` with the 4-byte ``key``, as RFC 6455 masking requires."""
+    if not payload:
+        return payload
+    repeated = (key * (len(payload) // 4 + 1))[: len(payload)]
+    value = int.from_bytes(payload, "big") ^ int.from_bytes(repeated, "big")
+    return value.to_bytes(len(payload), "big")
+
+
+class WebSocketTransport:
+    """A minimal RFC 6455 client for a loopback DevTools endpoint.
+
+    Persistent sessions need it: each CLI command is a new process, and only
+    the browser's debugging port can be reattached, not its pipe. Text frames
+    carry the JSON messages; fragments are joined, pings answered, and a
+    close frame or EOF ends the stream. No ``Origin`` header is sent, which
+    Chromium accepts without ``--remote-allow-origins``.
+    """
+
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Wrap a stream that has completed the upgrade; see :meth:`connect`."""
+        self._reader = reader
+        self._writer = writer
+
+    @classmethod
+    async def connect(
+        cls, host: str, port: int, path: str, *, timeout_s: float = 10.0
+    ) -> WebSocketTransport:
+        """Open ``ws://host:port/path`` and verify the server's handshake.
+
+        Raises:
+            ConnectionError: If the server refuses the upgrade or answers with
+                a wrong ``Sec-WebSocket-Accept``.
+            OSError: If nothing listens on the port.
+        """
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port, limit=MAX_MESSAGE_BYTES), timeout_s
+        )
+        key = base64.b64encode(os.urandom(16)).decode()
+        writer.write(
+            (
+                f"GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\n"
+                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+                "Sec-WebSocket-Version: 13\r\n\r\n"
+            ).encode()
+        )
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout_s)
+            lines = head.decode("latin-1").split("\r\n")
+            headers = {
+                name.strip().lower(): value.strip()
+                for name, _, value in (line.partition(":") for line in lines[1:] if line)
+            }
+            # SHA-1 is what RFC 6455 specifies for this proof; it is not a
+            # security boundary here.
+            digest = hashlib.sha1((key + _WEBSOCKET_GUID).encode(), usedforsecurity=False)
+            expected = base64.b64encode(digest.digest()).decode()
+            if not lines[0].startswith("HTTP/1.1 101"):
+                raise ConnectionError(f"DevTools refused the WebSocket upgrade: {lines[0]}")
+            if headers.get("sec-websocket-accept") != expected:
+                raise ConnectionError("DevTools answered the upgrade with a wrong accept key")
+        except BaseException:
+            writer.close()
+            raise
+        return cls(reader, writer)
+
+    async def read_message(self) -> bytes:
+        """Return the next complete message, answering pings on the way."""
+        parts: list[bytes] = []
+        size = 0
+        while True:
+            try:
+                first, second = await self._reader.readexactly(2)
+                length = second & 0x7F
+                if length == 126:
+                    (length,) = struct.unpack(">H", await self._reader.readexactly(2))
+                elif length == 127:
+                    (length,) = struct.unpack(">Q", await self._reader.readexactly(8))
+                key = await self._reader.readexactly(4) if second & 0x80 else b""
+                if size + length > MAX_MESSAGE_BYTES:
+                    raise ConnectionError("DevTools sent a message over the size limit")
+                payload = await self._reader.readexactly(length)
+            except asyncio.IncompleteReadError as exc:
+                raise ConnectionError("DevTools closed the WebSocket") from exc
+            if key:
+                payload = _mask(payload, key)
+            opcode = first & 0x0F
+            if opcode == _OPCODE_CLOSE:
+                raise ConnectionError("DevTools closed the WebSocket")
+            if opcode == _OPCODE_PING:
+                self._send_frame(_OPCODE_PONG, payload)
+                continue
+            if opcode == _OPCODE_PONG:
+                continue
+            parts.append(payload)
+            size += length
+            if first & 0x80:
+                return b"".join(parts)
+
+    def write_message(self, data: bytes) -> None:
+        """Send ``data`` as one text frame."""
+        self._send_frame(_OPCODE_TEXT, data)
+
+    def _send_frame(self, opcode: int, payload: bytes) -> None:
+        # Clients must mask every frame (RFC 6455 section 5.3).
+        key = os.urandom(4)
+        length = len(payload)
+        if length < 126:
+            header = struct.pack(">BB", 0x80 | opcode, 0x80 | length)
+        elif length < 1 << 16:
+            header = struct.pack(">BBH", 0x80 | opcode, 0x80 | 126, length)
+        else:
+            header = struct.pack(">BBQ", 0x80 | opcode, 0x80 | 127, length)
+        self._writer.write(header + key + _mask(payload, key))
+
+    async def close(self) -> None:
+        """Send a close frame and close the socket. Idempotent."""
+        if self._writer.is_closing():
+            return
+        with contextlib.suppress(ConnectionError, RuntimeError):
+            self._send_frame(_OPCODE_CLOSE, b"")
+        self._writer.close()
+        with contextlib.suppress(ConnectionError, OSError):
+            await self._writer.wait_closed()
+
+
+class CDPConnection:
+    """Routes commands, replies and events over one :class:`Transport`.
+
+    Commands get increasing ids and resolve when the matching reply arrives.
+    Events go to handlers registered per ``(session_id, method)``; the browser
+    target uses session id None. When the transport closes, every pending
+    command fails with the error given to :meth:`close`.
+    """
+
+    def __init__(self, transport: Transport) -> None:
+        """Wrap an open transport; call :meth:`start` to begin reading."""
+        self._transport = transport
         self._ids = count(1)
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self._handlers: dict[tuple[str | None, str], list[EventHandler]] = {}
@@ -126,7 +302,7 @@ class CDPConnection:
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[message_id] = future
         try:
-            self._writer.write(json.dumps(message).encode() + b"\0")
+            self._transport.write_message(json.dumps(message).encode())
             timeout_s = self.default_timeout_s if timeout_s is None else timeout_s
             return await asyncio.wait_for(future, timeout_s)
         except TimeoutError as exc:
@@ -148,9 +324,7 @@ class CDPConnection:
     async def close(self, error: WebSkrapError | None = None) -> None:
         """Stop reading, close the write end, and fail pending commands."""
         self._fail_pending(error or WebSkrapError("CDP connection closed"))
-        self._writer.close()
-        if self._read_transport is not None:
-            self._read_transport.close()
+        await self._transport.close()
         if self._read_task is not None and self._read_task is not asyncio.current_task():
             self._read_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -167,9 +341,8 @@ class CDPConnection:
     async def _read_loop(self) -> None:
         try:
             while True:
-                raw = await self._reader.readuntil(b"\0")
-                self._dispatch(json.loads(raw[:-1]))
-        except (asyncio.IncompleteReadError, ConnectionError):
+                self._dispatch(json.loads(await self._transport.read_message()))
+        except ConnectionError:
             error = (
                 self.on_disconnect()
                 if self.on_disconnect
@@ -260,6 +433,14 @@ class EventRecorder:
             self._connection.off(method, handler, session_id=self._session_id)
 
 
+#: CDP lifecycle event name for each Playwright load state.
+LIFECYCLE_EVENTS: dict[str, str] = {
+    "domcontentloaded": "DOMContentLoaded",
+    "load": "load",
+    "networkidle": "networkIdle",
+}
+
+
 class CDPPage:
     """One page target attached over a flat session.
 
@@ -275,6 +456,7 @@ class CDPPage:
         self.session_id = session_id
         self.target_id = target_id
         self.default_timeout_s = 30.0
+        self._events_enabled = False
 
     async def send(
         self, method: str, params: Mapping[str, Any] | None = None, **kwargs: Any
@@ -282,6 +464,106 @@ class CDPPage:
         """Send ``method`` to this page's session."""
         kwargs.setdefault("timeout_s", self.default_timeout_s)
         return await self.connection.send(method, params, session_id=self.session_id, **kwargs)
+
+    async def enable_events(self) -> None:
+        """Turn on the page, lifecycle and network events :meth:`goto` reads.
+
+        Idempotent per page object. These domains are what Playwright and
+        Patchright enable too; ``Runtime`` stays off.
+        """
+        if self._events_enabled:
+            return
+        await self.send("Page.enable")
+        await self.send("Page.setLifecycleEventsEnabled", {"enabled": True})
+        await self.send("Network.enable")
+        self._events_enabled = True
+
+    async def goto(self, url: str, *, wait_until: str, timeout_s: float) -> dict[str, Any]:
+        """Navigate and wait for ``wait_until``; return the document response.
+
+        Navigation and the load wait share one ``timeout_s`` budget, as in
+        Playwright's ``goto``. The returned CDP ``Response`` object is empty
+        for loads without a network response (``about:``, ``data:``, same
+        document).
+
+        Raises:
+            WebSkrapError: ``navigation`` for a network error, ``timeout``
+                when the load state is not reached in time.
+        """
+        await self.enable_events()
+        events = self.record("Page.lifecycleEvent", "Network.responseReceived")
+        deadline = time.monotonic() + timeout_s
+        try:
+            navigation = await self.send("Page.navigate", {"url": url}, timeout_s=timeout_s)
+            if navigation.get("errorText"):
+                msg = f"{navigation['errorText']} at {url}"
+                raise WebSkrapError(msg, code=ErrorCode.NAVIGATION)
+            loader_id = navigation.get("loaderId")
+            if not loader_id:
+                return {}
+            await self.wait_lifecycle(events, loader_id, wait_until, deadline, url)
+            try:
+                document = await events.wait(
+                    lambda method, params: (
+                        method == "Network.responseReceived"
+                        and params.get("loaderId") == loader_id
+                        and params.get("type") == "Document"
+                    ),
+                    # The response usually arrives before navigate returns.
+                    timeout_s=min(timeout_s, 5.0),
+                    what="the document response",
+                )
+            except WebSkrapError as exc:
+                if exc.code is not ErrorCode.TIMEOUT:
+                    raise
+                return {}
+            return document.get("response", {})
+        finally:
+            events.stop()
+
+    async def wait_lifecycle(
+        self,
+        events: EventRecorder,
+        loader_id: str | None,
+        wait_until: str,
+        deadline: float,
+        url: str,
+    ) -> None:
+        """Wait for ``wait_until`` in the main frame, on ``loader_id`` or any loader.
+
+        ``events`` must have been recording ``Page.lifecycleEvent`` since
+        before the navigation started.
+        """
+        name = LIFECYCLE_EVENTS.get(wait_until)
+        if name is None:
+            return
+        await events.wait(
+            lambda method, params: (
+                method == "Page.lifecycleEvent"
+                and params.get("frameId") == self.target_id
+                and (loader_id is None or params.get("loaderId") == loader_id)
+                and params.get("name") == name
+            ),
+            timeout_s=max(0.0, deadline - time.monotonic()),
+            what=f"{wait_until} on {url}",
+        )
+
+    async def screenshot(self, *, full_page: bool = False) -> bytes:
+        """Return a PNG of the viewport, or of the whole page when ``full_page``."""
+        params: dict[str, Any] = {"format": "png"}
+        if full_page:
+            metrics = await self.send("Page.getLayoutMetrics")
+            size = metrics.get("cssContentSize") or metrics["contentSize"]
+            params["captureBeyondViewport"] = True
+            params["clip"] = {
+                "x": 0,
+                "y": 0,
+                "width": size["width"],
+                "height": size["height"],
+                "scale": 1,
+            }
+        shot = await self.send("Page.captureScreenshot", params)
+        return base64.b64decode(shot["data"])
 
     def record(self, *methods: str) -> EventRecorder:
         """Start recording ``methods`` events from this page."""
@@ -521,7 +803,7 @@ async def launch(
         await asyncio.to_thread(_reap, pid, 0)
         await asyncio.to_thread(shutil.rmtree, temp_dir, True)
         raise
-    connection = CDPConnection(reader, write_transport, read_transport)
+    connection = CDPConnection(PipeTransport(reader, write_transport, read_transport))
     connection.on_disconnect = lambda: _exit_error(log_path)
     connection.start()
     browser = CDPBrowser(connection, pid, log_path, temp_dir)
