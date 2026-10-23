@@ -457,6 +457,7 @@ class CDPPage:
         self.target_id = target_id
         self.default_timeout_s = 30.0
         self._events_enabled = False
+        self._shared_world: int | None = None
 
     async def send(
         self, method: str, params: Mapping[str, Any] | None = None, **kwargs: Any
@@ -569,6 +570,34 @@ class CDPPage:
         """Start recording ``methods`` events from this page."""
         return EventRecorder(self.connection, methods, session_id=self.session_id)
 
+    async def isolated_world(self) -> int:
+        """Create a fresh isolated world in the main frame and return its context id.
+
+        It shares the DOM with the page but not its JavaScript globals, and
+        needs no ``Runtime.enable``. A navigation destroys it, so callers
+        create one per operation.
+        """
+        world = await self.send(
+            "Page.createIsolatedWorld",
+            {"frameId": self.target_id, "worldName": f"w{uuid4().hex[:8]}"},
+        )
+        return int(world["executionContextId"])
+
+    async def shared_world(self) -> int:
+        """Return an isolated world kept for this page object's lookups.
+
+        Polling loops reuse it instead of creating one world per poll. A
+        navigation destroys it; :meth:`forget_world` drops the cached id after
+        Chromium reports the context gone, and the next call makes a new one.
+        """
+        if self._shared_world is None:
+            self._shared_world = await self.isolated_world()
+        return self._shared_world
+
+    def forget_world(self) -> None:
+        """Drop the cached :meth:`shared_world` id."""
+        self._shared_world = None
+
     async def evaluate(self, expression: str, arg: Any = None, /) -> Any:
         """Run ``expression`` in a fresh isolated world and return its JSON value.
 
@@ -584,15 +613,12 @@ class CDPPage:
         Raises:
             CDPError: If the script threw or its value is not serializable.
         """
-        world = await self.send(
-            "Page.createIsolatedWorld",
-            {"frameId": self.target_id, "worldName": f"w{uuid4().hex[:8]}"},
-        )
+        world = await self.isolated_world()
         result = await self.send(
             "Runtime.evaluate",
             {
                 "expression": f"({_EVALUATE_SCRIPT})({json.dumps(expression)}, {json.dumps(arg)})",
-                "contextId": world["executionContextId"],
+                "contextId": world,
                 "returnByValue": True,
                 "awaitPromise": True,
             },

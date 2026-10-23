@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 import struct
 import sys
 import threading
@@ -208,8 +209,40 @@ SESSION_PAGE = (
 )
 
 
+FORM_PAGE = b"""<html><title>Form</title><body><h1>Form</h1>
+<a href="/home"><img alt="Logo" src="data:,"></a>
+<p>Run <code>make</code> first</p>
+<label for="name">Name</label><input id="name" value="old">
+<label><input type="checkbox" id="agree"> Agree</label>
+<select id="color"><option value="r">Red</option><option value="g">Green</option></select>
+<fieldset disabled><select id="locked"><option value="a">A</option><option value="b">B</option>
+</select></fieldset>
+<textarea id="notes" aria-label="Notes"></textarea>
+<button id="go">Send</button>
+<div hidden><button>Secret</button></div>
+<div style="visibility:hidden">Invisible text
+<span style="visibility:visible">Shown again</span></div>
+<div style="height:3000px"></div>
+<button id="far">Far</button>
+<button class="dup">A</button><button class="dup">B</button>
+<p id="log"></p>
+<script>
+window.__events = [];
+for (const t of ['wheel', 'mousemove', 'mousedown', 'mouseup', 'keydown'])
+  addEventListener(t, e => __events.push({t, ts: e.timeStamp, trusted: e.isTrusted}), true);
+go.addEventListener('click', e => log.textContent += 'sent:' + e.isTrusted + ' ');
+far.addEventListener('click', () => log.textContent += 'far ');
+</script></body></html>"""
+
+
 class _SessionHandler(_CDPHandler):
     def do_GET(self) -> None:
+        if self.path == "/form":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(FORM_PAGE)
+            return
         if self.path in ("/session", "/session-2"):
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -355,13 +388,6 @@ def test_cdp_session_drives_pages_across_reconnects(
         shot = tmp_path / "full.png"
         await run(lambda page: browser_session.screenshot(page, shot, full_page=True))
         results["shot"] = shot.read_bytes()[:8]
-        for refused in (
-            lambda page: browser_session.snapshot(page),
-            lambda page: browser_session.element_action(page, "click", "#b", []),
-        ):
-            with pytest.raises(WebSkrapError) as error:
-                await run(refused)
-            assert error.value.code is ErrorCode.USAGE
         # A popup becomes the current page for the next command, as with
         # Patchright's pages[-1]; the opener stays reachable once it closes.
         await run(lambda page: browser_session.evaluate(page, "window.open('/session-2')"))
@@ -437,3 +463,131 @@ def test_cdp_session_drives_pages_across_reconnects(
     # Across all these attaches the page never saw Runtime or Console enabled.
     assert '"touched":false' in results["probe_text"]["text"]
     assert '"webdriver":false' in results["probe_text"]["text"]
+
+
+def _ref(tree: str, line_start: str) -> str:
+    line = next(line for line in tree.splitlines() if line.strip().startswith(line_start))
+    match = re.search(r"\[ref=(e\d+)\]", line)
+    assert match, line
+    return match.group(1)
+
+
+@pytest.mark.browser
+@pytest.mark.skipif(sys.platform == "win32", reason="the CDP driver needs posix_spawn")
+def test_cdp_session_snapshot_refs_drive_elements(
+    persistent_session_env: Path, session_server: str
+) -> None:
+    name = "cdp-elements"
+
+    async def exercise() -> dict[str, Any]:
+        await browser_session.open_session(name, driver="cdp")
+        results: dict[str, Any] = {}
+
+        async def run(action: Any) -> Any:
+            return await browser_session.run_page_action(name, action, timeout_ms=20_000)
+
+        async def act(action: str, target: str, *values: str) -> None:
+            await run(
+                lambda page: browser_session.element_action(page, action, target, list(values))
+            )
+
+        async def value(script: str) -> Any:
+            return await run(lambda page: browser_session.evaluate(page, script))
+
+        await run(lambda page: browser_session.goto(page, f"{session_server}/form", "load"))
+        tree = (await run(browser_session.snapshot))["snapshot"]
+        results["tree"] = tree
+        results["full"] = (await run(lambda page: browser_session.snapshot(page, depth=0)))[
+            "snapshot"
+        ]
+        results["shallow"] = (await run(lambda page: browser_session.snapshot(page, depth=1)))[
+            "snapshot"
+        ]
+        name_ref = _ref(tree, '- textbox "Name"')
+        send_ref = _ref(tree, '- button "Send"')
+        # Refs resolve on later connections: each run is a fresh attach.
+        results["wait_ref"] = await run(
+            lambda page: browser_session.wait_for(page, selector=name_ref, timeout_ms=5_000)
+        )
+        await act("fill", name_ref, "Ada")
+        results["name"] = await value("document.getElementById('name').value")
+        await act("type", "#notes", "hi!")
+        results["notes"] = await value("document.getElementById('notes').value")
+        await act("check", "#agree")
+        results["checked"] = await value("document.getElementById('agree').checked")
+        await act("uncheck", "#agree")
+        results["unchecked"] = await value("document.getElementById('agree').checked")
+        await act("select", "#color", "g")
+        results["color"] = await value("document.getElementById('color').value")
+        await act("select", "#color", "Red")
+        results["color_label"] = await value("document.getElementById('color').value")
+        await value("window.__events.length = 0")
+        await act("click", send_ref)
+        results["send_events"] = await value("window.__events")
+        await act("click", "#far")
+        results["log"] = await value("document.getElementById('log').textContent")
+        results["far_events"] = await value("window.__events")
+        with pytest.raises(WebSkrapError) as disabled:
+            await browser_session.run_page_action(
+                name,
+                lambda page: browser_session.element_action(page, "select", "#locked", ["b"]),
+                timeout_ms=600,
+            )
+        results["disabled"] = disabled.value.code
+        results["locked"] = await value("document.getElementById('locked').value")
+        # check refuses a non-checkbox before any click reaches it.
+        with pytest.raises(WebSkrapError) as not_checkable:
+            await act("check", "#far")
+        results["not_checkable"] = not_checkable.value.code
+        results["log_after_check"] = await value("document.getElementById('log').textContent")
+        for target, code in ((".dup", ErrorCode.USAGE), ("##", ErrorCode.USAGE)):
+            with pytest.raises(WebSkrapError) as error:
+                await act("click", target)
+            assert error.value.code is code
+        await value("document.getElementById('go').remove()")
+        with pytest.raises(WebSkrapError) as stale:
+            await act("click", send_ref)
+        results["stale"] = stale.value.code
+        return results
+
+    try:
+        results = asyncio.run(exercise())
+    finally:
+        browser_session.close_session(name, delete_data=True)
+
+    tree = results["tree"]
+    assert '- heading "Form" [level=1] [ref=e' in tree
+    assert '- textbox "Name" [ref=e' in tree and ': "old"' in tree
+    assert '- checkbox "Agree" [ref=e' in tree
+    assert "- combobox [ref=e" in tree and ': "Red"' in tree
+    assert '- textbox "Notes" [ref=e' in tree
+    assert "Secret" not in tree  # hidden subtrees are left out
+    assert "Invisible text" not in tree and "Shown again" in tree
+    # Links are named by their image's alt text and say where they go.
+    assert '- link "Logo" [ref=e' in tree and "- /url: /home" in tree
+    assert "- code [ref=e" in tree and "- text: Run" in tree
+    assert "#" not in "".join(re.findall(r"\[ref=[^\]]*\]", tree))  # no placeholder left
+    # Like Playwright, depth 0 means no limit; depth 1 keeps the top level.
+    assert re.sub(r"e\d+", "e", results["full"]) == re.sub(r"e\d+", "e", tree)
+    assert '- heading "Form"' in results["shallow"] and "  -" not in results["shallow"]
+    assert '- button "Send"' in results["shallow"]
+    assert results["wait_ref"]["matched"] == "selector"
+    assert results["name"] == "Ada"  # fill replaced the old value
+    assert results["notes"] == "hi!"
+    assert (results["checked"], results["unchecked"]) == (True, False)
+    assert (results["color"], results["color_label"]) == ("g", "r")
+    events = results["send_events"]
+    kinds = [event["t"] for event in events]
+    assert all(event["trusted"] for event in events)
+    first_down = kinds.index("mousedown")
+    assert kinds[:first_down].count("mousemove") >= 10  # a path, not a teleport
+    down, up = events[first_down], events[kinds.index("mouseup")]
+    assert up["ts"] - down["ts"] >= 50  # a human button hold
+    assert results["log"] == "sent:true far "
+    assert [event["t"] for event in results["far_events"]].count("wheel") >= 5
+    assert results["stale"] is ErrorCode.STALE_REF
+    assert results["not_checkable"] is ErrorCode.USAGE
+    assert results["log_after_check"] == "sent:true far "  # #far was not clicked
+    # A disabled control is waited on, then refused, never changed.
+    assert results["disabled"] is ErrorCode.TIMEOUT
+    assert results["locked"] == "a"

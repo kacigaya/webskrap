@@ -19,9 +19,11 @@ history, so they summarize each release rather than list every change.
 - `scripts/compare_drivers.py` compares automation signals and fetch time of
   the Patchright and CDP drivers on a local probe page.
 - `webskrap browser open --driver cdp`: persistent sessions on the CDP driver.
-  Later commands attach over a built-in WebSocket client. Navigation,
-  history, `eval`, `view`, `screenshot`, `press`, `insert-text`, `mouse` and
-  `wait` work; `snapshot` and element actions do not yet.
+  Later commands attach over a built-in WebSocket client. Every browser
+  command works, including `snapshot` with `eN` refs and the element actions
+  with human cursor paths and keystroke timing. Snapshots come from a DOM
+  walk in an isolated world; the Accessibility domain is not used, because
+  it leaves a measurable slowdown on the page.
 - `scripts/driver_parity.py` runs both drivers on Cloudflare, Turnstile,
   reCAPTCHA v3 and DataDome test pages, with screenshots and an opt-in
   Turnstile checkbox click.

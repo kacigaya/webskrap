@@ -39,7 +39,7 @@ from patchright.async_api import Locator, Page
 from patchright.async_api import async_playwright as patchright_playwright
 from playwright.async_api import async_playwright
 
-from webskrap import cdp_session
+from webskrap import cdp_dom, cdp_session
 from webskrap import human as humanize
 from webskrap.cdp import CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
@@ -913,12 +913,6 @@ def element_arguments(action: str, values: list[str]) -> list[Any]:
 HUMAN_CLICK_ACTIONS: dict[str, dict[str, int]] = {"click": {}, "dblclick": {"click_count": 2}}
 
 
-def _not_on_cdp(feature: str) -> WebSkrapError:
-    """Explain a stage 3b feature on a ``cdp`` session; see docs/design/cdp-driver.md."""
-    msg = f"{feature} is not available on driver='cdp' sessions yet"
-    return WebSkrapError(msg, code=ErrorCode.USAGE)
-
-
 async def element_action(page: SessionPage, action: str, target: str, values: list[str]) -> None:
     """Run an :data:`ELEMENT_ACTIONS` interaction against ``target``.
 
@@ -929,7 +923,8 @@ async def element_action(page: SessionPage, action: str, target: str, values: li
     """
     arguments = element_arguments(action, values)
     if isinstance(page, CDPPage):
-        raise _not_on_cdp(f"'{action}' on an element")
+        await cdp_dom.element_action(page, action, target, arguments)
+        return
     locator = await resolve_locator(page, target)
     if action in HUMAN_CLICK_ACTIONS:
         await humanize.click(page, locator, description=target, **HUMAN_CLICK_ACTIONS[action])
@@ -1191,7 +1186,8 @@ async def screenshot(page: SessionPage, path: Path, *, full_page: bool) -> dict[
 async def snapshot(page: SessionPage, *, depth: int | None = None) -> dict[str, Any]:
     """Return the page state plus an aria snapshot carrying ``eN`` refs."""
     if isinstance(page, CDPPage):
-        raise _not_on_cdp("snapshot")
+        tree = await cdp_dom.snapshot(page, depth=depth)
+        return {**await page_state(page), "snapshot": tree}
     tree = await page.locator("body").aria_snapshot(mode="ai", depth=depth)
     return {**await page_state(page), "snapshot": tree}
 
@@ -1298,8 +1294,6 @@ async def wait_for(
     # narrowed to a non-None type without an assert or a cast.
     condition = wait_condition(text, text_gone, selector, load_state)
     if isinstance(page, CDPPage):
-        if selector is not None and SNAPSHOT_REF_PATTERN.fullmatch(selector):
-            raise _not_on_cdp("waiting on a snapshot ref")
         return await cdp_session.wait_for(
             page,
             condition=condition,

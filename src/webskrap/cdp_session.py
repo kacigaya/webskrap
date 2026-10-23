@@ -58,15 +58,6 @@ _TEXT_SCRIPT = """({limit, start}) => {
     next_text_offset: stop < length ? stop : null,
   };
 }"""
-# Playwright's visibility rule: a non-empty box and not visibility:hidden.
-_ELEMENT_STATE_SCRIPT = """({selector}) => {
-  const element = document.querySelector(selector);
-  if (!element) return 'detached';
-  const box = element.getBoundingClientRect();
-  const visible = box.width > 0 && box.height > 0
-    && getComputedStyle(element).visibility !== 'hidden';
-  return visible ? 'visible' : 'hidden';
-}"""
 # Mirrors Playwright's get_by_text default: case-insensitive substring of
 # whitespace-normalized text in a visible element.
 _TEXT_VISIBLE_SCRIPT = """({needle}) => {
@@ -705,7 +696,7 @@ async def wait_for(
 ) -> dict[str, Any]:
     """Wait for one condition; see :func:`webskrap.browser_session.wait_for`.
 
-    Selectors are CSS only on this driver.
+    ``selector`` is a snapshot ref or a CSS selector on this driver.
 
     Raises:
         WebSkrapError: ``timeout`` when the condition is not met in time, or
@@ -726,17 +717,14 @@ async def wait_for(
 
         await _poll(text_hidden, timeout_ms, f"text '{text_gone}' to disappear")
     if selector is not None:
-        css = selector
+        # Imported here: cdp_dom builds on this module's key handling.
+        from webskrap.cdp_dom import element_state
+
+        target = selector
         wanted = selector_state
 
         async def selector_reached() -> bool:
-            try:
-                state = await page.evaluate(_ELEMENT_STATE_SCRIPT, {"selector": css})
-            except CDPError as exc:
-                if "is not a valid selector" in str(exc):
-                    msg = f"'{css}' is not a valid CSS selector (the cdp driver takes CSS only)"
-                    raise WebSkrapError(msg, code=ErrorCode.USAGE) from exc
-                raise
+            state = await element_state(page, target)
             if wanted == "attached":
                 return state != "detached"
             if wanted == "hidden":

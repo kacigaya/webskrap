@@ -88,14 +88,15 @@ than one.
 `browser open --driver cdp` makes every later command attach with WebSkrap's
 own experimental CDP driver instead of Patchright. The driver is fixed while
 the session runs; reopening with the other one exits 2 (`usage`). It needs
-Linux or macOS and takes CSS selectors only. `snapshot` and element actions
-(`click`, `fill`, `type`, ...) are not available on it yet; use `mouse`,
-`press`, `insert-text`, `wait` and `eval` instead.
+Linux or macOS. Targets are snapshot refs or CSS selectors; Playwright
+selector engines such as `text=` do not work. Snapshot refs are stable while
+the element exists, also across commands.
 
 ```bash
 webskrap browser open https://example.com --driver cdp
-webskrap browser wait --selector "h1"
-webskrap browser press Tab
+webskrap browser snapshot
+webskrap browser click e15
+webskrap browser fill "input[name=q]" "playwright"
 ```
 
 Sessions default to the name `default`. Profiles live below

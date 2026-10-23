@@ -47,12 +47,19 @@ driver do not resolve in the other. Patchright stays the default.
    CSS selectors, and load states. Raw Patchright calls in `browser_cli.py`
    and `mcp_server.py` move into `browser_session` functions, so call sites
    do not depend on the driver.
-2. **3b: snapshot and element actions.** Build the snapshot from
-   `Accessibility.getFullAXTree`, so Chromium computes roles and names. Refs
-   are `e<backendDOMNodeId>`. They stay valid while the node lives and across
+2. **3b: snapshot and element actions. Done.** Build the snapshot with a DOM walk
+   in an isolated world, as Playwright's injected script does, and map each
+   listed element to its `backendNodeId` with `DOM.describeNode`. Refs are
+   `e<backendNodeId>`. They stay valid while the node lives and across
    connections, with no marker written into the page. Port the element
    actions, including the human cursor path and keystroke timing from
    `human.py`, to `Input.dispatch*` events.
+
+   `Accessibility.getFullAXTree` was measured first and rejected. Once it
+   runs, Chromium keeps its accessibility mode on: a 3000-button DOM burst
+   took 136 to 145 ms instead of 122 to 128 ms (median of 5, 4 runs).
+   `Accessibility.disable` did not restore it, and it sometimes survived a
+   navigation. A page can time that, so the domain stays unused.
 3. **3c: MCP and search.** Add a `driver` option to the MCP `browser_open`
    tool and to `search`. Run `scripts/driver_parity.py` again with sessions.
 
@@ -136,6 +143,11 @@ never clears it. `--click` moves both drivers along the same curved path
 through CDP input events. The click clears the challenge in a headed
 browser on a virtual display, but not in headless mode.
 
+Persistent sessions (stage 3b), headless, 2 runs per driver: open, goto
+deviceandbrowserinfo.com, snapshot, a human hover on a ref, then read the
+verdict. Both drivers report the same: `isBot` (headless mode) and weak
+signals, with no CDP, webdriver or Playwright flag.
+
 Result: the CDP driver matches Patchright on every signal measured. It is
 about 30 to 35 percent faster per cold fetch. It does not beat Patchright on
 detection. The remaining failures come from the host (no GPU, headless mode),
@@ -164,8 +176,14 @@ the same.
   browsers). The driver finds Chromium without starting Playwright.
 - CLI entry points: `webskrap fetch --driver cdp` and
   `webskrap browser open --driver cdp`. The MCP server, `search`, and
-  `WebSkrapClient` still use Patchright. On a `cdp` session, `snapshot` and
-  element actions raise `usage` until stage 3b.
+  `WebSkrapClient` still use Patchright.
+- The CDP snapshot leaves out `generic` wrappers and Playwright's
+  `[cursor=pointer]` marks, so it is about a third shorter. It does not
+  descend into iframes; an iframe is listed as one node. Roles and names
+  cover the ARIA implicit-role table and the common accessible-name rules,
+  not the full specification.
+- Element targets are refs or CSS selectors. As in Playwright's strict mode,
+  a CSS selector that matches several elements is refused; use a ref.
 - Session waits take CSS selectors only. A `networkidle` wait on an already
   loaded page means 500 ms with no request in flight that the command saw
   start and no new resource-timing entry, because the live lifecycle event
