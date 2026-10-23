@@ -80,6 +80,28 @@ Public demos (the targets of the live test suite), same wait for both drivers:
 | bot.sannysoft.com | virtual display | WebGL vendor and renderer fail | same |
 | bot.incolumitas.com | virtual display | `WEBDRIVER` fails | same |
 
+Protected pages (`scripts/driver_parity.py`), 3 fresh-profile runs per driver
+and mode, 30 to 90 s per run. Runs alternate which driver goes first.
+
+| Target | Mode | Patchright | CDP |
+| --- | --- | --- | --- |
+| Cloudflare challenge (scrapingcourse.com, 2 pages), wait only | headless, virtual display | 0/3 each, checkbox stays | same |
+| Same, with a checkbox click (`--click`) | headless | 0/3 each, checkbox returns | same |
+| Same, with a checkbox click (`--click`) | virtual display | 3/3 each, median 8.8 s | 3/3 each, median 7.3 to 8.2 s |
+| Cloudflare Turnstile (peet.ws) | headless, virtual display | 3/3 token | 3/3 token |
+| reCAPTCHA v3 demo | headless, virtual display | 3/3, score 0.9 | 3/3, score 0.9 |
+| DataDome-protected form (local test) | headless, virtual display | 3/3 captcha, 0 blocked | 3/3 captcha, 0 blocked |
+
+On this datacenter (VPS) IP, DataDome always shows its captcha; the IP
+reputation alone triggers it. So the captcha counts as a pass here, and only
+the hard block (`t=bv`) counts as a failure. The hard block never appeared.
+The captcha is not solved.
+
+Cloudflare needs the "Verify you are human" checkbox clicked; waiting alone
+never clears it. `--click` moves both drivers along the same curved path
+through CDP input events. The click clears the challenge in a headed
+browser on a virtual display, but not in headless mode.
+
 Result: the CDP driver matches Patchright on every signal measured. It is
 about 30 to 35 percent faster per cold fetch. It does not beat Patchright on
 detection. The remaining failures come from the host (no GPU, headless mode),
@@ -111,8 +133,12 @@ the same.
 
 ## Conditions for more work
 
-- Stage 3 is worth it if the parity holds on more targets, for example
-  Cloudflare and DataDome sites, over several runs.
+- Parity held on Cloudflare and DataDome over 3 runs per mode (stage 2 gate
+  met). On this datacenter host, neither driver clears the Cloudflare
+  challenge pages without a click or in headless mode, and DataDome always
+  shows its captcha (expected from the IP). So stage 3 gains speed and
+  control, not stealth. A residential IP or a GPU host is the next lever for
+  detection.
 - Proxy credentials need `Fetch.authRequired`. That pauses every request, so
   add it only when a user needs an authenticated proxy.
 - Consent dismissal needs click and locator primitives. They come with stage 3.
