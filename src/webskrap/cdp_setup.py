@@ -157,19 +157,34 @@ def _strings(entry: dict[str, Any], *keys: str) -> bool:
 
 
 def _valid_cookie(cookie: object) -> bool:
+    if not isinstance(cookie, dict) or not _strings(cookie, "name", "value", "domain"):
+        return False
+    expires = cookie.get("expires", -1)
     return (
-        isinstance(cookie, dict)
-        and _strings(cookie, "name", "value", "domain")
-        and isinstance(cookie.get("path", "/"), str)
+        isinstance(cookie.get("path", "/"), str)
+        and all(isinstance(cookie.get(key, False), bool) for key in ("secure", "httpOnly"))
+        and isinstance(expires, int | float)
+        and not isinstance(expires, bool)
+        and cookie.get("sameSite", "Lax") in ("Strict", "Lax", "None")
     )
 
 
 def _valid_origin(origin: object) -> bool:
     if not isinstance(origin, dict) or not _strings(origin, "origin"):
         return False
+    try:
+        url = urlsplit(origin["origin"])
+        _ = url.port  # raises on an invalid port
+    except ValueError:
+        return False
     items = origin.get("localStorage", [])
     return (
-        urlsplit(origin["origin"]).scheme in ("http", "https")
+        url.scheme in ("http", "https")
+        and bool(url.hostname)
+        and url.username is None
+        and url.path in ("", "/")
+        and not url.query
+        and not url.fragment
         and isinstance(items, list)
         and all(isinstance(item, dict) and _strings(item, "name", "value") for item in items)
     )

@@ -879,6 +879,11 @@ async def test_channel_fallback_remembers_a_channel_whose_page_failed() -> None:
         {"origins": [{"origin": "file:///etc", "localStorage": []}]},
         {"cookies": [{"name": ["not-a-string"], "value": "x", "domain": "a.test"}]},
         {"cookies": [{"name": "n", "value": "v"}]},
+        {"cookies": [{"name": "n", "value": "v", "domain": "a.test", "secure": "false"}]},
+        {"cookies": [{"name": "n", "value": "v", "domain": "a.test", "sameSite": "lax"}]},
+        {"origins": [{"origin": "https://", "localStorage": []}]},
+        {"origins": [{"origin": "https:example.com", "localStorage": []}]},
+        {"origins": [{"origin": "https://a.test:99999", "localStorage": []}]},
         ["not", "an", "object"],
     ],
 )
@@ -911,3 +916,26 @@ async def test_channel_fallback_retries_cdp_startup_failures(message: str) -> No
 
     assert await with_channel_fallback(run, SessionConfig(channel="chrome")) == "msedge"
     assert attempts == ["chrome", "msedge"]
+
+
+def test_a_real_playwright_storage_state_is_accepted() -> None:
+    from webskrap.cdp_setup import load_storage_state
+
+    state = {
+        "cookies": [
+            {
+                "name": "sid",
+                "value": "1",
+                "domain": ".a.test",
+                "path": "/",
+                "expires": 1893456000.5,
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ],
+        "origins": [
+            {"origin": "https://a.test:8443", "localStorage": [{"name": "k", "value": "v"}]}
+        ],
+    }
+    assert load_storage_state(state) is state
