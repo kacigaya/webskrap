@@ -18,15 +18,17 @@ from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
 
-from patchright.async_api import Page
-
 from webskrap import browser_session
+from webskrap.browser_session import SessionPage
+from webskrap.cdp_fetch import fetch as cdp_fetch
+from webskrap.cdp_fetch import search as cdp_search
 from webskrap.client import WebSkrapClient, WebSkrapError, with_channel_fallback
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
 from webskrap.fetch_runtime import FetchRuntime
 from webskrap.models import (
     BrowserProfile,
+    FetchDriver,
     FetchResult,
     GpuBackend,
     SearchResult,
@@ -38,6 +40,7 @@ from webskrap.models import (
 from webskrap.parsing import (
     parse_element_state,
     parse_engine,
+    parse_fetch_driver,
     parse_load_state,
     parse_resource_policy,
     parse_wait_until,
@@ -169,7 +172,11 @@ async def _run_fetch(
     session: str | None,
     ctx: Context | None,
     ready_selector: str | None = None,
+    driver: FetchDriver = "patchright",
 ) -> FetchResult:
+    if driver == "cdp" and session is not None:
+        msg = "warm fetch sessions need driver='patchright'; omit session with driver='cdp'"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
     if ctx is None and session is not None:
         raise WebSkrapError("fetch sessions require the MCP lifespan", code=ErrorCode.USAGE)
     runtime = None if ctx is None else ctx.request_context.lifespan_context
@@ -186,6 +193,9 @@ async def _run_fetch(
             "decline_cookies": resolved.decline_cookies,
             "ready_selector": ready_selector,
         }
+        if driver == "cdp":
+            del fetch_options["decline_cookies"]
+            return await cdp_fetch(url, config=resolved, profile=profile, **fetch_options)
         if not isinstance(runtime, FetchRuntime):
             # Direct Python tool calls retain their one-shot lifecycle.
             async with WebSkrapClient() as client:
@@ -299,12 +309,13 @@ async def stealth_fetch(
     text_only: bool = True,
     include_links: bool = False,
     max_links: int = 50,
-    decline_cookies: bool = True,
+    decline_cookies: bool | None = None,
     *,
     ready_selector: str | None = None,
     wait_until: str = "domcontentloaded",
     resource_policy: str = "all",
     session: str | None = None,
+    driver: str = "patchright",
     ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Fetch a URL with the Patchright stealth driver (CDP-leak-free).
@@ -343,17 +354,22 @@ async def stealth_fetch(
         include_links: Also return the page's outbound links.
         max_links: How many links to return; links_total counts them all.
         decline_cookies: Click a cookie consent notice's reject button after
-            load, so the banner does not bury the page text.
+            load, so the banner does not bury the page text. Default on for
+            the patchright driver; the cdp driver does not support it.
         wait_until: commit, domcontentloaded (default), load, or networkidle.
         resource_policy: all, lite (block images/fonts/media), or documents.
         ready_selector: Optional Playwright selector that must be visible before
             extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
+            Patchright only.
+        driver: patchright (default), or cdp: WebSkrap's own experimental
+            driver, which needs no Playwright and takes CSS ready_selector only.
         ctx: Server-injected request context.
     """
     with _tool_errors():
         url = await validate_mcp_url(url)
+        selected_driver = parse_fetch_driver(driver)
         config = SessionConfig(
             driver="patchright",
             channel=channel,
@@ -368,7 +384,9 @@ async def stealth_fetch(
             gpu=gpu,
             fake_media_devices=fake_media_devices,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
-            decline_cookies=decline_cookies,
+            decline_cookies=(
+                selected_driver == "patchright" if decline_cookies is None else decline_cookies
+            ),
             resource_policy=parse_resource_policy(resource_policy),
         )
         result = await _run_fetch(
@@ -383,6 +401,7 @@ async def stealth_fetch(
             session=session,
             ctx=ctx,
             ready_selector=ready_selector,
+            driver=selected_driver,
         )
         return shape_fetch_result(result, max_chars, offset)
 
@@ -421,7 +440,8 @@ async def search(
     fake_media_devices: bool = False,
     webrtc_ip_handling_policy: str | None = None,
     timeout_ms: float = 90_000,
-    decline_cookies: bool = True,
+    decline_cookies: bool | None = None,
+    driver: str = "patchright",
 ) -> dict[str, Any]:
     """Search the web and return the organic hits as title, url and snippet.
 
@@ -458,9 +478,13 @@ async def search(
             disable_non_proxied_udp.
         timeout_ms: Navigation timeout in milliseconds.
         decline_cookies: Click a cookie consent notice's reject button on the
-            results page before reading it.
+            results page before reading it. Default on for the patchright
+            driver; the cdp driver does not support it.
+        driver: patchright (default), or cdp: WebSkrap's own experimental
+            driver.
     """
     with _tool_errors():
+        selected_driver = parse_fetch_driver(driver)
         config = SessionConfig(
             driver="patchright",
             channel=channel,
@@ -475,12 +499,23 @@ async def search(
             gpu=gpu,
             fake_media_devices=fake_media_devices,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
-            decline_cookies=decline_cookies,
+            decline_cookies=(
+                selected_driver == "patchright" if decline_cookies is None else decline_cookies
+            ),
         )
         selected_engine = parse_engine(engine)
         selected_profile = get_profile(profile)
 
         async def attempt(resolved: SessionConfig) -> SearchResult:
+            if selected_driver == "cdp":
+                return await cdp_search(
+                    query,
+                    engine=selected_engine,
+                    max_results=max_results,
+                    profile=selected_profile,
+                    config=resolved,
+                    timeout_ms=timeout_ms,
+                )
             async with WebSkrapClient() as client:
                 return await client.search(
                     query,
@@ -536,7 +571,7 @@ def _tool_errors() -> Iterator[None]:
 
 async def _browser_action(
     session: str,
-    action: Callable[[Page], Awaitable[T]],
+    action: Callable[[SessionPage], Awaitable[T]],
     timeout_ms: float,
 ) -> T:
     """Run a page action, reporting failures as code-tagged one-liners."""
@@ -553,6 +588,7 @@ async def browser_open(
     session: str = "default",
     webrtc_ip_handling_policy: str | None = None,
     fake_media_devices: bool = False,
+    driver: str | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent headless browser session.
 
@@ -577,6 +613,10 @@ async def browser_open(
             addresses out of WebRTC candidates. Fixed at launch; reopening a
             running session with a different policy is refused.
         fake_media_devices: Supply Chromium's synthetic camera and microphone.
+        driver: How later browser_* calls attach: patchright (the default for
+            a new session) or cdp, WebSkrap's own experimental driver, which
+            takes snapshot refs or CSS selectors only. Fixed for the session's
+            lifetime; None keeps a running session's driver.
     """
     with _tool_errors():
         if url is not None:
@@ -586,6 +626,7 @@ async def browser_open(
             headless=True,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             fake_media_devices=fake_media_devices,
+            driver=None if driver is None else parse_fetch_driver(driver),
         )
     if url:
         payload.update(
@@ -703,7 +744,7 @@ async def browser_interact(
     with _tool_errors():
         browser_session.element_arguments(action, resolved_values)
 
-    async def run(page: Page) -> dict[str, Any]:
+    async def run(page: SessionPage) -> dict[str, Any]:
         await browser_session.element_action(page, action, target, resolved_values)
         return await browser_session.page_state(page)
 
@@ -726,9 +767,8 @@ async def browser_press(
         timeout_ms: Action timeout in milliseconds.
     """
 
-    async def run(page: Page) -> dict[str, Any]:
-        await page.keyboard.press(key)
-        return await browser_session.page_state(page)
+    async def run(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.press(page, key)
 
     return await _browser_action(session, run, timeout_ms)
 
@@ -804,9 +844,8 @@ async def browser_screenshot(
     with _tool_errors():
         target = resolve_output_path(path)
 
-    async def run(page: Page) -> dict[str, Any]:
-        await page.screenshot(path=str(target), full_page=full_page)
-        return {**await browser_session.page_state(page), "path": str(target)}
+    async def run(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.screenshot(page, target, full_page=full_page)
 
     return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
 

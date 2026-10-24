@@ -9,6 +9,36 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Experimental CDP driver: `webskrap fetch --driver cdp` and
+  `webskrap.cdp_fetch.fetch()`. WebSkrap drives Chromium over its debugging
+  pipe with no Playwright, Patchright, or Node.js process. It never sends
+  `Runtime.enable` and runs page scripts in isolated worlds. Linux and macOS
+  only. See `docs/design/cdp-driver.md` for limits and measured results.
+- `scripts/compare_drivers.py` compares automation signals and fetch time of
+  the Patchright and CDP drivers on a local probe page.
+- `webskrap browser open --driver cdp`: persistent sessions on the CDP driver.
+  Later commands attach over a built-in WebSocket client. Every browser
+  command works, including `snapshot` with `eN` refs and the element actions
+  with human cursor paths and keystroke timing. Snapshots come from a DOM
+  walk in an isolated world; the Accessibility domain is not used, because
+  it leaves a measurable slowdown on the page.
+- `webskrap search --driver cdp`, and a `driver` argument on the MCP
+  `stealth_fetch`, `search` and `browser_open` tools. `decline_cookies`
+  defaults to on for Patchright only; asking for it on `cdp` is refused.
+- `scripts/driver_parity.py` runs both drivers on Cloudflare, Turnstile,
+  reCAPTCHA v3 and DataDome test pages, with screenshots, an opt-in
+  Turnstile checkbox click, and `--via session` to go through persistent
+  sessions.
+
+### Changed
+
+- `raise_for_challenge` accepts any object with an `evaluate` method, so both
+  drivers share one challenge check.
+- Session state records the driver. `browser open` refuses to reuse a running
+  session with a different driver, because snapshot refs do not carry over.
+
 ## [2.14.0] - 2026-10-23
 
 ### Added

@@ -23,6 +23,8 @@ from rich.table import Table
 
 from webskrap.browser_cli import browser_app
 from webskrap.browser_session import sandbox_enabled
+from webskrap.cdp_fetch import fetch as cdp_fetch
+from webskrap.cdp_fetch import search as cdp_search
 from webskrap.cli_output import (
     OutputFormat,
     fail,
@@ -41,6 +43,7 @@ from webskrap.errors import (
     is_sandbox_failure,
 )
 from webskrap.models import (
+    FetchDriver,
     FetchResult,
     GpuBackend,
     ResourcePolicy,
@@ -51,6 +54,7 @@ from webskrap.models import (
     shape_search_result,
 )
 from webskrap.parsing import (
+    parse_fetch_driver,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
@@ -204,6 +208,16 @@ def fetch_command(
         str | None,
         typer.Option("--channel", help="Browser channel for headless Patchright stealth."),
     ] = "chrome",
+    driver: Annotated[
+        str,
+        typer.Option(
+            "--driver",
+            help=(
+                "patchright, or cdp: WebSkrap's own experimental CDP driver. cdp takes "
+                "CSS ready selectors only and does not dismiss cookie notices."
+            ),
+        ),
+    ] = "patchright",
     user_data_dir: Annotated[
         Path | None,
         typer.Option("--user-data-dir", help="Persistent browser profile directory."),
@@ -269,12 +283,15 @@ def fetch_command(
         typer.Option("--resource-policy", help="Resource routing preset."),
     ] = ResourcePolicy.ALL,
     decline_cookies: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--decline-cookies/--no-decline-cookies",
-            help="Click the reject button of a cookie consent notice after load.",
+            help=(
+                "Click the reject button of a cookie consent notice after load. "
+                "Default on for patchright; cdp does not support it."
+            ),
         ),
-    ] = True,
+    ] = None,
     decline_cookies_timeout_ms: Annotated[
         float,
         typer.Option(
@@ -359,6 +376,7 @@ def fetch_command(
             url=url,
             profile=profile,
             channel=channel,
+            driver=driver,
             user_data_dir=user_data_dir,
             screenshot=screenshot,
             output=output,
@@ -394,6 +412,7 @@ async def _fetch(
     url: str,
     profile: str,
     channel: str | None,
+    driver: str,
     user_data_dir: Path | None,
     screenshot: Path | None,
     output: Path | None,
@@ -409,7 +428,7 @@ async def _fetch(
     ready_selector: str | None,
     timeout_ms: float,
     resource_policy: ResourcePolicy,
-    decline_cookies: bool,
+    decline_cookies: bool | None,
     decline_cookies_timeout_ms: float,
     patchright_context_profile: bool,
     reduce_fingerprint_surface: bool,
@@ -422,6 +441,7 @@ async def _fetch(
     webrtc_ip_handling_policy: str | None,
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
+    selected_driver = parse_cli_value(driver, parse_fetch_driver)
     selected_profile = get_profile(profile)
     config = SessionConfig(
         driver="patchright",
@@ -431,7 +451,11 @@ async def _fetch(
         user_data_dir=user_data_dir,
         navigation_timeout_ms=timeout_ms,
         resource_policy=resource_policy,
-        decline_cookies=decline_cookies,
+        # On by default for Patchright only: the CDP driver has no consent
+        # dismissal yet, so only an explicit request is refused there.
+        decline_cookies=(
+            selected_driver == "patchright" if decline_cookies is None else decline_cookies
+        ),
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
         patchright_context_profile=patchright_context_profile,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
@@ -449,6 +473,7 @@ async def _fetch(
         result = await _fetch_with_channel_fallback(
             config,
             parsed_output_format,
+            driver=selected_driver,
             url=url,
             profile=selected_profile,
             wait_until=parse_cli_value(wait_until, parse_wait_until),
@@ -519,6 +544,16 @@ def search_command(
         str | None,
         typer.Option("--channel", help="Browser channel for headless Patchright stealth."),
     ] = "chrome",
+    driver: Annotated[
+        str,
+        typer.Option(
+            "--driver",
+            help=(
+                "patchright, or cdp: WebSkrap's own experimental CDP driver, which does not "
+                "dismiss cookie notices."
+            ),
+        ),
+    ] = "patchright",
     user_data_dir: Annotated[
         Path | None,
         typer.Option("--user-data-dir", help="Persistent browser profile directory."),
@@ -536,12 +571,15 @@ def search_command(
         typer.Option("--resource-policy", help="Resource routing preset."),
     ] = ResourcePolicy.ALL,
     decline_cookies: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             "--decline-cookies/--no-decline-cookies",
-            help="Click the reject button of a cookie consent notice on the results page.",
+            help=(
+                "Click the reject button of a cookie consent notice on the results page. "
+                "Default on for patchright; cdp does not support it."
+            ),
         ),
-    ] = True,
+    ] = None,
     decline_cookies_timeout_ms: Annotated[
         float,
         typer.Option(
@@ -634,6 +672,7 @@ def search_command(
             max_results=max_results,
             profile=profile,
             channel=channel,
+            driver=driver,
             user_data_dir=user_data_dir,
             output_format=output_format,
             timeout_ms=timeout_ms,
@@ -660,11 +699,12 @@ async def _search(
     max_results: int,
     profile: str,
     channel: str | None,
+    driver: str,
     user_data_dir: Path | None,
     output_format: str,
     timeout_ms: float,
     resource_policy: ResourcePolicy,
-    decline_cookies: bool,
+    decline_cookies: bool | None,
     decline_cookies_timeout_ms: float,
     patchright_context_profile: bool,
     reduce_fingerprint_surface: bool,
@@ -677,6 +717,7 @@ async def _search(
     webrtc_ip_handling_policy: str | None,
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
+    selected_driver = parse_cli_value(driver, parse_fetch_driver)
     config = SessionConfig(
         driver="patchright",
         headless=True,
@@ -685,7 +726,10 @@ async def _search(
         user_data_dir=user_data_dir,
         navigation_timeout_ms=timeout_ms,
         resource_policy=resource_policy,
-        decline_cookies=decline_cookies,
+        # As with fetch: on by default for Patchright only.
+        decline_cookies=(
+            selected_driver == "patchright" if decline_cookies is None else decline_cookies
+        ),
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
         patchright_context_profile=patchright_context_profile,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
@@ -703,6 +747,7 @@ async def _search(
         result = await _with_channel_fallback(
             lambda resolved: _run_search(
                 resolved,
+                driver=selected_driver,
                 query=query,
                 engine=engine,
                 max_results=max_results,
@@ -746,12 +791,20 @@ def _fail_launch(exc: Exception, output_format: OutputFormat) -> NoReturn:
     fail(WebSkrapError(message, code=ErrorCode.BROWSER_LAUNCH), output_format)
 
 
-async def _run_fetch(config: SessionConfig, **kwargs: Any) -> FetchResult:
+async def _run_fetch(
+    config: SessionConfig, *, driver: FetchDriver = "patchright", **kwargs: Any
+) -> FetchResult:
+    if driver == "cdp":
+        return await cdp_fetch(config=config, **kwargs)
     async with WebSkrapClient() as client:
         return await client.fetch(config=config, **kwargs)
 
 
-async def _run_search(config: SessionConfig, **kwargs: Any) -> SearchResult:
+async def _run_search(
+    config: SessionConfig, *, driver: FetchDriver = "patchright", **kwargs: Any
+) -> SearchResult:
+    if driver == "cdp":
+        return await cdp_search(config=config, **kwargs)
     async with WebSkrapClient() as client:
         return await client.search(config=config, **kwargs)
 

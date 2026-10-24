@@ -819,8 +819,85 @@ def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
             "headless": True,
             "webrtc_ip_handling_policy": "disable_non_proxied_udp",
             "fake_media_devices": True,
+            "driver": None,
         }
     ]
+
+
+def test_browser_open_passes_a_validated_driver(monkeypatch: Any) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"session": name, "reused": False, "proxy_server": None}
+
+    monkeypatch.setattr(browser_session, "open_session", fake_open)
+    asyncio.run(mcp_server.browser_open(driver="cdp"))
+    assert calls[0]["driver"] == "cdp"
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_open(driver="selenium"))
+    assert "usage" in str(caught.value)
+
+
+def _fetch_result(url: str) -> Any:
+    from webskrap.models import FetchResult
+
+    return FetchResult(
+        url=url,
+        final_url=url,
+        status=200,
+        ok=True,
+        headers={},
+        text="body",
+        title="T",
+        cookies=[],
+        timings={"elapsed_ms": 1.0},
+    )
+
+
+def test_stealth_fetch_routes_driver_cdp(monkeypatch: Any) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_cdp_fetch(url: str, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return _fetch_result(url)
+
+    monkeypatch.setattr(mcp_server, "cdp_fetch", fake_cdp_fetch)
+    payload = asyncio.run(
+        mcp_server.stealth_fetch("https://example.com", channel="chromium", driver="cdp")
+    )
+    assert payload["text"] == "body"
+    # The default-on consent dismissal does not apply to the cdp driver.
+    assert calls[0]["config"].decline_cookies is False
+    assert "decline_cookies" not in calls[0]
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.stealth_fetch("https://example.com", driver="cdp", session="warm"))
+    assert "usage" in str(caught.value)
+
+
+def test_search_routes_driver_cdp(monkeypatch: Any) -> None:
+    from webskrap.models import SearchEngine, SearchResult
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake_cdp_search(query: str, **kwargs: Any) -> SearchResult:
+        calls.append({"query": query, **kwargs})
+        return SearchResult(
+            query=query,
+            engine=SearchEngine.BING,
+            url="https://www.bing.com/search?q=x",
+            final_url="https://www.bing.com/search?q=x",
+            status=200,
+            ok=True,
+            hits=[],
+            hits_total=0,
+            timings={"elapsed_ms": 1.0},
+        )
+
+    monkeypatch.setattr(mcp_server, "cdp_search", fake_cdp_search)
+    asyncio.run(mcp_server.search("x", channel="chromium", driver="cdp"))
+    assert calls[0]["query"] == "x"
+    assert calls[0]["config"].decline_cookies is False
 
 
 def test_browser_open_rejects_an_unknown_webrtc_policy() -> None:
