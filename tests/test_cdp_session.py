@@ -141,7 +141,8 @@ def test_page_order_keeps_creation_order_across_connections(tmp_path: Path) -> N
     # Later listings come back in any order; known pages keep their place.
     assert _ordered_pages(order, ["c", "a", "b"]) == ["b", "a", "c"]
     assert _ordered_pages(order, ["c", "b"]) == ["b", "c"]
-    assert order.stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":  # Windows has no POSIX mode bits
+        assert order.stat().st_mode & 0o777 == 0o600
     order.write_text("not json")
     assert _ordered_pages(order, ["x"]) == ["x"]
 
@@ -449,11 +450,17 @@ def test_cdp_session_drives_pages_across_reconnects(
     assert results["timed_out"] is ErrorCode.TIMEOUT
     mouse = results["mouse"]
     assert mouse.count("dblclick:0") == 1
-    # The drag starts on the word the double-click selected, so it becomes a
-    # native drag: the page sees dragstart and drop, and input keeps working.
-    assert "dragstart:1" in mouse
-    assert "drop:0" in mouse and "wheel:0" in mouse, " ".join(mouse)
-    assert mouse.index("drop:0") < mouse.index("wheel:0")
+    # The drag starts on the word the double-click selected. Whether that
+    # becomes a native drag depends on the platform (Linux Chromium: yes,
+    # macOS: no), but either way the gesture must end, with a drop or a
+    # mouseup, and later input must still reach the page.
+    events = " ".join(mouse)
+    drag = mouse[mouse.index("dblclick:0") + 1 :]
+    assert drag[0] == "mousedown:1", events
+    ends = [i for i, event in enumerate(drag) if event in ("drop:0", "mouseup:0")]
+    assert ends and "wheel:0" in drag and ends[0] < drag.index("wheel:0"), events
+    if sys.platform.startswith("linux"):
+        assert "dragstart:1" in drag and "drop:0" in drag, events
     assert results["popup"]["url"].endswith("/session-2")
     assert results["after_popup"]["url"].endswith("/session#part")
     assert results["gesture_popup"]["url"].endswith("?gesture")
