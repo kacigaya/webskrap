@@ -572,7 +572,7 @@ async def _find_in(page: CDPPage, target: str, group: str, world: int) -> list[_
         },
     )
     if "exceptionDetails" in result:
-        msg = f"'{target}' is not a valid CSS selector (the cdp driver takes CSS or refs)"
+        msg = f"'{target}' is not a valid CSS selector (targets are CSS selectors or snapshot refs)"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     # Properties of a grouped object belong to the same group.
     properties = await page.send(

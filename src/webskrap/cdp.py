@@ -52,7 +52,10 @@ EventHandler = Callable[[dict[str, Any]], None]
 MAX_MESSAGE_BYTES = 256 * 1024 * 1024
 CLOSE_TIMEOUT_S = 5.0
 _LOG_TAIL_BYTES = 4096
-_POSIX_ONLY = "the CDP driver needs Linux or macOS (posix_spawn with pipe descriptors)"
+_POSIX_ONLY = (
+    "the debugging pipe needs Linux or macOS (posix_spawn with pipe descriptors); "
+    "use transport='port'"
+)
 # Runs a caller's script the way Playwright's evaluate does, in one round trip.
 # The parse check (new Function only compiles) decides between a single
 # expression, whose function value is called with the argument, and statements
