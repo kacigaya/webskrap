@@ -875,6 +875,10 @@ async def test_channel_fallback_remembers_a_channel_whose_page_failed() -> None:
         {"cookies": "bad"},
         {"origins": [{"localStorage": []}]},
         {"origins": [{"origin": "https://a.test", "localStorage": "x"}]},
+        {"origins": [{"origin": "https://a.test", "localStorage": [1]}]},
+        {"origins": [{"origin": "file:///etc", "localStorage": []}]},
+        {"cookies": [{"name": ["not-a-string"], "value": "x", "domain": "a.test"}]},
+        {"cookies": [{"name": "n", "value": "v"}]},
         ["not", "an", "object"],
     ],
 )

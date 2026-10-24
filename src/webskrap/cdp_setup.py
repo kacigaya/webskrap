@@ -18,6 +18,7 @@ import base64
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from webskrap.cdp import CDPBrowser, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
@@ -137,19 +138,41 @@ def load_storage_state(state: Path | dict[str, Any]) -> dict[str, Any]:
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     cookies = state.get("cookies", [])
     origins = state.get("origins", [])
-    if (
-        not isinstance(cookies, list)
-        or not isinstance(origins, list)
-        or not all(isinstance(cookie, dict) for cookie in cookies)
-        or not all(
-            isinstance(origin, dict)
-            and isinstance(origin.get("origin"), str)
-            and isinstance(origin.get("localStorage", []), list)
-            for origin in origins
+    if not isinstance(cookies, list) or not isinstance(origins, list):
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    if not all(_valid_cookie(cookie) for cookie in cookies):
+        msg = "storage_state cookies need string name and value, and a domain"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    if not all(_valid_origin(origin) for origin in origins):
+        msg = (
+            "storage_state origins need an http(s) origin and localStorage entries "
+            "with string name and value"
         )
-    ):
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     return state
+
+
+def _strings(entry: dict[str, Any], *keys: str) -> bool:
+    return all(isinstance(entry.get(key), str) for key in keys)
+
+
+def _valid_cookie(cookie: object) -> bool:
+    return (
+        isinstance(cookie, dict)
+        and _strings(cookie, "name", "value", "domain")
+        and isinstance(cookie.get("path", "/"), str)
+    )
+
+
+def _valid_origin(origin: object) -> bool:
+    if not isinstance(origin, dict) or not _strings(origin, "origin"):
+        return False
+    items = origin.get("localStorage", [])
+    return (
+        urlsplit(origin["origin"]).scheme in ("http", "https")
+        and isinstance(items, list)
+        and all(isinstance(item, dict) and _strings(item, "name", "value") for item in items)
+    )
 
 
 def _cookie_param(cookie: dict[str, Any]) -> dict[str, Any]:
