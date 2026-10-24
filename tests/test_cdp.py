@@ -316,3 +316,38 @@ def test_the_core_imports_without_fcntl() -> None:
 
     # fcntl does not exist on Windows; importing the CLI must still work there.
     assert "fcntl" not in vars(cdp_module)
+
+
+def test_cli_search_driver_cdp_routes_to_the_cdp_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    from webskrap.models import SearchEngine, SearchResult
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake_search(query: str, **kwargs: Any) -> SearchResult:
+        calls.append({"query": query, **kwargs})
+        return SearchResult(
+            query=query,
+            engine=SearchEngine.BING,
+            url="https://www.bing.com/search?q=x",
+            final_url="https://www.bing.com/search?q=x",
+            status=200,
+            ok=True,
+            hits=[],
+            hits_total=0,
+            timings={"elapsed_ms": 1.0},
+        )
+
+    monkeypatch.setattr(cli, "cdp_search", fake_search)
+    result = CliRunner().invoke(cli.app, ["search", "x", "--driver", "cdp", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0]["query"] == "x"
+    assert calls[0]["config"].decline_cookies is False
+
+
+async def test_fetch_rejects_an_unknown_ready_state() -> None:
+    from webskrap.cdp_fetch import fetch
+
+    with pytest.raises(WebSkrapError) as error:
+        await fetch("https://example.com", ready_selector="body", ready_state="hidden")  # type: ignore[arg-type]
+    assert error.value.code is ErrorCode.USAGE

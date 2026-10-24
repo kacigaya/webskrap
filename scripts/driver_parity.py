@@ -23,13 +23,14 @@ import json
 import os
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from random import SystemRandom
 from typing import Any
+from uuid import uuid4
 
-from webskrap import SessionConfig, WebSkrapClient
+from webskrap import SessionConfig, WebSkrapClient, browser_session
 from webskrap.browser_session import sandbox_enabled
 from webskrap.cdp import find_executable, launch
 from webskrap.cdp_fetch import launch_args
@@ -235,6 +236,49 @@ async def _cdp(url: str, mode: str) -> AsyncIterator[Page]:
 
 DRIVERS = {"patchright": _patchright, "cdp": _cdp}
 
+
+def _via_session(driver: str) -> Callable[[str, str], AbstractAsyncContextManager[Page]]:
+    """Run a target through a persistent session, as `webskrap browser` does.
+
+    Every call attaches anew, like each CLI command or MCP tool call. Sessions
+    run headless or headed; a virtual display and clicks are not offered.
+    """
+
+    @asynccontextmanager
+    async def run(url: str, mode: str) -> AsyncIterator[Page]:
+        if mode == "virtual-display":
+            raise ValueError("sessions run headless or headed, not on a virtual display")
+        # A fresh name per run: cleanup deletes the session's data, so it must
+        # never reuse a session the operator opened.
+        name = f"parity-{driver}-{uuid4().hex[:12]}"
+        await browser_session.open_session(
+            name, headless=mode != "headed", driver="cdp" if driver == "cdp" else "patchright"
+        )
+        try:
+
+            async def act(action: Callable[[Any], Awaitable[Any]]) -> Any:
+                return await browser_session.run_page_action(name, action, timeout_ms=60_000)
+
+            await act(lambda page: browser_session.goto(page, url, "commit"))
+
+            async def evaluate(script: str) -> Any:
+                return await act(lambda page: browser_session.evaluate(page, script))
+
+            async def screenshot(path: Path) -> None:
+                await act(lambda page: browser_session.screenshot(page, path, full_page=False))
+
+            async def mouse(_kind: str, _x: float, _y: float) -> None:
+                raise NotImplementedError("--click is not offered with --via session")
+
+            yield Page(evaluate, screenshot, mouse)
+        finally:
+            browser_session.close_session(name, delete_data=True)
+
+    return run
+
+
+SESSION_DRIVERS = {driver: _via_session(driver) for driver in DRIVERS}
+
 # The widget box renders before the checkbox inside its iframe does.
 WIDGET_SETTLE_S = 3.0
 
@@ -266,6 +310,7 @@ async def run_once(
     wait_s: float,
     shot: Path | None = None,
     click: bool = False,
+    via: str = "launch",
 ) -> dict[str, Any]:
     url, check = TARGETS[target]
     started = time.monotonic()
@@ -275,7 +320,8 @@ async def run_once(
     challenged = False
     clicked = False
     try:
-        async with DRIVERS[driver](url, mode) as page:
+        drivers = SESSION_DRIVERS if via == "session" else DRIVERS
+        async with drivers[driver](url, mode) as page:
             while time.monotonic() - started < wait_s:
                 # A navigation can destroy the context mid-check; poll again.
                 with contextlib.suppress(Exception):
@@ -327,8 +373,18 @@ async def main() -> None:
         action="store_true",
         help="Click a Cloudflare Turnstile checkbox when a challenge shows it.",
     )
+    parser.add_argument(
+        "--via",
+        choices=("launch", "session"),
+        default="launch",
+        help="launch a browser per run, or go through a persistent session.",
+    )
     args = parser.parse_args()
-    modes = args.mode or ["headless", "virtual-display"]
+    if args.via == "session" and (args.click or "virtual-display" in (args.mode or [])):
+        parser.error("--via session runs headless or headed, without --click")
+    modes = args.mode or (
+        ["headless"] if args.via == "session" else ["headless", "virtual-display"]
+    )
     targets = args.target or list(TARGETS)
 
     results = []
@@ -344,7 +400,9 @@ async def main() -> None:
                         if args.screenshots
                         else None
                     )
-                    result = await run_once(driver, mode, target, args.wait, shot, click=args.click)
+                    result = await run_once(
+                        driver, mode, target, args.wait, shot, click=args.click, via=args.via
+                    )
                     results.append(result)
                     cleared = result["challenged"] and result["state"] == "passed"
                     print(

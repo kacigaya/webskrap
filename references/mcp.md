@@ -24,6 +24,12 @@ boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
 One-shot fetches do not share cookies between calls. Use a browser session when
 state must persist.
 
+`stealth_fetch`, `search` and `browser_open` take `driver`: `patchright`
+(default) or `cdp`, WebSkrap's own experimental driver (Linux and macOS). On
+`cdp`, selectors are snapshot refs or CSS, cookie notices are not dismissed,
+and `stealth_fetch` has no warm `session`. A session keeps the driver it was
+opened with; reopening it with the other one is refused.
+
 ## Keep results small
 
 - `max_chars` defaults to 8000 for fetch, snapshot, text, and eval tools.

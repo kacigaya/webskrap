@@ -21,7 +21,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from anyio import CancelScope
@@ -37,10 +37,13 @@ from webskrap.models import (
     GpuBackend,
     Link,
     ResourcePolicy,
+    SearchEngine,
+    SearchResult,
     SessionConfig,
     WaitUntil,
 )
 from webskrap.profiles import get_profile
+from webskrap.search import parse_results, search_url
 from webskrap.urls import validate_url
 
 #: Config fields this driver does not implement yet, with the value that means
@@ -76,9 +79,11 @@ _CONTENT_SCRIPT = """() => {
 }"""
 
 # Playwright's visibility rule: a non-empty box and not visibility:hidden.
-_VISIBLE_SCRIPT = """(selector) => {
+# With attached, any matching element is enough.
+_READY_SCRIPT = """({selector, attached}) => {
   const element = document.querySelector(selector);
   if (!element) return false;
+  if (attached) return true;
   const box = element.getBoundingClientRect();
   return box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== 'hidden';
 }"""
@@ -132,12 +137,15 @@ async def fetch(
     include_links: bool = False,
     max_links: int = 50,
     ready_selector: str | None = None,
+    ready_state: Literal["visible", "attached"] = "visible",
 ) -> FetchResult:
     """Fetch one URL in a throwaway Chromium driven over the CDP pipe.
 
     Arguments match :meth:`webskrap.client.WebSkrapClient.fetch`, except that
     ``ready_selector`` takes a CSS selector only (no Playwright ``text=`` or
     ``role=`` engines) and consent notices are not dismissed.
+    ``ready_state="attached"`` accepts a matching element that is not
+    visible, as :func:`search` needs for pages whose first element is hidden.
 
     Raises:
         WebSkrapError: ``usage`` for unsupported options or a bad selector,
@@ -149,6 +157,8 @@ async def fetch(
     url = validate_url(url)
     if ready_selector is not None and not ready_selector.strip():
         raise WebSkrapError("ready_selector cannot be blank", code=ErrorCode.USAGE)
+    if ready_state not in ("visible", "attached"):
+        raise WebSkrapError("ready_state must be visible or attached", code=ErrorCode.USAGE)
     resolved_profile = profile if isinstance(profile, BrowserProfile) else get_profile(profile)
     args, env = launch_args(config, resolved_profile)
     executable = find_executable(config.channel)
@@ -185,6 +195,7 @@ async def fetch(
             text_only=text_only,
             max_links=max_links if include_links else None,
             ready_selector=ready_selector,
+            ready_state=ready_state,
             started=started,
         )
     finally:
@@ -207,6 +218,7 @@ async def _fetch_page(
     text_only: bool,
     max_links: int | None,
     ready_selector: str | None,
+    ready_state: Literal["visible", "attached"],
     started: float,
 ) -> FetchResult:
     blocked = _BLOCKED_TYPES[config.resource_policy]
@@ -223,7 +235,7 @@ async def _fetch_page(
     status = int(status) if isinstance(status, int | float) else None
     await raise_for_challenge(page, headers)
     if ready_selector is not None:
-        await _wait_visible(page, ready_selector, timeout_s=timeout_s, headers=headers)
+        await _wait_ready(page, ready_selector, ready_state, timeout_s=timeout_s, headers=headers)
         await raise_for_challenge(page, headers)
 
     state = await page.evaluate(
@@ -277,13 +289,19 @@ async def _send_quietly(page: CDPPage, method: str, params: dict[str, Any]) -> N
         return
 
 
-async def _wait_visible(
-    page: CDPPage, selector: str, *, timeout_s: float, headers: dict[str, str]
+async def _wait_ready(
+    page: CDPPage,
+    selector: str,
+    state: Literal["visible", "attached"],
+    *,
+    timeout_s: float,
+    headers: dict[str, str],
 ) -> None:
     deadline = time.monotonic() + timeout_s
+    attached = state == "attached"
     while True:
         try:
-            if await page.evaluate(_VISIBLE_SCRIPT, selector):
+            if await page.evaluate(_READY_SCRIPT, {"selector": selector, "attached": attached}):
                 return
         except CDPError as exc:
             if "is not a valid selector" in str(exc):
@@ -293,7 +311,7 @@ async def _wait_visible(
         if time.monotonic() >= deadline:
             # A challenge can replace the page while readiness is pending.
             await raise_for_challenge(page, headers)
-            msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {selector} to be visible"
+            msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {selector} to be {state}"
             raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
         await asyncio.sleep(_READY_POLL_S)
 
@@ -324,3 +342,48 @@ async def _cookies(browser: CDPBrowser) -> list[dict[str, Any]]:
         }
         for cookie in result.get("cookies", [])
     ]
+
+
+async def search(
+    query: str,
+    *,
+    engine: SearchEngine = SearchEngine.BING,
+    max_results: int = 10,
+    config: SessionConfig | None = None,
+    profile: str | BrowserProfile | None = None,
+    timeout_ms: float | None = None,
+) -> SearchResult:
+    """Search on the CDP driver; see :meth:`webskrap.client.WebSkrapClient.search`.
+
+    Loads the engine's results page like :func:`fetch` and parses it with
+    :func:`webskrap.search.parse_results`, so challenge detection is shared.
+    It waits for a rendered body, which also outlasts Bing's cookie-less
+    interstitial. Consent notices are not dismissed on this driver.
+
+    Raises:
+        WebSkrapError: ``usage`` for a blank query or unsupported options,
+            ``blocked`` when the engine served a bot challenge.
+    """
+    url = search_url(engine, query)
+    page = await fetch(
+        url,
+        config=config,
+        profile=profile,
+        timeout_ms=timeout_ms,
+        # Attached, not visible, as Patchright's search waits: every results,
+        # no-results or challenge page renders something, not always visibly.
+        ready_selector="body > *",
+        ready_state="attached",
+    )
+    hits = parse_results(engine, page.text)
+    return SearchResult(
+        query=query,
+        engine=engine,
+        url=url,
+        final_url=page.final_url,
+        status=page.status,
+        ok=page.ok,
+        hits=hits[: max(0, max_results)],
+        hits_total=len(hits),
+        timings=page.timings,
+    )

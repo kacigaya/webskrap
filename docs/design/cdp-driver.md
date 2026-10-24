@@ -60,7 +60,7 @@ driver do not resolve in the other. Patchright stays the default.
    took 136 to 145 ms instead of 122 to 128 ms (median of 5, 4 runs).
    `Accessibility.disable` did not restore it, and it sometimes survived a
    navigation. A page can time that, so the domain stays unused.
-3. **3c: MCP and search.** Add a `driver` option to the MCP `browser_open`
+3. **3c: MCP and search. Done.** Add a `driver` option to the MCP `browser_open`
    tool and to `search`. Run `scripts/driver_parity.py` again with sessions.
 
 Each step ends with tests, the full pipeline, and a commit. Measure
@@ -148,6 +148,17 @@ deviceandbrowserinfo.com, snapshot, a human hover on a ref, then read the
 verdict. Both drivers report the same: `isBot` (headless mode) and weak
 signals, with no CDP, webdriver or Playwright flag.
 
+Protected pages through persistent sessions (stage 3c,
+`scripts/driver_parity.py --via session`), headless, 3 runs per driver; each
+poll is a fresh attach, as with CLI commands and MCP tool calls:
+
+| Target | Patchright | CDP |
+| --- | --- | --- |
+| Cloudflare Turnstile (peet.ws) | 3/3 token | 3/3 token |
+| reCAPTCHA v3 demo | 3/3, score 0.9 | 3/3, score 0.9 |
+| DataDome-protected form (local test) | 3/3 captcha, 0 blocked | 3/3 captcha, 0 blocked |
+| Cloudflare challenge, no click | 0/3, challenge stays | 0/3, challenge stays |
+
 Result: the CDP driver matches Patchright on every signal measured. It is
 about 30 to 35 percent faster per cold fetch. It does not beat Patchright on
 detection. The remaining failures come from the host (no GPU, headless mode),
@@ -174,9 +185,12 @@ the same.
   browser's native identity.
 - `PLAYWRIGHT_BROWSERS_PATH` is honored, including `0` (package-local
   browsers). The driver finds Chromium without starting Playwright.
-- CLI entry points: `webskrap fetch --driver cdp` and
-  `webskrap browser open --driver cdp`. The MCP server, `search`, and
-  `WebSkrapClient` still use Patchright.
+- Entry points: `--driver cdp` on `webskrap fetch`, `search` and
+  `browser open`, and `driver="cdp"` on the MCP `stealth_fetch`, `search` and
+  `browser_open` tools. `WebSkrapClient`, the MCP `fetch` tool and warm MCP
+  fetch sessions still use Patchright only.
+- DuckDuckGo answers both drivers with a bot challenge from this host's IP;
+  Bing serves results to both.
 - The CDP snapshot leaves out `generic` wrappers and Playwright's
   `[cursor=pointer]` marks, so it is about a third shorter. It does not
   descend into iframes; an iframe is listed as one node. Roles and names

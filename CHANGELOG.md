@@ -24,9 +24,13 @@ history, so they summarize each release rather than list every change.
   with human cursor paths and keystroke timing. Snapshots come from a DOM
   walk in an isolated world; the Accessibility domain is not used, because
   it leaves a measurable slowdown on the page.
+- `webskrap search --driver cdp`, and a `driver` argument on the MCP
+  `stealth_fetch`, `search` and `browser_open` tools. `decline_cookies`
+  defaults to on for Patchright only; asking for it on `cdp` is refused.
 - `scripts/driver_parity.py` runs both drivers on Cloudflare, Turnstile,
-  reCAPTCHA v3 and DataDome test pages, with screenshots and an opt-in
-  Turnstile checkbox click.
+  reCAPTCHA v3 and DataDome test pages, with screenshots, an opt-in
+  Turnstile checkbox click, and `--via session` to go through persistent
+  sessions.
 
 ### Changed
 
