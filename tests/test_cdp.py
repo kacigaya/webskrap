@@ -294,3 +294,20 @@ def test_find_executable_prefers_chrome_for_testing(
     monkeypatch.setenv("WEBSKRAP_BROWSERS_PATH", str(tmp_path))
 
     assert find_executable(None) == executable_in(tmp_path / f"chrome-156.0.8078.47-{key}", key)
+
+
+async def test_a_detached_session_loses_its_handlers() -> None:
+    connection, reader, _writer = _connection()
+    seen: list[str] = []
+    connection.on("Fetch.requestPaused", lambda _p: seen.append("page"), session_id="S1")
+    connection.on("Fetch.requestPaused", lambda _p: seen.append("other"), session_id="S2")
+    _feed(reader, {"method": "Target.detachedFromTarget", "params": {"sessionId": "S1"}})
+    for session in ("S1", "S2"):
+        _feed(reader, {"method": "Fetch.requestPaused", "sessionId": session, "params": {}})
+    connection.start()
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+    assert seen == ["other"]
+    assert all(key[0] != "S1" for key in connection._handlers)
+    await connection.close()

@@ -372,6 +372,12 @@ class CDPConnection:
         if not isinstance(method, str):
             return
         params = message.get("params", {})
+        if method == "Target.detachedFromTarget":
+            # A detached session sends nothing more; drop its handlers, or a
+            # long-lived browser keeps every closed page's handlers alive.
+            gone = params.get("sessionId")
+            for key in [key for key in self._handlers if key[0] == gone]:
+                del self._handlers[key]
         for handler in list(self._handlers.get((message.get("sessionId"), method), [])):
             try:
                 handler(params)
