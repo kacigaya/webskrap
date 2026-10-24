@@ -131,12 +131,14 @@ and mode, 30 to 90 s per run. Runs alternate which driver goes first.
 | Same, with a checkbox click (`--click`) | virtual display | 3/3 each, median 8.8 s | 3/3 each, median 7.3 to 8.2 s |
 | Cloudflare Turnstile (peet.ws) | headless, virtual display | 3/3 token | 3/3 token |
 | reCAPTCHA v3 demo | headless, virtual display | 3/3, score 0.9 | 3/3, score 0.9 |
-| DataDome-protected form (local test) | headless, virtual display | 3/3 captcha, 0 blocked | 3/3 captcha, 0 blocked |
+| DataDome-protected form (local test, `--datadome-url`) | headless, virtual display | same page as CDP every run | same page as Patchright every run |
 
-On this datacenter (VPS) IP, DataDome always shows its captcha; the IP
-reputation alone triggers it. So the captcha counts as a pass here, and only
-the hard block (`t=bv`) counts as a failure. The hard block never appeared.
-The captcha is not solved.
+DataDome answered both drivers the same way on every run. Screenshots show
+what that is on this datacenter (VPS) IP: an "access restricted" block page
+in headless mode, and the slider captcha with a headed browser. Both come
+from the same `/captcha/` iframe with `t=fe`, so the iframe URL cannot tell
+them apart; an earlier version of the parity script counted every run as a
+captcha and is corrected. The captcha is not solved.
 
 Cloudflare needs the "Verify you are human" checkbox clicked; waiting alone
 never clears it. `--click` moves both drivers along the same curved path
@@ -156,7 +158,7 @@ poll is a fresh attach, as with CLI commands and MCP tool calls:
 | --- | --- | --- |
 | Cloudflare Turnstile (peet.ws) | 3/3 token | 3/3 token |
 | reCAPTCHA v3 demo | 3/3, score 0.9 | 3/3, score 0.9 |
-| DataDome-protected form (local test) | 3/3 captcha, 0 blocked | 3/3 captcha, 0 blocked |
+| DataDome-protected form (local test) | same page as CDP every run | same page as Patchright every run |
 | Cloudflare challenge, no click | 0/3, challenge stays | 0/3, challenge stays |
 
 Result: the CDP driver matches Patchright on every signal measured. It is
@@ -219,8 +221,8 @@ the same.
 
 - Parity held on Cloudflare and DataDome over 3 runs per mode (stage 2 gate
   met). On this datacenter host, neither driver clears the Cloudflare
-  challenge pages without a click or in headless mode, and DataDome always
-  shows its captcha (expected from the IP). So stage 3 gains speed and
+  challenge pages without a click or in headless mode, and DataDome blocks
+  headless runs and shows its captcha to headed ones. So stage 3 gains speed and
   control, not stealth. A residential IP or a GPU host is the next lever for
   detection.
 - Proxy credentials need `Fetch.authRequired`. That pauses every request, so

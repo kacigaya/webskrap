@@ -8,6 +8,7 @@ built for bot and scraping tests.
 
 Run:  python scripts/driver_parity.py --runs 3
       python scripts/driver_parity.py --mode virtual-display --target turnstile
+      python scripts/driver_parity.py --datadome-url URL --target datadome --screenshots DIR
 If Chromium cannot use its OS sandbox on this host:
       WEBSKRAP_CHROMIUM_SANDBOX=0 python scripts/driver_parity.py
 Results are also written to .webskrap/reports/driver-parity.json.
@@ -68,16 +69,17 @@ _RECAPTCHA_CHECK = """(() => {
   return { state: score >= 0.5 ? 'passed' : 'challenge', detail: 'score ' + score };
 })()"""
 
-# DataDome serves its captcha and its hard block in the same iframe; the
-# iframe's t parameter tells them apart (bv = blocked, fe = captcha). The
-# captcha is never solved here: seeing it is a softer verdict than a block.
+# DataDome serves its slider captcha and its "access restricted" block from
+# the same /captcha/ iframe, and both can carry t=fe, so the page cannot tell
+# them apart: an explicit t=bv is reported as blocked, anything else as
+# "datadome" for the screenshot to settle. Nothing here solves a captcha.
 _DATADOME_CHECK = """(() => {
   for (const frame of document.querySelectorAll('iframe[src]')) {
     let url;
     try { url = new URL(frame.src); } catch { continue; }
     if (!url.hostname.endsWith('captcha-delivery.com')) continue;
     if (url.searchParams.get('t') === 'bv') return { state: 'blocked', detail: 'DataDome block' };
-    return { state: 'captcha', detail: 'DataDome captcha' };
+    return { state: 'datadome', detail: 'DataDome page: check the screenshot' };
   }
   if (document.readyState !== 'complete' || !document.title.trim())
     return { state: 'pending', detail: '' };
@@ -86,7 +88,7 @@ _DATADOME_CHECK = """(() => {
 
 # Verdicts that can still change while the page settles: a DataDome device
 # check can turn into the real page, so these end a run only after SETTLE_S.
-_SETTLING = {"captcha", "blocked"}
+_SETTLING = {"datadome", "blocked"}
 SETTLE_S = 8.0
 
 TARGETS: dict[str, tuple[str, str]] = {
@@ -327,7 +329,7 @@ async def run_once(
                 with contextlib.suppress(Exception):
                     verdict = await page.evaluate(check)
                 state = verdict.get("state")
-                challenged = challenged or state in ("challenge", "captcha")
+                challenged = challenged or state in ("challenge", "datadome")
                 if state == "passed":
                     break
                 if click and not clicked and state == "challenge":
@@ -362,7 +364,11 @@ async def main() -> None:
     parser.add_argument(
         "--mode", action="append", choices=("headless", "virtual-display", "headed")
     )
-    parser.add_argument("--target", action="append", choices=sorted(TARGETS))
+    parser.add_argument(
+        "--datadome-url",
+        help="Also run a DataDome-protected page you may test, as target 'datadome'.",
+    )
+    parser.add_argument("--target", action="append")
     parser.add_argument(
         "--screenshots",
         type=Path,
@@ -385,6 +391,12 @@ async def main() -> None:
     modes = args.mode or (
         ["headless"] if args.via == "session" else ["headless", "virtual-display"]
     )
+    if args.datadome_url:
+        # Taken at run time so no third-party site is named in the repository.
+        TARGETS["datadome"] = (args.datadome_url, _DATADOME_CHECK)
+    unknown = sorted(set(args.target or []) - set(TARGETS))
+    if unknown:
+        parser.error(f"unknown target(s): {', '.join(unknown)}")
     targets = args.target or list(TARGETS)
 
     results = []
@@ -413,7 +425,7 @@ async def main() -> None:
                         flush=True,
                     )
 
-    print("\nPassed runs per target and mode (captcha counted separately):")
+    print("\nPassed runs per target and mode (DataDome pages counted separately):")
     for target in targets:
         for mode in modes:
             parts = []
@@ -423,8 +435,8 @@ async def main() -> None:
                     for r in results
                     if (r["driver"], r["mode"], r["target"]) == (driver, mode, target)
                 ]
-                captcha = states.count("captcha")
-                extra = f" +{captcha} captcha" if captcha else ""
+                datadome = states.count("datadome")
+                extra = f" +{datadome} datadome" if datadome else ""
                 parts.append(f"{driver} {states.count('passed')}/{args.runs}{extra}")
             line = "  ".join(parts)
             print(f"  {target:13} {mode:15} {line}")
