@@ -670,3 +670,18 @@ def test_explicit_webrtc_policy_wins_behind_a_proxy() -> None:
 def test_no_proxy_leaves_webrtc_to_chromium() -> None:
     assert SessionConfig().effective_webrtc_ip_handling_policy() is None
     assert _webrtc_args(SessionConfig()) == []
+
+
+def test_headless_declares_a_mouse_unless_the_caller_sets_blink_settings() -> None:
+    flag = (
+        "--blink-settings=primaryHoverType=2,availableHoverTypes=2,"
+        "primaryPointerType=4,availablePointerTypes=4"
+    )
+    assert flag in SessionConfig(headless=True).browser_args()
+    # Headed and virtual-display browsers have a real pointer already.
+    assert flag not in SessionConfig(headless=False).browser_args()
+    assert flag not in SessionConfig(headless=True, virtual_display=True).browser_args()
+    custom = SessionConfig(launch_args=["--blink-settings=imagesEnabled=false"])
+    assert [a for a in custom.browser_args() if a.startswith("--blink-settings")] == [
+        "--blink-settings=imagesEnabled=false"
+    ]

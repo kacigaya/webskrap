@@ -420,6 +420,7 @@ class SessionConfig(BaseModel):
             self._automation_args()
             + self._accept_lang_args(native_profile)
             + self._screen_args()
+            + self._headless_pointer_args()
             + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
             + self._fake_media_args()
@@ -520,6 +521,19 @@ class SessionConfig(BaseModel):
         if profile is None or any(a.startswith("--accept-lang") for a in self.launch_args):
             return []
         return [f"--accept-lang={','.join(profile.navigator_languages)}"]
+
+    def _headless_pointer_args(self) -> list[str]:
+        # Headless Chromium has no input devices, so it reports hover "none"
+        # and a coarse pointer, which no desktop browser does. Declare a mouse,
+        # as Playwright did, unless the caller set its own blink settings.
+        if not self.launch_headless or any(
+            a.startswith("--blink-settings") for a in self.launch_args
+        ):
+            return []
+        return [
+            "--blink-settings=primaryHoverType=2,availableHoverTypes=2,"
+            "primaryPointerType=4,availablePointerTypes=4"
+        ]
 
     def _sandbox_args(self) -> list[str]:
         """Return the sandbox opt-out flag when sandboxing is disabled."""
