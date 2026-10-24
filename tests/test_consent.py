@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from conftest import set_page_content
@@ -152,3 +154,52 @@ def test_reject_text_pattern_matches_reject_labels(label: str) -> None:
 )
 def test_reject_text_pattern_ignores_other_labels(label: str) -> None:
     assert REJECT_TEXT_PATTERN.search(label) is None
+
+
+class _CrossSiteHandler(BaseHTTPRequestHandler):
+    """Serves a page whose consent iframe comes from another site."""
+
+    def do_GET(self) -> None:
+        port = self.server.server_address[1]
+        if self.path == "/consent-frame":
+            # The reject control renders after the first consent pass.
+            body = (
+                f'<template id="t"><button class="cc-deny" id="framed" {_RECORD}>No</button>'
+                "</template><script>setTimeout(() => document.body.append("
+                "document.getElementById('t').content.cloneNode(true)), 900)</script>"
+            )
+        else:
+            body = (
+                f'<iframe id="consent-frame" src="http://localhost:{port}/consent-frame"></iframe>'
+            )
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def log_message(self, *_args: object) -> None:
+        pass
+
+
+@pytest.mark.browser
+async def test_finds_a_late_button_in_a_cross_site_consent_iframe(
+    sandbox_supported: bool,
+) -> None:
+    # 127.0.0.1 and localhost are different sites, so the iframe runs out of
+    # process and is reported once, when auto-attach starts.
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _CrossSiteHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    config = SessionConfig(chromium_sandbox=sandbox_supported)
+    try:
+        async with WebSkrapClient(default_config=config) as client:
+            session = await client.session("cross-site")
+            page = await session.new_page()
+            await page.goto(
+                f"http://127.0.0.1:{server.server_port}/", wait_until="load", timeout_s=10
+            )
+            assert await decline_cookies(page, timeout_ms=1_000) == "cmp"
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+        server.server_close()

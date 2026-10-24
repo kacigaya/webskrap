@@ -867,3 +867,43 @@ async def test_channel_fallback_remembers_a_channel_whose_page_failed() -> None:
         with pytest.raises(RuntimeError, match="ERR_NAME_NOT_RESOLVED"):
             await with_channel_fallback(run, SessionConfig(channel="chrome"), exclusive=True)
     assert attempts == ["chrome", "msedge", "msedge"]
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"cookies": "bad"},
+        {"origins": [{"localStorage": []}]},
+        {"origins": [{"origin": "https://a.test", "localStorage": "x"}]},
+        ["not", "an", "object"],
+    ],
+)
+async def test_malformed_storage_state_is_a_usage_error_before_launch(monkeypatch, state) -> None:
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher)
+    config = SessionConfig.model_construct(**{**SessionConfig().__dict__, "storage_state": state})
+    with pytest.raises(WebSkrapError) as excinfo:
+        await client._create_session("state", config, get_profile(None))
+    assert excinfo.value.code is ErrorCode.USAGE
+    assert launcher.calls == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "browser exited during startup or closed the CDP pipe",
+        "browser did not report a DevTools port within 30s",
+        "browser did not answer over CDP within 30s",
+    ],
+)
+async def test_channel_fallback_retries_cdp_startup_failures(message: str) -> None:
+    attempts: list[str | None] = []
+
+    async def run(config: SessionConfig) -> str | None:
+        attempts.append(config.channel)
+        if config.channel == "chrome":
+            raise WebSkrapError(message, code=ErrorCode.BROWSER_LAUNCH)
+        return config.channel
+
+    assert await with_channel_fallback(run, SessionConfig(channel="chrome")) == "msedge"
+    assert attempts == ["chrome", "msedge"]

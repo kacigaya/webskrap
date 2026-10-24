@@ -263,6 +263,7 @@ def test_proxy_accepts_supported_schemes(server: str) -> None:
         pytest.param("ftp://proxy.test", id="unsupported-scheme"),
         pytest.param("HTTP://proxy.test", id="wrong-case"),
         pytest.param("", id="empty"),
+        pytest.param("http://user:secret@proxy.test:8080", id="userinfo"),
     ],
 )
 def test_proxy_requires_supported_scheme(server: str) -> None:

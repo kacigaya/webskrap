@@ -468,6 +468,9 @@ class CDPPage:
         self.default_timeout_s = 30.0
         self._events_enabled = False
         self._shared_world: int | None = None
+        #: Out-of-process iframes auto-attached to this page, by target id;
+        #: see :func:`webskrap.cdp_dom.frames`. None until auto-attach is on.
+        self.iframe_targets: dict[str, dict[str, Any]] | None = None
 
     async def send(
         self, method: str, params: Mapping[str, Any] | None = None, **kwargs: Any
@@ -521,7 +524,7 @@ class CDPPage:
                         and params.get("type") == "Document"
                     ),
                     # The response usually arrives before navigate returns.
-                    timeout_s=min(timeout_s, 5.0),
+                    timeout_s=min(5.0, max(0.0, deadline - time.monotonic())),
                     what="the document response",
                 )
             except WebSkrapError as exc:

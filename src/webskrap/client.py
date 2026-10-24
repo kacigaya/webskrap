@@ -891,6 +891,10 @@ class WebSkrapClient:
             env = config.browser_env(profile)
         except ValueError as exc:
             raise WebSkrapError(str(exc), code=ErrorCode.USAGE) from exc
+        # A persistent profile already carries its own state.
+        state = None
+        if config.storage_state is not None and config.user_data_dir is None:
+            state = cdp_setup.load_storage_state(config.storage_state)
         executable = find_executable(config.channel)
         if (
             config.mask_headless_user_agent
@@ -925,9 +929,8 @@ class WebSkrapClient:
                 timeout_s=config.timeout_ms / 1000,
             )
             browser.connection.default_timeout_s = config.default_timeout_ms / 1000
-            # A persistent profile already carries its own state.
-            if config.storage_state is not None and config.user_data_dir is None:
-                await cdp_setup.apply_storage_state(browser, config.storage_state)
+            if state is not None:
+                await cdp_setup.apply_storage_state(browser, state)
         except BaseException:
             with CancelScope(shield=True):
                 if browser is not None:

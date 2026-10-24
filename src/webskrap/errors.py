@@ -202,6 +202,10 @@ LAUNCH_FAILURE_MARKERS: tuple[str, ...] = (
     "is not found at",
     "webskrap install",
     "failed to launch",
+    # webskrap.cdp's own startup errors.
+    "browser exited during startup",
+    "did not report a devtools port",
+    "did not answer over cdp",
 )
 
 

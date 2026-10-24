@@ -98,11 +98,16 @@ class ProxyConfig(BaseModel):
         """Require a scheme Chromium accepts, so failures surface at config time.
 
         Raises:
-            ValueError: If the server has no http/https/socks4/socks5 scheme.
+            ValueError: If the server has no http/https/socks4/socks5 scheme,
+                or embeds ``user:password@``. That would put the password on
+                Chromium's command line, which other local users can read.
         """
         allowed_prefixes = ("http://", "https://", "socks4://", "socks5://")
         if not value.startswith(allowed_prefixes):
             msg = "proxy server must start with http://, https://, socks4://, or socks5://"
+            raise ValueError(msg)
+        if "@" in value.split("://", 1)[1].split("/", 1)[0]:
+            msg = "proxy server must not embed user:password@; set username and password"
             raise ValueError(msg)
         return value
 

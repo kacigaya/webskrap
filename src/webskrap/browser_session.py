@@ -440,17 +440,17 @@ def persistent_proxy_server(server: str) -> str:
         WebSkrapError: If ``server`` has no http/https/socks4/socks5 scheme or
             embeds credentials (``usage``).
     """
-    try:
-        ProxyConfig(server=server)
-    except ValueError as exc:
-        msg = "proxy server must start with http://, https://, socks4://, or socks5://"
-        raise WebSkrapError(msg, code=ErrorCode.USAGE) from exc
-    if "@" in server.split("://", 1)[1].split("/", 1)[0]:
+    if "@" in server.split("://", 1)[-1].split("/", 1)[0]:
         msg = (
             "persistent sessions cannot authenticate to a proxy: pass a proxy URL "
             "without user:password@"
         )
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    try:
+        ProxyConfig(server=server)
+    except ValueError as exc:
+        msg = "proxy server must start with http://, https://, socks4://, or socks5://"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE) from exc
     return server
 
 

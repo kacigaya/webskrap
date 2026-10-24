@@ -30,6 +30,9 @@ BLOCKED_TYPES: dict[ResourcePolicy, tuple[str, ...]] = {
     ResourcePolicy.DOCUMENTS: ("Image", "Font", "Media", "Stylesheet"),
 }
 
+_BLOCK_WORKERS = """if (navigator.serviceWorker) navigator.serviceWorker.register =
+  async () => { throw new DOMException('Service workers are blocked', 'SecurityError'); };"""
+
 # A blank document served for an origin while its localStorage is restored.
 _BLANK_PAGE = base64.b64encode(b"<!doctype html><title></title>").decode()
 
@@ -43,7 +46,11 @@ async def prepare_page(page: CDPPage, config: SessionConfig, profile: BrowserPro
     if not config.java_script_enabled:
         await page.send("Emulation.setScriptExecutionDisabled", {"value": True})
     if config.service_workers == "block":
+        # Bypassing only routes requests around existing workers. As in
+        # Playwright, registration is refused too; this is a page-visible
+        # patch, so it runs only for callers who ask for "block".
         await page.send("Network.setBypassServiceWorker", {"bypass": True})
+        await page.send("Page.addScriptToEvaluateOnNewDocument", {"source": _BLOCK_WORKERS})
     await _route(page, config)
 
 
@@ -125,8 +132,22 @@ def load_storage_state(state: Path | dict[str, Any]) -> dict[str, Any]:
         except (OSError, ValueError) as exc:
             msg = f"storage_state could not be read: {exc}"
             raise WebSkrapError(msg, code=ErrorCode.USAGE) from exc
+    msg = "storage_state must be an object with cookies and origins"
     if not isinstance(state, dict):
-        msg = "storage_state must be an object with cookies and origins"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    cookies = state.get("cookies", [])
+    origins = state.get("origins", [])
+    if (
+        not isinstance(cookies, list)
+        or not isinstance(origins, list)
+        or not all(isinstance(cookie, dict) for cookie in cookies)
+        or not all(
+            isinstance(origin, dict)
+            and isinstance(origin.get("origin"), str)
+            and isinstance(origin.get("localStorage", []), list)
+            for origin in origins
+        )
+    ):
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     return state
 

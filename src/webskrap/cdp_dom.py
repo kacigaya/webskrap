@@ -410,18 +410,10 @@ async def frames(page: CDPPage) -> list[Frame]:
     tree = await page.send("Page.getFrameTree")
     found.append(Frame(page, page, tree["frameTree"]["frame"].get("url", "")))
     await _add_child_frames(page, page, tree["frameTree"], 0.0, 0.0, found)
-    attached = page.record("Target.attachedToTarget")
-    try:
-        await page.send(
-            "Target.setAutoAttach",
-            {"autoAttach": True, "waitForDebuggerOnStart": False, "flatten": True},
-        )
-        # Existing iframe targets are reported right after the command.
-        await asyncio.sleep(0.05)
-        events = [params for _method, params in attached.events]
-    finally:
-        attached.stop()
-    for event in events:
+    targets = page.iframe_targets
+    if targets is None:
+        targets = await _start_auto_attach(page)
+    for event in list(targets.values()):
         info = event.get("targetInfo", {})
         if info.get("type") != "iframe":
             continue
@@ -435,6 +427,37 @@ async def frames(page: CDPPage) -> list[Frame]:
             subtree = await frame_page.send("Page.getFrameTree")
             await _add_child_frames(frame_page, page, subtree["frameTree"], *offset, found)
     return found
+
+
+async def _start_auto_attach(page: CDPPage) -> dict[str, dict[str, Any]]:
+    """Track ``page``'s out-of-process iframes from now on.
+
+    Chromium reports each iframe target once, when auto-attach starts or when
+    the iframe appears, so the registry outlives one :func:`frames` call: a
+    consent notice that renders into an existing iframe later is still found.
+    """
+    targets: dict[str, dict[str, Any]] = {}
+
+    def attached(params: dict[str, Any]) -> None:
+        info = params.get("targetInfo", {})
+        if info.get("type") == "iframe":
+            targets[info["targetId"]] = params
+
+    def detached(params: dict[str, Any]) -> None:
+        for target_id, event in list(targets.items()):
+            if event.get("sessionId") == params.get("sessionId"):
+                del targets[target_id]
+
+    page.connection.on("Target.attachedToTarget", attached, session_id=page.session_id)
+    page.connection.on("Target.detachedFromTarget", detached, session_id=page.session_id)
+    page.iframe_targets = targets
+    await page.send(
+        "Target.setAutoAttach",
+        {"autoAttach": True, "waitForDebuggerOnStart": False, "flatten": True},
+    )
+    # Existing iframe targets are reported right after the command.
+    await asyncio.sleep(0.05)
+    return targets
 
 
 async def _add_child_frames(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import threading
 from collections.abc import Iterator
@@ -33,6 +34,13 @@ setTimeout(() => {
 }, 200);
 </script></body></html>"""
 
+# Records the registration outcome in the DOM, where an isolated world reads it.
+SW_PAGE = b"""<html><body><script>
+navigator.serviceWorker.register('/sw.js').then(
+  () => { document.body.dataset.sw = 'registered'; },
+  () => { document.body.dataset.sw = 'refused'; });
+</script></body></html>"""
+
 IMAGE_PAGE = b'<html><title>Images</title><body><img src="/pixel.png">text</body></html>'
 
 EVALUATE_CASES = [
@@ -53,7 +61,13 @@ class _CDPHandler(_Handler):
     image_requests = 0
 
     def do_GET(self) -> None:
-        pages = {"/console-probe": CONSOLE_PROBE_PAGE, "/image-page": IMAGE_PAGE}
+        pages = {"/console-probe": CONSOLE_PROBE_PAGE, "/image-page": IMAGE_PAGE, "/sw": SW_PAGE}
+        if self.path == "/sw.js":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.end_headers()
+            self.wfile.write(b"self.addEventListener('fetch', () => {});")
+            return
         if self.path == "/csp":
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -207,3 +221,20 @@ async def test_port_transport_attaches_over_websocket(server: str, sandbox_suppo
     finally:
         await browser.close()
     assert browser.process.poll() is not None  # the browser process exited
+
+
+@pytest.mark.parametrize(("policy", "outcome"), [("allow", "registered"), ("block", "refused")])
+async def test_blocked_service_workers_cannot_register(
+    server: str, config: SessionConfig, policy: str, outcome: str
+) -> None:
+    async with WebSkrapClient(
+        default_config=config.model_copy(update={"service_workers": policy})
+    ) as client:
+        session = await client.session("workers")
+        page = await session.new_page()
+        await page.goto(f"{server}/sw", wait_until="load", timeout_s=20)
+        for _ in range(50):
+            if state := await page.evaluate("document.body.dataset.sw"):
+                break
+            await asyncio.sleep(0.1)
+        assert state == outcome
