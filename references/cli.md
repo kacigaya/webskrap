@@ -48,6 +48,15 @@ On Linux ARM64, the `chrome` channel may be unavailable. `fetch` retries a
 failed launch with bundled Chromium. Pass `--channel chromium` to avoid the
 first attempt.
 
+`fetch --driver cdp` and `search --driver cdp` use WebSkrap's own experimental
+CDP driver instead of Patchright. It needs Linux or macOS. It takes CSS ready selectors only and does
+not dismiss cookie notices. Unsupported options exit 2 (`usage`).
+
+```bash
+webskrap fetch https://example.com --driver cdp --channel chromium --text-only --stdout
+webskrap search "example domain" --driver cdp --format json
+```
+
 ## Persistent browser
 
 `webskrap browser open` launches detached Chromium. Later commands reconnect
@@ -76,6 +85,20 @@ a covered target; `fill` sets a value at once.
 Snapshot refs become stale when the DOM changes. Take another snapshot before
 retrying. `wait` accepts one condition. Do not guess when callers provide more
 than one.
+
+`browser open --driver cdp` makes every later command attach with WebSkrap's
+own experimental CDP driver instead of Patchright. The driver is fixed while
+the session runs; reopening with the other one exits 2 (`usage`). It needs
+Linux or macOS. Targets are snapshot refs or CSS selectors; Playwright
+selector engines such as `text=` do not work. Snapshot refs are stable while
+the element exists, also across commands.
+
+```bash
+webskrap browser open https://example.com --driver cdp
+webskrap browser snapshot
+webskrap browser click e15
+webskrap browser fill "input[name=q]" "playwright"
+```
 
 Sessions default to the name `default`. Profiles live below
 `~/.webskrap/browser/<name>/`, unless `WEBSKRAP_BROWSER_DIR` changes the root.

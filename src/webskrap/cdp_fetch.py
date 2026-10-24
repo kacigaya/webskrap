@@ -1,0 +1,389 @@
+"""One-shot page fetch on WebSkrap's own CDP driver (:mod:`webskrap.cdp`).
+
+:func:`fetch` returns the same :class:`~webskrap.models.FetchResult` as
+:meth:`webskrap.client.WebSkrapClient.fetch`, so callers and benchmarks can
+compare the two drivers directly. It launches Chromium with the flags a
+Patchright fetch gets, plus ``--disable-blink-features=AutomationControlled``,
+because no driver patch hides ``navigator.webdriver`` here.
+
+CDP domains used on the page: ``Page`` (navigation and lifecycle events),
+``Network`` (the main document's status and headers), ``Fetch`` (only when a
+resource policy blocks types, and then only for those types), and
+``Runtime.evaluate`` in isolated worlds. ``Runtime.enable`` is never sent.
+
+Unsupported :class:`~webskrap.models.SessionConfig` fields raise ``usage``
+instead of being silently ignored; see :data:`UNSUPPORTED_FIELDS`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import time
+from pathlib import Path
+from typing import Any, Literal
+from uuid import uuid4
+
+from anyio import CancelScope
+
+from webskrap.cdp import CDPBrowser, CDPError, CDPPage, find_executable, launch
+from webskrap.challenges import raise_for_challenge
+from webskrap.client import LINKS_SCRIPT, require_lavapipe
+from webskrap.display import VirtualDisplay
+from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.models import (
+    BrowserProfile,
+    FetchResult,
+    GpuBackend,
+    Link,
+    ResourcePolicy,
+    SearchEngine,
+    SearchResult,
+    SessionConfig,
+    WaitUntil,
+)
+from webskrap.profiles import get_profile
+from webskrap.search import parse_results, search_url
+from webskrap.urls import validate_url
+
+#: Config fields this driver does not implement yet, with the value that means
+#: "not requested". A config that sets any other value is rejected.
+UNSUPPORTED_FIELDS: dict[str, Any] = {
+    "browser": "chromium",
+    "storage_state": None,
+    "java_script_enabled": True,
+    "service_workers": "allow",
+    "slow_mo_ms": None,
+    "mask_headless_user_agent": False,
+    "patchright_focus_control": None,
+    "decline_cookies": False,
+    # Patchright's context profile also sets color scheme, reduced motion and
+    # extra headers in the browser context, which this driver has no
+    # equivalent for yet. Without it, both drivers ignore the profile alike.
+    "patchright_context_profile": False,
+}
+
+#: CDP resource types each policy blocks.
+_BLOCKED_TYPES: dict[ResourcePolicy, tuple[str, ...]] = {
+    ResourcePolicy.ALL: (),
+    ResourcePolicy.LITE: ("Image", "Font", "Media"),
+    ResourcePolicy.DOCUMENTS: ("Image", "Font", "Media", "Stylesheet"),
+}
+
+# Matches Playwright's page.content(): doctype plus the serialized document.
+_CONTENT_SCRIPT = """() => {
+  let html = '';
+  if (document.doctype) html = new XMLSerializer().serializeToString(document.doctype);
+  if (document.documentElement) html += document.documentElement.outerHTML;
+  return html;
+}"""
+
+# Playwright's visibility rule: a non-empty box and not visibility:hidden.
+# With attached, any matching element is enough.
+_READY_SCRIPT = """({selector, attached}) => {
+  const element = document.querySelector(selector);
+  if (!element) return false;
+  if (attached) return true;
+  const box = element.getBoundingClientRect();
+  return box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== 'hidden';
+}"""
+
+_READY_POLL_S = 0.1
+
+
+def launch_args(config: SessionConfig, profile: BrowserProfile) -> tuple[list[str], dict[str, str]]:
+    """Return the Chromium flags and environment for ``config``.
+
+    Reuses :meth:`SessionConfig.launch_options` in Patchright mode, so both
+    stealth drivers share one flag definition. Proxy settings become
+    ``--proxy-server`` and ``--proxy-bypass-list``.
+
+    Raises:
+        WebSkrapError: ``usage`` for unsupported fields or proxy credentials.
+    """
+    for name, default in UNSUPPORTED_FIELDS.items():
+        if getattr(config, name) != default:
+            msg = f"driver='cdp' does not support {name}={getattr(config, name)!r} yet"
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    if config.proxy is not None and (config.proxy.username or config.proxy.password):
+        msg = "driver='cdp' cannot authenticate to a proxy yet: pass a URL without credentials"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    try:
+        options = config.model_copy(update={"driver": "patchright"}).launch_options(profile)
+    except ValueError as exc:
+        raise WebSkrapError(str(exc), code=ErrorCode.USAGE) from exc
+    args = list(options.get("args", []))
+    if not any(arg.startswith("--disable-blink-features") for arg in args):
+        args.insert(0, "--disable-blink-features=AutomationControlled")
+    if config.proxy is not None:
+        args.append(f"--proxy-server={config.proxy.server}")
+        if config.proxy.bypass:
+            args.append(f"--proxy-bypass-list={config.proxy.bypass}")
+    if config.ignore_https_errors:
+        args.append("--ignore-certificate-errors")
+    env = dict(options.get("env") or {})
+    return args, env
+
+
+async def fetch(
+    url: str,
+    *,
+    config: SessionConfig | None = None,
+    profile: str | BrowserProfile | None = None,
+    wait_until: WaitUntil = "domcontentloaded",
+    screenshot: bool | str | Path = False,
+    timeout_ms: float | None = None,
+    text_only: bool = False,
+    include_links: bool = False,
+    max_links: int = 50,
+    ready_selector: str | None = None,
+    ready_state: Literal["visible", "attached"] = "visible",
+) -> FetchResult:
+    """Fetch one URL in a throwaway Chromium driven over the CDP pipe.
+
+    Arguments match :meth:`webskrap.client.WebSkrapClient.fetch`, except that
+    ``ready_selector`` takes a CSS selector only (no Playwright ``text=`` or
+    ``role=`` engines) and consent notices are not dismissed.
+    ``ready_state="attached"`` accepts a matching element that is not
+    visible, as :func:`search` needs for pages whose first element is hidden.
+
+    Raises:
+        WebSkrapError: ``usage`` for unsupported options or a bad selector,
+            ``browser_launch``/``sandbox`` when Chromium does not start,
+            ``navigation`` for a network error, ``timeout`` when a wait runs
+            out, and ``blocked`` for a recognized bot challenge.
+    """
+    config = config or SessionConfig()
+    url = validate_url(url)
+    if ready_selector is not None and not ready_selector.strip():
+        raise WebSkrapError("ready_selector cannot be blank", code=ErrorCode.USAGE)
+    if ready_state not in ("visible", "attached"):
+        raise WebSkrapError("ready_state must be visible or attached", code=ErrorCode.USAGE)
+    resolved_profile = profile if isinstance(profile, BrowserProfile) else get_profile(profile)
+    args, env = launch_args(config, resolved_profile)
+    executable = find_executable(config.channel)
+    started = time.perf_counter()
+
+    display: VirtualDisplay | None = None
+    browser: CDPBrowser | None = None
+    try:
+        if config.gpu is GpuBackend.MESA:
+            require_lavapipe()
+        if config.uses_virtual_display():
+            screen = config.virtual_screen()
+            display = await VirtualDisplay.start(screen.width, screen.height)
+            env = {**(env or os.environ), **display.env}
+        browser = await launch(
+            executable,
+            args=args,
+            headless=config.headless and not config.virtual_display,
+            user_data_dir=config.user_data_dir,
+            env=env or None,
+            timeout_s=config.timeout_ms / 1000,
+        )
+        browser.connection.default_timeout_s = config.default_timeout_ms / 1000
+        page = await browser.new_page()
+        page.default_timeout_s = config.default_timeout_ms / 1000
+        return await _fetch_page(
+            browser,
+            page,
+            url,
+            config=config,
+            wait_until=wait_until,
+            screenshot=screenshot,
+            timeout_s=(timeout_ms or config.navigation_timeout_ms) / 1000,
+            text_only=text_only,
+            max_links=max_links if include_links else None,
+            ready_selector=ready_selector,
+            ready_state=ready_state,
+            started=started,
+        )
+    finally:
+        with CancelScope(shield=True):
+            if browser is not None:
+                await browser.close()
+            if display is not None:
+                await display.stop()
+
+
+async def _fetch_page(
+    browser: CDPBrowser,
+    page: CDPPage,
+    url: str,
+    *,
+    config: SessionConfig,
+    wait_until: WaitUntil,
+    screenshot: bool | str | Path,
+    timeout_s: float,
+    text_only: bool,
+    max_links: int | None,
+    ready_selector: str | None,
+    ready_state: Literal["visible", "attached"],
+    started: float,
+) -> FetchResult:
+    blocked = _BLOCKED_TYPES[config.resource_policy]
+    if blocked:
+        _route_blocked(page)
+        await page.send(
+            "Fetch.enable",
+            {"patterns": [{"urlPattern": "*", "resourceType": kind} for kind in blocked]},
+        )
+
+    response = await page.goto(url, wait_until=wait_until, timeout_s=timeout_s)
+    headers = {str(key).lower(): str(value) for key, value in response.get("headers", {}).items()}
+    status = response.get("status")
+    status = int(status) if isinstance(status, int | float) else None
+    await raise_for_challenge(page, headers)
+    if ready_selector is not None:
+        await _wait_ready(page, ready_selector, ready_state, timeout_s=timeout_s, headers=headers)
+        await raise_for_challenge(page, headers)
+
+    state = await page.evaluate(
+        "({ url: location.href, title: document.title, text: document.body ? "
+        "document.body.innerText : '' })"
+    )
+    text = state["text"] if text_only else await page.evaluate(_CONTENT_SCRIPT)
+    links: list[Link] = []
+    links_total = 0
+    if max_links is not None:
+        collected = await page.evaluate(LINKS_SCRIPT, max_links)
+        links = [Link(**link) for link in collected["links"]]
+        links_total = int(collected["total"])
+    screenshot_path = await _screenshot(page, screenshot)
+    cookies = await _cookies(browser)
+    return FetchResult(
+        url=url,
+        final_url=state["url"],
+        status=status,
+        ok=status is not None and 200 <= status < 400,
+        headers=headers,
+        text=text,
+        title=state["title"],
+        cookies=cookies,
+        timings={"elapsed_ms": (time.perf_counter() - started) * 1000},
+        screenshot_path=screenshot_path,
+        links=links,
+        links_total=links_total,
+    )
+
+
+def _route_blocked(page: CDPPage) -> None:
+    """Fail every paused request; ``Fetch.enable`` pauses only blocked types."""
+    tasks: set[asyncio.Task[Any]] = set()
+
+    def on_paused(params: dict[str, Any]) -> None:
+        body = {"requestId": params["requestId"], "errorReason": "BlockedByClient"}
+        task = asyncio.create_task(_send_quietly(page, "Fetch.failRequest", body))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    page.connection.on("Fetch.requestPaused", on_paused, session_id=page.session_id)
+
+
+async def _send_quietly(page: CDPPage, method: str, params: dict[str, Any]) -> None:
+    # The page may navigate or close while a request is paused; its id is then
+    # gone and the browser answers with an error nobody needs.
+    try:
+        await page.send(method, params)
+    except WebSkrapError:
+        return
+
+
+async def _wait_ready(
+    page: CDPPage,
+    selector: str,
+    state: Literal["visible", "attached"],
+    *,
+    timeout_s: float,
+    headers: dict[str, str],
+) -> None:
+    deadline = time.monotonic() + timeout_s
+    attached = state == "attached"
+    while True:
+        try:
+            if await page.evaluate(_READY_SCRIPT, {"selector": selector, "attached": attached}):
+                return
+        except CDPError as exc:
+            if "is not a valid selector" in str(exc):
+                msg = f"ready_selector is not a valid CSS selector: {selector}"
+                raise WebSkrapError(msg, code=ErrorCode.USAGE) from exc
+            # A navigation destroyed the world mid-call; poll again.
+        if time.monotonic() >= deadline:
+            # A challenge can replace the page while readiness is pending.
+            await raise_for_challenge(page, headers)
+            msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {selector} to be {state}"
+            raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
+        await asyncio.sleep(_READY_POLL_S)
+
+
+async def _screenshot(page: CDPPage, screenshot: bool | str | Path) -> Path | None:
+    if not screenshot:
+        return None
+    path = Path(f"webskrap-{uuid4().hex}.png") if screenshot is True else Path(screenshot)
+    image = await page.screenshot(full_page=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(path.write_bytes, image)
+    return path
+
+
+async def _cookies(browser: CDPBrowser) -> list[dict[str, Any]]:
+    """Return every cookie in the browser, shaped like Playwright's ``cookies()``."""
+    result = await browser.connection.send("Storage.getCookies")
+    return [
+        {
+            "name": cookie["name"],
+            "value": cookie["value"],
+            "domain": cookie["domain"],
+            "path": cookie["path"],
+            "expires": -1 if cookie.get("session") else cookie.get("expires", -1),
+            "httpOnly": cookie.get("httpOnly", False),
+            "secure": cookie.get("secure", False),
+            "sameSite": cookie.get("sameSite", "Lax"),
+        }
+        for cookie in result.get("cookies", [])
+    ]
+
+
+async def search(
+    query: str,
+    *,
+    engine: SearchEngine = SearchEngine.BING,
+    max_results: int = 10,
+    config: SessionConfig | None = None,
+    profile: str | BrowserProfile | None = None,
+    timeout_ms: float | None = None,
+) -> SearchResult:
+    """Search on the CDP driver; see :meth:`webskrap.client.WebSkrapClient.search`.
+
+    Loads the engine's results page like :func:`fetch` and parses it with
+    :func:`webskrap.search.parse_results`, so challenge detection is shared.
+    It waits for a rendered body, which also outlasts Bing's cookie-less
+    interstitial. Consent notices are not dismissed on this driver.
+
+    Raises:
+        WebSkrapError: ``usage`` for a blank query or unsupported options,
+            ``blocked`` when the engine served a bot challenge.
+    """
+    url = search_url(engine, query)
+    page = await fetch(
+        url,
+        config=config,
+        profile=profile,
+        timeout_ms=timeout_ms,
+        # Attached, not visible, as Patchright's search waits: every results,
+        # no-results or challenge page renders something, not always visibly.
+        ready_selector="body > *",
+        ready_state="attached",
+    )
+    hits = parse_results(engine, page.text)
+    return SearchResult(
+        query=query,
+        engine=engine,
+        url=url,
+        final_url=page.final_url,
+        status=page.status,
+        ok=page.ok,
+        hits=hits[: max(0, max_results)],
+        hits_total=len(hits),
+        timings=page.timings,
+    )

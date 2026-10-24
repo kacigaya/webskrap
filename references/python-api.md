@@ -41,6 +41,18 @@ config = SessionConfig(
 )
 ```
 
+`webskrap.cdp_fetch.fetch()` is an experimental one-shot fetch on WebSkrap's
+own CDP driver. It takes the same arguments as `client.fetch()` and returns the
+same `FetchResult`. It needs Linux or macOS. `ready_selector` must be CSS, and
+consent notices are not dismissed. Fields in `UNSUPPORTED_FIELDS` raise `usage`.
+
+```python
+from webskrap import SessionConfig
+from webskrap.cdp_fetch import fetch
+
+result = await fetch("https://example.com", config=SessionConfig(channel="chromium"))
+```
+
 ## Consent and links
 
 `client.fetch()` and `session.fetch()` accept `ready_selector`, an optional

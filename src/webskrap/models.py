@@ -33,6 +33,9 @@ WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 LoadState = Literal["domcontentloaded", "load", "networkidle"]
 #: Element state :func:`~webskrap.browser_session.wait_for` can wait on.
 ElementState = Literal["attached", "detached", "visible", "hidden"]
+#: Driver a CLI fetch runs on: Patchright, or WebSkrap's own CDP driver
+#: (:mod:`webskrap.cdp_fetch`, experimental).
+FetchDriver = Literal["patchright", "cdp"]
 
 
 class ResourcePolicy(StrEnum):
