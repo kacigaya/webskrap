@@ -69,3 +69,5 @@ as `text=` and `role=` do not work.
 - `webskrap install` no longer runs `playwright install`. A browser that 2.x
   downloaded with Playwright is still found.
 - Launch errors do not contain Playwright call logs. Error codes are the same.
+- `ProxyConfig(server="http://user:pass@host")` is refused. Use
+  `ProxyConfig(server="http://host", username="user", password="pass")`.

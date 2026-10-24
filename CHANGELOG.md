@@ -35,6 +35,8 @@ WebSkrap 3.0 drives Chromium only through its own CDP client. Read
 - `scripts/driver_parity.py` compares the client path with the bare CDP core.
 - Headless launches declare a mouse with `--blink-settings`, as Playwright
   did, so pages see hover and a fine pointer.
+- `ProxyConfig.server` refuses `user:password@`. Set `username` and
+  `password` instead, so the password never reaches Chromium's command line.
 
 ### Removed
 
