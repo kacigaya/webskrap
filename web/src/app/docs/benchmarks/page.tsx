@@ -63,7 +63,7 @@ const FEATURE_COLUMNS = [
   "undetected-chromedriver",
   "Camoufox",
   "CloakBrowser",
-  "WebSkrap patchright",
+  "WebSkrap",
 ];
 
 const FEATURE_ROWS: { feature: string; values: string[] }[] = [
@@ -83,12 +83,12 @@ const FEATURE_ROWS: { feature: string; values: string[] }[] = [
       "Config patches",
       "C++ (Firefox)",
       "C++ (Chromium)",
-      "Patchright driver + native Chrome options",
+      "Own CDP client + native Chrome options",
     ],
   },
   {
     feature: "Survives Chrome updates",
-    values: ["N/A", "Breaks often", "Breaks often", "Yes", "Yes", "Depends on Chrome + Patchright"],
+    values: ["N/A", "Breaks often", "Breaks often", "Yes", "Yes", "Yes (stock Chrome, no patched driver)"],
   },
   {
     feature: "Maintained",
@@ -100,7 +100,7 @@ const FEATURE_ROWS: { feature: string; values: string[] }[] = [
   },
   {
     feature: "Playwright API",
-    values: ["Native", "Native", "No (Selenium)", "No", "Native", "Native-compatible"],
+    values: ["Native", "Native", "No (Selenium)", "No", "Native", "No (own Python API)"],
   },
 ];
 
@@ -264,7 +264,7 @@ export default function BenchmarksPage() {
               WEBSKRAP_LIVE_GPU=mesa WEBSKRAP_CHROMIUM_SANDBOX=0 xvfb-run -a python
               scripts/live_stealth_report.py --no-open --report-only
             </code>
-            . Both suites ran Patchright with Chromium 153 on ARM64 Linux with no GPU
+            . Both suites ran WebSkrap 2.x on Patchright with Chromium 153 on ARM64 Linux with no GPU
             and no proxy, rendering WebGL through Mesa lavapipe. The headed suite ran under{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">xvfb-run</code>; the
             headless suite used{" "}
@@ -277,7 +277,7 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameTitle>Feature comparison</FrameTitle>
-            <FrameDescription>WebSkrap patchright vs other stacks</FrameDescription>
+            <FrameDescription>WebSkrap vs other stacks</FrameDescription>
           </FrameHeader>
           <Table
             variant="card"
@@ -291,7 +291,7 @@ export default function BenchmarksPage() {
                   <TableHead
                     key={col}
                     className={
-                      col === "WebSkrap patchright" ? "text-foreground" : undefined
+                      col === "WebSkrap" ? "text-foreground" : undefined
                     }
                   >
                     {col}
@@ -324,7 +324,7 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameTitle>Detection services</FrameTitle>
-            <FrameDescription>Stock Playwright vs CloakBrowser vs WebSkrap patchright headed on Xvfb</FrameDescription>
+            <FrameDescription>Stock Playwright vs CloakBrowser vs WebSkrap 2.x (Patchright) headed on Xvfb</FrameDescription>
           </FrameHeader>
           <Table
             variant="card"
@@ -386,7 +386,7 @@ export default function BenchmarksPage() {
         <div className="flex flex-col gap-1">
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Performance</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Measured on 2026-09-25 against a local HTTP server with delayed assets. No
+            Measured on 2026-09-25 with WebSkrap 2.x against a local HTTP server with delayed assets. No
             external sites were contacted. Every session used the stealth setup: the
             Patchright driver with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">headless=True</code>{" "}

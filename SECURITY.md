@@ -129,8 +129,9 @@ accept caller-chosen profile paths.
 
 ### Proxy credentials
 
-`ProxyConfig` holds proxy usernames and passwords in memory and passes them to
-Playwright. WebSkrap never writes them to disk. Its `repr`/`str` redact them,
+`ProxyConfig` holds proxy usernames and passwords in memory. WebSkrap gives
+them to Chromium only in answer to an authentication challenge from the proxy,
+never to a website, and never writes them to disk. Its `repr`/`str` redact them,
 error text scrubs embedded `user:pass@` authorities before it reaches a tool
 result or terminal, and shaped CLI/MCP fetch payloads carry an allowlist of
 response headers (content metadata, never `set-cookie` or credentials), so

@@ -5,15 +5,14 @@
 <h1 align="center">WebSkrap</h1>
 
 <p align="center">
-  <strong>Async-first Python scraping on Playwright, with persistent sessions,
-  resource routing, Patchright stealth, web search, a CLI, and an MCP server
-  for agents.</strong>
+  <strong>Async-first Python scraping on its own Chrome DevTools Protocol
+  client, with persistent sessions, resource routing, stealth defaults, web
+  search, a CLI, and an MCP server for agents.</strong>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/webskrap/"><img alt="WebSkrap version on PyPI" src="https://shieldcn.dev/pypi/webskrap.svg?variant=secondary&amp;logo=pypi"></a>
   <a href="https://www.python.org/"><img alt="Python 3.11 or newer" src="https://shieldcn.dev/badge/Python-3.11%2B-3776ab.svg?variant=secondary&amp;logo=python"></a>
-  <a href="https://playwright.dev/python/"><img alt="Playwright 1.49 or newer" src="https://shieldcn.dev/badge/Playwright-1.49%2B-2ead33.svg?variant=secondary&amp;logo=playwright"></a>
   <a href="https://github.com/kacigaya/webskrap/blob/main/LICENSE"><img alt="Apache 2.0 License" src="https://shieldcn.dev/github/license/kacigaya/webskrap.svg?variant=secondary"></a>
 </p>
 
@@ -23,6 +22,10 @@
 pip install webskrap
 webskrap install
 ```
+
+`webskrap install` downloads Chrome for Testing. WebSkrap drives it through its
+own CDP client, with no Playwright. Upgrading from 2.x? Read the
+[migration guide](docs/migration-3.0.md).
 
 ## Quickstart
 

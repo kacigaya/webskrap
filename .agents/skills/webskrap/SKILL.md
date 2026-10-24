@@ -5,8 +5,8 @@ description: Use when writing, debugging, documenting, or reviewing Python scrap
 
 # WebSkrap
 
-WebSkrap is an async Python scraping package built on Playwright, with
-Patchright support for stealth-oriented browser sessions. The Python API,
+WebSkrap is an async Python scraping package that drives Chromium through its
+own Chrome DevTools Protocol (CDP) client, with no Playwright. The Python API,
 `webskrap` CLI, and `webskrap-mcp` server share core behavior.
 
 WebSkrap loads known URLs. To find URLs it loads DuckDuckGo or Bing's
@@ -54,8 +54,8 @@ refresh that engine's fixture and fix that one extractor.
 | Fetch one known URL | `client.fetch()` | `webskrap fetch` | `stealth_fetch` |
 | Find URLs for a query | `client.search()` | `webskrap search` | `search` |
 | Preserve cookies or storage | `client.session()` | `webskrap browser open` | `browser_open` |
-| See a rendered page or interact with canvas | `browser_session.view()` on a Patchright page | `webskrap browser view` and `mouse` | `browser_view` and `browser_mouse` |
-| Click, fill, wait, or run a flow | Playwright page from a session | `webskrap browser` | `browser_interact` and related tools |
+| See a rendered page or interact with canvas | `browser_session.view()` on a session page | `webskrap browser view` and `mouse` | `browser_view` and `browser_mouse` |
+| Click, fill, wait, or run a flow | `session.new_page()` and `human_click()` | `webskrap browser` | `browser_interact` and related tools |
 | Diagnose installation | Inspect raised error | `webskrap doctor` | `doctor` |
 
 Use a one-shot fetch for one page. Use a persistent browser only when state or
@@ -64,7 +64,7 @@ drive a multi-step flow.
 
 Read only the reference needed for the task:
 
-- [Python API](references/python-api.md): sessions, Patchright, consent, links,
+- [Python API](references/python-api.md): sessions, pages, profile modes, consent, links,
   and fingerprint controls.
 - [CLI](references/cli.md): one-shot fetches, persistent browser commands, and
   Linux ARM64 behavior.

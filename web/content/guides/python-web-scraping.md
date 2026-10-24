@@ -1,11 +1,11 @@
 ---
 title: Python Web Scraping with WebSkrap
-description: Learn Python web scraping with WebSkrap, Playwright, browser profiles, persistent sessions, and clean text extraction for modern JavaScript pages.
+description: Learn Python web scraping with WebSkrap, real Chromium, browser profiles, persistent sessions, and clean text extraction for modern JavaScript pages.
 ---
 
 # Python Web Scraping with WebSkrap
 
-WebSkrap is a Python web scraping toolkit for pages that need a real browser. It wraps Playwright with an async API, reusable browser sessions, coherent browser profiles, resource routing, and optional Patchright-powered stealth sessions.
+WebSkrap is a Python web scraping toolkit for pages that need a real browser. It drives Chromium through its own Chrome DevTools Protocol client, with an async API, reusable browser sessions, coherent browser profiles, resource routing, and stealth defaults.
 
 Use it when a simple `requests` or `BeautifulSoup` script cannot see the content because the site renders data with JavaScript, relies on browser storage, or needs a realistic browser context.
 
@@ -41,7 +41,7 @@ asyncio.run(main())
 
 ## Why use a browser scraper?
 
-Modern websites often ship a small HTML shell and fill it with JavaScript. WebSkrap launches Chromium through Playwright so your scraper sees the page after browser navigation, redirects, cookies, and client-side rendering.
+Modern websites often ship a small HTML shell and fill it with JavaScript. WebSkrap launches Chromium and drives it over CDP, so your scraper sees the page after browser navigation, redirects, cookies, and client-side rendering.
 
 Common use cases:
 
