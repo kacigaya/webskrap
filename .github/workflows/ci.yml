@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # Pinned exactly: setup-uv publishes no floating v9 major tag.
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           enable-cache: true
       - name: Lint
@@ -63,7 +63,7 @@ jobs:
             python-version: "3.13"
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
@@ -92,7 +92,7 @@ jobs:
         os: [ubuntu-26.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           enable-cache: true
           python-version: "3.13"
@@ -123,7 +123,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.0
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           enable-cache: true
           python-version: "3.13"
