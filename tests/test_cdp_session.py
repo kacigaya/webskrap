@@ -116,6 +116,10 @@ async def test_websocket_handshake_checks_the_accept_key() -> None:
         )
         writer.write(_frame(0x1, json.dumps({"id": 1, "result": {}}).encode()))
         await writer.drain()
+        # Close this side too: since Python 3.12, leaving `async with server`
+        # waits for every connection to close, so an open one hangs the test.
+        writer.close()
+        await writer.wait_closed()
 
     server = await asyncio.start_server(serve, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
