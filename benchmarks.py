@@ -1,7 +1,7 @@
 """WebSkrap performance benchmarks.
 
-Unlike a parser benchmark, WebSkrap is a Playwright-based browser automation
-framework, so these benchmarks measure what WebSkrap actually does:
+Unlike a parser benchmark, WebSkrap is a browser automation framework built on
+its own CDP client, so these benchmarks measure what WebSkrap actually does:
 
 1. Resource routing  - ResourcePolicy.ALL vs LITE vs DOCUMENTS
 2. Session reuse      - cold launch per fetch vs warm persistent session
@@ -13,7 +13,7 @@ is answered after a small fixed delay to model real-world network cost, so the
 effect of blocking resources is observable and repeatable. No external sites are
 contacted. Timings vary with the host and browser version.
 
-Sessions use the stealth setup with the Patchright driver. Three modes:
+Sessions use the stealth setup. Three modes:
 
 - virtual-display (default): headless=True with virtual_display=True, so
   Chromium runs headed on a private Xvfb screen WebSkrap starts per session.
@@ -160,7 +160,6 @@ MASK_UA = False
 def _config(policy: ResourcePolicy) -> SessionConfig:
     headed = MODE == "headed"
     return SessionConfig(
-        driver="patchright",
         headless=not headed,
         virtual_display=MODE == "virtual-display",
         chromium_sandbox=sandbox_enabled(None),
@@ -254,7 +253,7 @@ async def main() -> None:
             try:
                 mcp_warm = await bench_mcp_session(runtime)
                 display(
-                    "MCP session reuse (driver/browser retained)",
+                    "MCP session reuse (browser retained)",
                     {
                         "isolated cold fetch": reuse_results["cold launch / fetch"],
                         "MCP warm": mcp_warm,

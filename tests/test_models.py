@@ -11,7 +11,6 @@ from webskrap import (
     FetchResult,
     GpuBackend,
     ProxyConfig,
-    ResourcePolicy,
     SearchEngine,
     SearchHit,
     SearchResult,
@@ -22,22 +21,29 @@ from webskrap import (
 from webskrap.models import TextWindow, shape_fetch_result, shape_search_result, text_window
 
 
-def test_profile_generates_context_options() -> None:
+def test_full_profile_mode_emulates_the_whole_profile() -> None:
     profile = BrowserProfile(
         name="test",
+        user_agent="Custom/1.0",
         viewport=Viewport(width=1280, height=720),
         locale="en-US",
         timezone_id="Europe/Paris",
         navigator_languages=["en-US", "en"],
     )
 
-    options = profile.to_context_options()
+    commands = dict(SessionConfig(profile_mode="full").emulation_commands(profile))
 
-    assert options["viewport"] == {"width": 1280, "height": 720}
-    assert options["locale"] == "en-US"
-    assert options["timezone_id"] == "Europe/Paris"
-    assert options["extra_http_headers"]["Accept-Language"] == "en-US,en;q=0.9"
-    assert "Accept" not in options["extra_http_headers"]
+    metrics = commands["Emulation.setDeviceMetricsOverride"]
+    assert (metrics["width"], metrics["height"]) == (1280, 720)
+    assert commands["Emulation.setUserAgentOverride"] == {
+        "userAgent": "Custom/1.0",
+        "acceptLanguage": "en-US,en;q=0.9",
+    }
+    assert commands["Emulation.setLocaleOverride"] == {"locale": "en-US"}
+    assert commands["Emulation.setTimezoneOverride"] == {"timezoneId": "Europe/Paris"}
+    headers = commands["Network.setExtraHTTPHeaders"]["headers"]
+    assert headers["Accept-Language"] == "en-US,en;q=0.9"
+    assert "Accept" not in headers
 
 
 def test_profile_preserves_caller_accept_header() -> None:
@@ -46,45 +52,39 @@ def test_profile_preserves_caller_accept_header() -> None:
     assert profile.headers()["Accept"] == "application/json"
 
 
-def test_session_config_maps_proxy_and_storage_state() -> None:
-    profile = BrowserProfile(name="test")
-    config = SessionConfig(
-        proxy=ProxyConfig(server="http://localhost:8080", username="user", password="pass"),
-        storage_state={"cookies": [], "origins": []},
-        resource_policy=ResourcePolicy.LITE,
-    )
-
-    options = config.context_options(profile)
-
-    assert options["proxy"] == {
-        "server": "http://localhost:8080",
-        "username": "user",
-        "password": "pass",
-    }
-    assert options["storage_state"] == {"cookies": [], "origins": []}
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("driver", "patchright"),
+        ("browser", "firefox"),
+        ("slow_mo_ms", 50),
+        ("patchright_focus_control", True),
+        ("patchright_context_profile", True),
+    ],
+)
+def test_removed_fields_name_their_replacement(field: str, value: object) -> None:
+    with pytest.raises(ValidationError, match=f"SessionConfig.{field} was removed in WebSkrap 3.0"):
+        SessionConfig(**{field: value})
 
 
 def test_cookie_decline_is_opt_in() -> None:
     assert SessionConfig().decline_cookies is False
 
 
-def test_patchright_context_omits_profile_by_default() -> None:
+def test_native_profile_mode_emulates_nothing() -> None:
     profile = BrowserProfile(
         name="test",
         user_agent="Custom/1.0",
         navigator_languages=["fr-FR", "fr"],
     )
-    config = SessionConfig(driver="patchright", headless=True)
+    config = SessionConfig()
 
-    options = config.context_options(profile)
-
-    assert options["no_viewport"] is True
-    assert "focus_control" not in options
-    assert "user_agent" not in options
-    assert "extra_http_headers" not in options
+    assert config.profile_mode == "native"
+    assert config.emulation_commands(profile) == []
+    assert config.browser_env(profile) is None
 
 
-def test_patchright_context_profile_applies_native_context_metadata(
+def test_locale_profile_mode_applies_only_what_chrome_owns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
@@ -100,89 +100,47 @@ def test_patchright_context_profile_applies_native_context_metadata(
         extra_http_headers={"X-Test": "1"},
         navigator_languages=["en-US", "en"],
     )
-    config = SessionConfig(driver="patchright", patchright_context_profile=True)
 
-    options = config.context_options(profile)
+    commands = dict(SessionConfig(profile_mode="locale").emulation_commands(profile))
 
-    assert options["no_viewport"] is True
-    assert "focus_control" not in options
     # Locale and timezone go in at launch on Linux; see
-    # test_context_profile_sets_timezone_and_languages_at_launch.
-    assert "locale" not in options
-    assert "timezone_id" not in options
-    assert options["color_scheme"] == "dark"
-    assert options["reduced_motion"] == "reduce"
-    assert options["extra_http_headers"] == {"X-Test": "1"}
-    assert "viewport" not in options
-    assert "screen" not in options
-    assert "user_agent" not in options
-    assert "device_scale_factor" not in options
-    assert "is_mobile" not in options
-    assert "has_touch" not in options
+    # test_locale_profile_sets_timezone_and_languages_at_launch.
+    assert set(commands) == {"Emulation.setEmulatedMedia", "Network.setExtraHTTPHeaders"}
+    assert commands["Emulation.setEmulatedMedia"]["features"] == [
+        {"name": "prefers-color-scheme", "value": "dark"},
+        {"name": "prefers-reduced-motion", "value": "reduce"},
+    ]
+    assert commands["Network.setExtraHTTPHeaders"] == {"headers": {"X-Test": "1"}}
 
 
-def test_patchright_focus_control_can_be_omitted() -> None:
-    profile = BrowserProfile(name="test")
-    config = SessionConfig(driver="patchright", patchright_focus_control=None)
-
-    options = config.context_options(profile)
-
-    assert options["no_viewport"] is True
-    assert "focus_control" not in options
-
-
-def test_patchright_focus_control_omitted_by_default() -> None:
-    profile = BrowserProfile(name="test")
-    config = SessionConfig(driver="patchright")
-
-    options = config.context_options(profile)
-
-    assert "focus_control" not in options
-
-
-def test_patchright_focus_control_emitted_when_set() -> None:
-    profile = BrowserProfile(name="test")
-    config = SessionConfig(driver="patchright", patchright_focus_control=True)
-
-    options = config.context_options(profile)
-
-    assert options["focus_control"] is True
+def test_profile_mode_rejects_unknown_values() -> None:
+    with pytest.raises(ValidationError):
+        SessionConfig(profile_mode="everything")  # type: ignore[arg-type]
 
 
 def test_headless_chromium_gets_simulated_screen() -> None:
-    config = SessionConfig(driver="patchright", channel="chrome", headless=True)
+    config = SessionConfig(channel="chrome", headless=True)
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
 
     assert "--window-size=1840,1000" in args
     assert "--window-position=0,0" in args
     assert "--screen-info={1920x1080 workAreaBottom=80}" in args
 
 
-def test_headless_chromium_keeps_scrollbars_and_audio() -> None:
-    ignored = SessionConfig(headless=True).launch_options()["ignore_default_args"]
-
-    assert "--hide-scrollbars" in ignored
-    assert "--mute-audio" in ignored
-    assert not any(arg.startswith("--blink-settings=") for arg in ignored)
-    assert "ignore_default_args" not in SessionConfig(headless=False).launch_options()
-    assert "ignore_default_args" not in SessionConfig(browser="firefox").launch_options()
-
-
-def test_fake_media_devices_are_opt_in_and_chromium_only() -> None:
+def test_fake_media_devices_are_opt_in() -> None:
     flag = "--use-fake-device-for-media-stream"
 
-    assert flag not in SessionConfig().launch_options()["args"]
-    assert flag in SessionConfig(fake_media_devices=True).launch_options()["args"]
-    assert "args" not in SessionConfig(browser="firefox", fake_media_devices=True).launch_options()
+    assert flag not in SessionConfig().browser_args()
+    assert flag in SessionConfig(fake_media_devices=True).browser_args()
     config = SessionConfig(fake_media_devices=True, launch_args=[flag])
-    assert config.launch_options()["args"].count(flag) == 1
+    assert config.browser_args().count(flag) == 1
 
 
 def test_headless_screen_size_is_configurable() -> None:
     config = SessionConfig(headless=True, headless_screen=Viewport(width=1366, height=768))
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
 
     assert "--window-size=1286,688" in args
     assert "--screen-info={1366x768 workAreaBottom=80}" in args
@@ -191,21 +149,21 @@ def test_headless_screen_size_is_configurable() -> None:
 def test_headless_screen_can_be_disabled() -> None:
     config = SessionConfig(headless=True, headless_screen=None)
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
     assert not any(a.startswith("--window-size") or a.startswith("--screen-info") for a in args)
 
 
 def test_headed_mode_omits_simulated_screen() -> None:
-    config = SessionConfig(driver="patchright", channel="chrome", headless=False)
+    config = SessionConfig(channel="chrome", headless=False)
 
-    args = config.launch_options().get("args", [])
+    args = config.browser_args()
     assert not any(a.startswith("--window-size") or a.startswith("--screen-info") for a in args)
 
 
 def test_user_launch_args_override_simulated_screen() -> None:
     config = SessionConfig(headless=True, launch_args=["--window-size=800,600"])
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
 
     assert "--window-size=800,600" in args
     assert "--window-size=1840,1000" not in args
@@ -213,31 +171,16 @@ def test_user_launch_args_override_simulated_screen() -> None:
     assert "--screen-info={1920x1080 workAreaBottom=80}" in args
 
 
-def test_non_chromium_headless_omits_simulated_screen() -> None:
-    config = SessionConfig(browser="firefox", headless=True)
-
-    assert "args" not in config.launch_options()
-
-
 def test_chromium_disables_automation_controlled() -> None:
-    args = SessionConfig(browser="chromium").launch_options()["args"]
+    args = SessionConfig().browser_args()
     assert "--disable-blink-features=AutomationControlled" in args
-
-
-def test_patchright_omits_automation_controlled_flag() -> None:
-    args = SessionConfig(driver="patchright", browser="chromium").launch_options()["args"]
-    assert "--disable-blink-features=AutomationControlled" not in args
 
 
 def test_automation_flag_skipped_when_caller_sets_blink_features() -> None:
     config = SessionConfig(launch_args=["--disable-blink-features=AutomationControlled,Foo"])
-    args = config.launch_options()["args"]
+    args = config.browser_args()
     assert args.count("--disable-blink-features=AutomationControlled") == 0
     assert "--disable-blink-features=AutomationControlled,Foo" in args
-
-
-def test_non_chromium_omits_automation_flag() -> None:
-    assert "args" not in SessionConfig(browser="firefox", headless=False).launch_options()
 
 
 def test_mask_headless_user_agent_defaults_off() -> None:
@@ -253,7 +196,7 @@ def test_reduce_fingerprint_surface_defaults_off() -> None:
 def test_reduce_fingerprint_surface_adds_chromium_flags() -> None:
     config = SessionConfig(reduce_fingerprint_surface=True)
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
 
     assert "--disable-webgl" in args
     assert "--disable-reading-from-canvas" in args
@@ -265,20 +208,10 @@ def test_reduce_fingerprint_surface_respects_user_launch_args() -> None:
         launch_args=["--disable-webgl", "--disable-reading-from-canvas"],
     )
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
 
     assert args.count("--disable-webgl") == 1
     assert args.count("--disable-reading-from-canvas") == 1
-
-
-def test_reduce_fingerprint_surface_is_chromium_only() -> None:
-    config = SessionConfig(
-        browser="firefox",
-        headless=False,
-        reduce_fingerprint_surface=True,
-    )
-
-    assert "args" not in config.launch_options()
 
 
 def test_webrtc_ip_handling_policy_is_exported() -> None:
@@ -288,7 +221,7 @@ def test_webrtc_ip_handling_policy_is_exported() -> None:
 def test_webrtc_ip_handling_policy_adds_chromium_flags() -> None:
     config = SessionConfig(webrtc_ip_handling_policy="disable_non_proxied_udp")
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
 
     assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in args
     assert "--force-webrtc-ip-handling-policy" in args
@@ -303,21 +236,11 @@ def test_webrtc_ip_handling_policy_respects_user_launch_args() -> None:
         ],
     )
 
-    args = config.launch_options()["args"]
+    args = config.browser_args()
 
     assert "--webrtc-ip-handling-policy=default_public_interface_only" in args
     assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" not in args
     assert args.count("--force-webrtc-ip-handling-policy") == 1
-
-
-def test_webrtc_ip_handling_policy_is_chromium_only() -> None:
-    config = SessionConfig(
-        browser="firefox",
-        headless=False,
-        webrtc_ip_handling_policy="disable_non_proxied_udp",
-    )
-
-    assert "args" not in config.launch_options()
 
 
 @pytest.mark.parametrize(
@@ -347,12 +270,6 @@ def test_proxy_requires_supported_scheme(server: str) -> None:
         ProxyConfig(server=server)
 
 
-def test_proxy_omits_unset_credentials() -> None:
-    assert ProxyConfig(server="http://proxy.test").to_playwright() == {
-        "server": "http://proxy.test"
-    }
-
-
 @pytest.mark.parametrize(
     ("width", "height"),
     [
@@ -380,37 +297,11 @@ def test_profile_rejects_blank_identity_fields(field: str) -> None:
         BrowserProfile(**{"name": "test", field: "   "})
 
 
-def test_proxy_includes_bypass_and_credentials() -> None:
-    proxy = ProxyConfig(
-        server="http://proxy.test",
-        bypass="localhost,127.0.0.1",
-        username="user",
-        password="secret",
-    )
-
-    assert proxy.to_playwright() == {
-        "server": "http://proxy.test",
-        "bypass": "localhost,127.0.0.1",
-        "username": "user",
-        "password": "secret",
-    }
-
-
 def test_profile_without_languages_falls_back_to_its_locale() -> None:
     profile = BrowserProfile(name="test", locale="fr-FR", navigator_languages=[])
 
     assert profile.navigator_languages == ["fr-FR"]
     assert profile.accept_language() == "fr-FR"
-
-
-def test_profile_user_agent_reaches_context_options() -> None:
-    profile = BrowserProfile(name="test", user_agent="Custom/1.0")
-
-    assert profile.to_context_options()["user_agent"] == "Custom/1.0"
-
-
-def test_slow_mo_reaches_launch_options() -> None:
-    assert SessionConfig(slow_mo_ms=50).launch_options()["slow_mo"] == 50
 
 
 def test_text_window_reports_the_next_offset() -> None:
@@ -527,21 +418,13 @@ def test_chromium_stays_sandboxed_by_default() -> None:
     config = SessionConfig()
 
     assert config.chromium_sandbox is True
-    assert "--no-sandbox" not in config.launch_options().get("args", [])
+    assert "--no-sandbox" not in config.browser_args()
 
 
 def test_sandbox_opt_out_adds_exactly_one_flag() -> None:
-    args = SessionConfig(chromium_sandbox=False).launch_options()["args"]
+    args = SessionConfig(chromium_sandbox=False).browser_args()
 
     assert args.count("--no-sandbox") == 1
-
-
-def test_sandbox_opt_out_is_chromium_only() -> None:
-    options = SessionConfig(
-        browser="firefox", headless=False, chromium_sandbox=False
-    ).launch_options()
-
-    assert "args" not in options
 
 
 @pytest.mark.parametrize(
@@ -563,7 +446,7 @@ def test_dangerous_launch_args_are_blocked(flag: str) -> None:
 def test_benign_launch_args_still_pass() -> None:
     config = SessionConfig(launch_args=["--window-size=800,600", "--no-sandboxed-feature"])
 
-    assert "--window-size=800,600" in config.launch_options()["args"]
+    assert "--window-size=800,600" in config.browser_args()
 
 
 def test_proxy_repr_and_str_redact_credentials() -> None:
@@ -572,8 +455,8 @@ def test_proxy_repr_and_str_redact_credentials() -> None:
     assert "secret" not in repr(proxy)
     assert "'user'" not in repr(proxy)
     assert "secret" not in str(proxy)
-    # The driver still gets the real values; only the display is redacted.
-    assert proxy.to_playwright()["password"] == "secret"
+    # The browser still gets the real values; only the display is redacted.
+    assert proxy.password == "secret"
 
 
 def test_proxy_redacted_mapping_hides_credentials() -> None:
@@ -611,15 +494,15 @@ def test_shape_fetch_result_filters_response_headers() -> None:
 
 
 def test_virtual_display_launches_headed_with_window_but_no_headless_screen() -> None:
-    config = SessionConfig(driver="patchright", headless=True, virtual_display=True)
+    config = SessionConfig(headless=True, virtual_display=True)
 
-    options = config.launch_options()
+    args = config.browser_args()
 
-    assert options["headless"] is False
-    assert "--window-size=1840,1000" in options["args"]
-    assert "--window-position=0,0" in options["args"]
+    assert config.launch_headless is False
+    assert "--window-size=1840,1000" in args
+    assert "--window-position=0,0" in args
     # --screen-info only exists in headless mode; Xvfb supplies the screen.
-    assert not any(a.startswith("--screen-info") for a in options["args"])
+    assert not any(a.startswith("--screen-info") for a in args)
     assert config.uses_virtual_display()
 
 
@@ -629,45 +512,18 @@ def test_virtual_display_screen_follows_headless_screen() -> None:
 
     assert sized.virtual_screen() == Viewport(width=1366, height=768)
     assert unsized.virtual_screen() == Viewport(width=1920, height=1080)
-    assert not any(a.startswith("--window-size") for a in unsized.launch_options().get("args", []))
+    assert not any(a.startswith("--window-size") for a in unsized.browser_args())
 
 
 def test_virtual_display_is_ignored_for_headed_runs() -> None:
     config = SessionConfig(headless=False, virtual_display=True)
 
-    assert config.launch_options()["headless"] is False
+    assert config.launch_headless is False
     assert not config.uses_virtual_display()
 
 
-def test_headless_chromium_without_a_channel_uses_new_headless() -> None:
-    # No channel would mean Playwright's headless shell, which leaks
-    # "HeadlessChrome" in Sec-CH-UA and sends no Accept-Language.
-    assert SessionConfig(headless=True).launch_options()["channel"] == "chromium"
-    assert SessionConfig(driver="patchright").launch_options()["channel"] == "chromium"
-
-
-@pytest.mark.parametrize(
-    ("config", "expected"),
-    [
-        pytest.param(SessionConfig(headless=False), None, id="headed"),
-        pytest.param(SessionConfig(virtual_display=True), None, id="virtual-display-is-headed"),
-        pytest.param(SessionConfig(browser="firefox"), None, id="firefox"),
-        pytest.param(SessionConfig(channel="chrome"), "chrome", id="explicit"),
-        pytest.param(
-            SessionConfig(channel="chromium-headless-shell"),
-            "chromium-headless-shell",
-            id="explicit-shell-opt-in",
-        ),
-    ],
-)
-def test_channel_is_only_filled_in_for_headless_chromium(
-    config: SessionConfig, expected: str | None
-) -> None:
-    assert config.launch_options().get("channel") == expected
-
-
 def _native_config(**overrides: Any) -> SessionConfig:
-    return SessionConfig(driver="patchright", patchright_context_profile=True, **overrides)
+    return SessionConfig(profile_mode="locale", **overrides)
 
 
 def _fr_profile() -> BrowserProfile:
@@ -680,7 +536,7 @@ def _fr_profile() -> BrowserProfile:
     )
 
 
-def test_context_profile_sets_timezone_and_languages_at_launch(
+def test_locale_profile_sets_timezone_and_languages_at_launch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
@@ -688,51 +544,53 @@ def test_context_profile_sets_timezone_and_languages_at_launch(
     config = _native_config()
     profile = _fr_profile()
 
-    options = config.launch_options(profile)
-    context = config.context_options(profile)
+    args = config.browser_args(profile)
+    env = config.browser_env(profile)
+    commands = dict(config.emulation_commands(profile))
 
-    assert "--accept-lang=fr-FR,fr,en-US,en" in options["args"]
-    env = options["env"]
+    assert "--accept-lang=fr-FR,fr,en-US,en" in args
+    assert env is not None
     assert env["TZ"] == "Europe/Paris"
     # LC_ALL is replaced too: a host value would otherwise pin Intl's locale.
     assert env["LC_ALL"] == env["LANG"] == "fr_FR.UTF-8"
     assert env["LANGUAGE"] == "fr_FR:fr:en_US:en"
     assert "PATH" in env
     # Nothing left to override over CDP; media preferences still apply there.
-    assert "locale" not in context
-    assert "timezone_id" not in context
-    assert context["color_scheme"] == "dark"
+    assert "Emulation.setLocaleOverride" not in commands
+    assert "Emulation.setTimezoneOverride" not in commands
+    assert "Emulation.setEmulatedMedia" in commands
 
 
 @pytest.mark.parametrize("platform", ["win32", "darwin"])
-def test_context_profile_keeps_cdp_overrides_off_linux(
+def test_locale_profile_uses_cdp_overrides_off_linux(
     monkeypatch: pytest.MonkeyPatch, platform: str
 ) -> None:
     monkeypatch.setattr(sys, "platform", platform)
     config = _native_config()
     profile = _fr_profile()
 
-    options = config.launch_options(profile)
-    context = config.context_options(profile)
+    commands = dict(config.emulation_commands(profile))
 
-    assert "env" not in options
-    assert not any(a.startswith("--accept-lang") for a in options["args"])
-    assert context["locale"] == "fr-FR"
-    assert context["timezone_id"] == "Europe/Paris"
+    assert config.browser_env(profile) is None
+    assert not any(a.startswith("--accept-lang") for a in config.browser_args(profile))
+    assert commands["Emulation.setLocaleOverride"] == {"locale": "fr-FR"}
+    assert commands["Emulation.setTimezoneOverride"] == {"timezoneId": "Europe/Paris"}
+    accept = commands["Network.setExtraHTTPHeaders"]["headers"]["Accept-Language"]
+    assert accept.startswith("fr-FR,fr;q=")
 
 
-def test_native_profile_needs_the_context_profile_switch() -> None:
-    options = SessionConfig(driver="patchright").launch_options(_fr_profile())
+def test_native_profile_mode_sets_nothing_at_launch() -> None:
+    config = SessionConfig()
 
-    assert "env" not in options
-    assert not any(a.startswith("--accept-lang") for a in options.get("args", []))
+    assert config.browser_env(_fr_profile()) is None
+    assert not any(a.startswith("--accept-lang") for a in config.browser_args(_fr_profile()))
 
 
 def test_caller_accept_lang_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     config = _native_config(launch_args=["--accept-lang=de-DE"])
 
-    args = config.launch_options(_fr_profile())["args"]
+    args = config.browser_args(_fr_profile())
 
     assert [a for a in args if a.startswith("--accept-lang")] == ["--accept-lang=de-DE"]
 
@@ -743,27 +601,13 @@ def test_unknown_timezone_is_rejected_before_launch(monkeypatch: pytest.MonkeyPa
     profile = _fr_profile().model_copy(update={"timezone_id": "Not/AZone"})
 
     with pytest.raises(ValueError, match="unknown timezone 'Not/AZone'"):
-        _native_config().launch_options(profile)
-
-
-def test_sandbox_setting_reaches_playwright() -> None:
-    # Playwright appends --no-sandbox unless chromium_sandbox is True, so the
-    # option itself has to be passed, not only the absence of the flag.
-    assert SessionConfig().launch_options()["chromium_sandbox"] is True
-    assert SessionConfig(driver="patchright").launch_options()["chromium_sandbox"] is True
-    opted_out = SessionConfig(chromium_sandbox=False).launch_options()
-    assert opted_out["chromium_sandbox"] is False
-    assert "--no-sandbox" in opted_out["args"]
-
-
-def test_sandbox_option_is_chromium_only() -> None:
-    assert "chromium_sandbox" not in SessionConfig(browser="firefox").launch_options()
+        _native_config().browser_env(profile)
 
 
 def _gl_args(config: SessionConfig) -> list[str]:
     return [
         a
-        for a in config.launch_options().get("args", [])
+        for a in config.browser_args()
         if a.startswith(("--use-gl", "--use-angle", "--ignore-gpu", "--enable-unsafe-swift"))
     ]
 
@@ -777,12 +621,12 @@ def test_gpu_auto_leaves_headless_webgl_to_chromium() -> None:
 def test_gpu_auto_adds_no_swiftshader_under_a_virtual_display() -> None:
     # Headed Chrome has had no SwiftShader fallback since Chrome 139; a
     # GPU-less desktop shows no WebGL, and forcing SwiftShader reads as a bot.
-    assert _gl_args(SessionConfig(driver="patchright", virtual_display=True)) == []
+    assert _gl_args(SessionConfig(virtual_display=True)) == []
 
 
 @pytest.mark.parametrize("virtual_display", [False, True])
 def test_gpu_mesa_renders_through_lavapipe(virtual_display: bool) -> None:
-    config = SessionConfig(driver="patchright", gpu="mesa", virtual_display=virtual_display)
+    config = SessionConfig(gpu="mesa", virtual_display=virtual_display)
 
     assert _gl_args(config) == ["--use-gl=angle", "--use-angle=vulkan", "--ignore-gpu-blocklist"]
 
@@ -793,17 +637,13 @@ def test_caller_gl_flags_win_over_gpu() -> None:
     assert _gl_args(config) == ["--use-angle=swiftshader"]
 
 
-def test_gpu_is_chromium_only() -> None:
-    assert _gl_args(SessionConfig(browser="firefox", gpu="mesa")) == []
-
-
 def test_gpu_rejects_unknown_backends() -> None:
     with pytest.raises(ValidationError):
         SessionConfig(gpu="nvidia")  # type: ignore[arg-type]
 
 
 def _webrtc_args(config: SessionConfig) -> list[str]:
-    return [a for a in config.launch_options().get("args", []) if "webrtc" in a]
+    return [a for a in config.browser_args() if "webrtc" in a]
 
 
 def test_proxy_disables_non_proxied_udp_by_default() -> None:

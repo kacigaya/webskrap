@@ -131,10 +131,9 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
     }
 
     config = _FakeClient.calls[0]["config"]
-    assert config.driver == "patchright"
     assert config.headless is True
     assert config.channel == "chrome"
-    assert config.patchright_focus_control is None
+    assert config.profile_mode == "native"
     assert config.decline_cookies is True
 
 
@@ -168,8 +167,7 @@ class _LaunchFailingClient(_FakeClient):
         self.attempts.append(config.channel)
         if config.channel in self.fail_channels:
             raise RuntimeError(
-                f"Chromium distribution '{config.channel}' is not found at /opt/google/chrome\n"
-                'Run "playwright install chrome"'
+                f"Chromium distribution '{config.channel}' is not found at /opt/google/chrome"
             )
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
@@ -523,7 +521,7 @@ def test_doctor_human_prints_the_surrounding_facts(monkeypatch: Any) -> None:
             "ok": True,
             "message": "ready",
             "executable_path": "/browsers/chrome",
-            "versions": {"webskrap": "2.0.0", "patchright": None},
+            "versions": {"webskrap": "3.0.0", "mcp": None},
             "paths": {"output_root": "/tmp/out"},
             "environment": {"WEBSKRAP_OUTPUT_DIR": "/tmp/out", "WEBSKRAP_BROWSER_DIR": None},
             "sessions": [{"session": "shop", "running": True}],
@@ -534,9 +532,9 @@ def test_doctor_human_prints_the_surrounding_facts(monkeypatch: Any) -> None:
     result = runner.invoke(cli.app, ["doctor"])
 
     assert result.exit_code == 0, result.output
-    assert "webskrap 2.0.0" in result.output
-    # A driver that is not installed is named rather than silently omitted.
-    assert "patchright missing" in result.output
+    assert "webskrap 3.0.0" in result.output
+    # A package that is not installed is named rather than silently omitted.
+    assert "mcp missing" in result.output
     assert "/browsers/chrome" in result.output
     assert "1 (1 running)" in result.output
     # Only the overrides actually set are shown.
@@ -614,7 +612,6 @@ def test_search_json_is_the_shared_payload(monkeypatch: Any) -> None:
     assert call["engine"] is SearchEngine.BING
     assert call["max_results"] == 1
     config = call["config"]
-    assert config.driver == "patchright"
     assert config.headless is True
     assert config.channel == "chrome"
     assert config.decline_cookies is True
@@ -796,7 +793,7 @@ def test_fetch_stays_sandboxed_by_default(monkeypatch: Any) -> None:
     assert result.exit_code == 0, result.output
     config = _FakeClient.calls[0]["config"]
     assert config.chromium_sandbox is True
-    assert "--no-sandbox" not in config.launch_options().get("args", [])
+    assert "--no-sandbox" not in config.browser_args()
 
 
 def test_fetch_no_sandbox_flag_opts_out(monkeypatch: Any) -> None:
@@ -809,7 +806,7 @@ def test_fetch_no_sandbox_flag_opts_out(monkeypatch: Any) -> None:
     assert result.exit_code == 0, result.output
     config = _FakeClient.calls[0]["config"]
     assert config.chromium_sandbox is False
-    assert "--no-sandbox" in config.launch_options()["args"]
+    assert "--no-sandbox" in config.browser_args()
 
 
 def test_fetch_no_sandbox_env_opts_out(monkeypatch: Any) -> None:

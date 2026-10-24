@@ -21,8 +21,6 @@ from rich.table import Table
 
 from webskrap.browser_cli import browser_app
 from webskrap.browser_session import sandbox_enabled
-from webskrap.cdp_fetch import fetch as cdp_fetch
-from webskrap.cdp_fetch import search as cdp_search
 from webskrap.cli_output import (
     OutputFormat,
     fail,
@@ -42,7 +40,6 @@ from webskrap.errors import (
 )
 from webskrap.install import install as install_browser
 from webskrap.models import (
-    FetchDriver,
     FetchResult,
     GpuBackend,
     ResourcePolicy,
@@ -53,7 +50,7 @@ from webskrap.models import (
     shape_search_result,
 )
 from webskrap.parsing import (
-    parse_fetch_driver,
+    parse_profile_mode,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
@@ -170,7 +167,7 @@ def doctor_command(
         typer.Option("--format", help="Output format: human or json."),
     ] = "human",
 ) -> None:
-    """Check that Patchright and Chromium are installed and can launch."""
+    """Check that Chromium is installed and can launch."""
     output_format = parse_output_format(format)
     result = asyncio.run(_doctor())
     if output_format == "json":
@@ -193,23 +190,15 @@ def fetch_command(
         typer.Option(
             "--profile",
             "-p",
-            help="Bundled profile metadata (requires --patchright-context-profile).",
+            help="Bundled profile; --profile-mode decides how much of it pages see.",
         ),
     ] = "desktop-chrome",
     channel: Annotated[
         str | None,
-        typer.Option("--channel", help="Browser channel for headless Patchright stealth."),
-    ] = "chrome",
-    driver: Annotated[
-        str,
         typer.Option(
-            "--driver",
-            help=(
-                "patchright, or cdp: WebSkrap's own experimental CDP driver. cdp takes "
-                "CSS ready selectors only and does not dismiss cookie notices."
-            ),
+            "--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."
         ),
-    ] = "patchright",
+    ] = "chrome",
     user_data_dir: Annotated[
         Path | None,
         typer.Option("--user-data-dir", help="Persistent browser profile directory."),
@@ -264,7 +253,7 @@ def fetch_command(
     ] = "domcontentloaded",
     ready_selector: Annotated[
         str | None,
-        typer.Option("--ready-selector", help="Wait for this Playwright selector to be visible."),
+        typer.Option("--ready-selector", help="Wait for this CSS selector or ref to be visible."),
     ] = None,
     timeout_ms: Annotated[
         float,
@@ -275,15 +264,12 @@ def fetch_command(
         typer.Option("--resource-policy", help="Resource routing preset."),
     ] = ResourcePolicy.ALL,
     decline_cookies: Annotated[
-        bool | None,
+        bool,
         typer.Option(
             "--decline-cookies/--no-decline-cookies",
-            help=(
-                "Click the reject button of a cookie consent notice after load. "
-                "Default on for patchright; cdp does not support it."
-            ),
+            help="Click the reject button of a cookie consent notice after load.",
         ),
-    ] = None,
+    ] = True,
     decline_cookies_timeout_ms: Annotated[
         float,
         typer.Option(
@@ -292,13 +278,16 @@ def fetch_command(
             help="How long to wait for a cookie consent notice to appear.",
         ),
     ] = 2_000,
-    patchright_context_profile: Annotated[
-        bool,
+    profile_mode: Annotated[
+        str,
         typer.Option(
-            "--patchright-context-profile",
-            help="Apply locale/timezone/media profile metadata in Patchright contexts.",
+            "--profile-mode",
+            help=(
+                "How much of --profile pages see: native (none, the default), locale "
+                "(locale, timezone, media, headers) or full (also viewport and user agent)."
+            ),
         ),
-    ] = False,
+    ] = "native",
     reduce_fingerprint_surface: Annotated[
         bool,
         typer.Option(
@@ -362,13 +351,12 @@ def fetch_command(
         ),
     ] = None,
 ) -> None:
-    """Fetch a URL with the Patchright stealth driver and report the result."""
+    """Fetch a URL in headless Chromium and report the result."""
     asyncio.run(
         _fetch(
             url=url,
             profile=profile,
             channel=channel,
-            driver=driver,
             user_data_dir=user_data_dir,
             screenshot=screenshot,
             output=output,
@@ -386,7 +374,7 @@ def fetch_command(
             resource_policy=resource_policy,
             decline_cookies=decline_cookies,
             decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-            patchright_context_profile=patchright_context_profile,
+            profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
@@ -404,7 +392,6 @@ async def _fetch(
     url: str,
     profile: str,
     channel: str | None,
-    driver: str,
     user_data_dir: Path | None,
     screenshot: Path | None,
     output: Path | None,
@@ -420,9 +407,9 @@ async def _fetch(
     ready_selector: str | None,
     timeout_ms: float,
     resource_policy: ResourcePolicy,
-    decline_cookies: bool | None,
+    decline_cookies: bool,
     decline_cookies_timeout_ms: float,
-    patchright_context_profile: bool,
+    profile_mode: str,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     virtual_display: bool,
@@ -433,23 +420,17 @@ async def _fetch(
     webrtc_ip_handling_policy: str | None,
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
-    selected_driver = parse_cli_value(driver, parse_fetch_driver)
     selected_profile = get_profile(profile)
     config = SessionConfig(
-        driver="patchright",
         headless=True,
         channel=channel,
         chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
         user_data_dir=user_data_dir,
         navigation_timeout_ms=timeout_ms,
         resource_policy=resource_policy,
-        # On by default for Patchright only: the CDP driver has no consent
-        # dismissal yet, so only an explicit request is refused there.
-        decline_cookies=(
-            selected_driver == "patchright" if decline_cookies is None else decline_cookies
-        ),
+        decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-        patchright_context_profile=patchright_context_profile,
+        profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
@@ -465,7 +446,6 @@ async def _fetch(
         result = await _fetch_with_channel_fallback(
             config,
             parsed_output_format,
-            driver=selected_driver,
             url=url,
             profile=selected_profile,
             wait_until=parse_cli_value(wait_until, parse_wait_until),
@@ -529,23 +509,15 @@ def search_command(
         typer.Option(
             "--profile",
             "-p",
-            help="Bundled profile metadata (requires --patchright-context-profile).",
+            help="Bundled profile; --profile-mode decides how much of it pages see.",
         ),
     ] = "desktop-chrome",
     channel: Annotated[
         str | None,
-        typer.Option("--channel", help="Browser channel for headless Patchright stealth."),
-    ] = "chrome",
-    driver: Annotated[
-        str,
         typer.Option(
-            "--driver",
-            help=(
-                "patchright, or cdp: WebSkrap's own experimental CDP driver, which does not "
-                "dismiss cookie notices."
-            ),
+            "--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."
         ),
-    ] = "patchright",
+    ] = "chrome",
     user_data_dir: Annotated[
         Path | None,
         typer.Option("--user-data-dir", help="Persistent browser profile directory."),
@@ -563,15 +535,12 @@ def search_command(
         typer.Option("--resource-policy", help="Resource routing preset."),
     ] = ResourcePolicy.ALL,
     decline_cookies: Annotated[
-        bool | None,
+        bool,
         typer.Option(
             "--decline-cookies/--no-decline-cookies",
-            help=(
-                "Click the reject button of a cookie consent notice on the results page. "
-                "Default on for patchright; cdp does not support it."
-            ),
+            help="Click the reject button of a cookie consent notice on the results page.",
         ),
-    ] = None,
+    ] = True,
     decline_cookies_timeout_ms: Annotated[
         float,
         typer.Option(
@@ -580,13 +549,16 @@ def search_command(
             help="How long to wait for a cookie consent notice to appear.",
         ),
     ] = 2_000,
-    patchright_context_profile: Annotated[
-        bool,
+    profile_mode: Annotated[
+        str,
         typer.Option(
-            "--patchright-context-profile",
-            help="Apply locale/timezone/media profile metadata in Patchright contexts.",
+            "--profile-mode",
+            help=(
+                "How much of --profile pages see: native (none, the default), locale "
+                "(locale, timezone, media, headers) or full (also viewport and user agent)."
+            ),
         ),
-    ] = False,
+    ] = "native",
     reduce_fingerprint_surface: Annotated[
         bool,
         typer.Option(
@@ -664,14 +636,13 @@ def search_command(
             max_results=max_results,
             profile=profile,
             channel=channel,
-            driver=driver,
             user_data_dir=user_data_dir,
             output_format=output_format,
             timeout_ms=timeout_ms,
             resource_policy=resource_policy,
             decline_cookies=decline_cookies,
             decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-            patchright_context_profile=patchright_context_profile,
+            profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
@@ -691,14 +662,13 @@ async def _search(
     max_results: int,
     profile: str,
     channel: str | None,
-    driver: str,
     user_data_dir: Path | None,
     output_format: str,
     timeout_ms: float,
     resource_policy: ResourcePolicy,
-    decline_cookies: bool | None,
+    decline_cookies: bool,
     decline_cookies_timeout_ms: float,
-    patchright_context_profile: bool,
+    profile_mode: str,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     virtual_display: bool,
@@ -709,21 +679,16 @@ async def _search(
     webrtc_ip_handling_policy: str | None,
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
-    selected_driver = parse_cli_value(driver, parse_fetch_driver)
     config = SessionConfig(
-        driver="patchright",
         headless=True,
         channel=channel,
         chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
         user_data_dir=user_data_dir,
         navigation_timeout_ms=timeout_ms,
         resource_policy=resource_policy,
-        # As with fetch: on by default for Patchright only.
-        decline_cookies=(
-            selected_driver == "patchright" if decline_cookies is None else decline_cookies
-        ),
+        decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-        patchright_context_profile=patchright_context_profile,
+        profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
@@ -739,7 +704,6 @@ async def _search(
         result = await _with_channel_fallback(
             lambda resolved: _run_search(
                 resolved,
-                driver=selected_driver,
                 query=query,
                 engine=engine,
                 max_results=max_results,
@@ -775,28 +739,20 @@ async def _search(
 def _fail_launch(exc: Exception, output_format: OutputFormat) -> NoReturn:
     """Report an unlaunchable browser the way `doctor` does, not as a traceback."""
     if is_sandbox_failure(exc):
-        # Playwright's first line only says the browser closed; the cause is
-        # in the browser log below it.
+        # The first line only says the browser closed; the cause is in the
+        # browser log below it.
         message = "Browser did not launch: Chromium's OS sandbox could not start"
         fail(WebSkrapError(message, code=ErrorCode.SANDBOX), output_format)
     message = f"Browser did not launch: {first_line(exc)}"
     fail(WebSkrapError(message, code=ErrorCode.BROWSER_LAUNCH), output_format)
 
 
-async def _run_fetch(
-    config: SessionConfig, *, driver: FetchDriver = "patchright", **kwargs: Any
-) -> FetchResult:
-    if driver == "cdp":
-        return await cdp_fetch(config=config, **kwargs)
+async def _run_fetch(config: SessionConfig, **kwargs: Any) -> FetchResult:
     async with WebSkrapClient() as client:
         return await client.fetch(config=config, **kwargs)
 
 
-async def _run_search(
-    config: SessionConfig, *, driver: FetchDriver = "patchright", **kwargs: Any
-) -> SearchResult:
-    if driver == "cdp":
-        return await cdp_search(config=config, **kwargs)
+async def _run_search(config: SessionConfig, **kwargs: Any) -> SearchResult:
     async with WebSkrapClient() as client:
         return await client.search(config=config, **kwargs)
 
@@ -834,7 +790,7 @@ def _print_doctor_result(result: dict[str, Any]) -> None:
     if result["ok"]:
         console.print(f"[green]{message}[/green]")
     else:
-        console.print("[yellow]Patchright is unavailable.[/yellow]")
+        console.print("[yellow]Chromium is unavailable.[/yellow]")
         console.print(message)
         if hint := result.get("hint"):
             console.print(str(hint))

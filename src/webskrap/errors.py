@@ -8,7 +8,7 @@ recovery hint and a CLI exit status.
 
 :class:`WebSkrapError` accepts an explicit code. Raise sites that predate this
 module leave it unset, so :func:`classify` falls back to matching the message,
-keeping one taxonomy for WebSkrap and Playwright failures alike.
+keeping one taxonomy for WebSkrap, CDP and Chromium failures alike.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ RECOVERY_HINTS: dict[ErrorCode, str] = {
     ),
     ErrorCode.STALE_REF: (
         "Refs describe one snapshot of the DOM. Take a fresh browser_snapshot and use its refs, "
-        "or pass a Playwright selector instead."
+        "or pass a CSS selector instead."
     ),
     ErrorCode.TIMEOUT: (
         "Raise timeout_ms, wait for a weaker load state (domcontentloaded instead of "
@@ -130,10 +130,8 @@ _MESSAGE_CODES: tuple[tuple[str, ErrorCode], ...] = (
     ("could not create", ErrorCode.PATH_REJECTED),
     ("executable doesn't exist", ErrorCode.BROWSER_LAUNCH),
     ("is not found at", ErrorCode.BROWSER_LAUNCH),
-    ("playwright install", ErrorCode.BROWSER_LAUNCH),
     ("webskrap install", ErrorCode.BROWSER_LAUNCH),
     ("failed to launch", ErrorCode.BROWSER_LAUNCH),
-    ("browsertype.launch", ErrorCode.BROWSER_LAUNCH),
     ("exited during startup", ErrorCode.BROWSER_LAUNCH),
     ("devtools port", ErrorCode.BROWSER_LAUNCH),
     ("chromium is not installed", ErrorCode.BROWSER_LAUNCH),
@@ -150,9 +148,8 @@ class WebSkrapError(RuntimeError):
     """Raised for every WebSkrap-level failure.
 
     Covers bad configuration, closed clients and sessions, missing browsers,
-    and rejected paths. Playwright's own exceptions are left alone so callers
-    can still catch a navigation timeout as a timeout; :func:`classify` gives
-    both the same vocabulary.
+    and rejected paths. Other exceptions are left alone; :func:`classify`
+    gives them the same vocabulary.
     """
 
     def __init__(self, message: str, *, code: ErrorCode | None = None) -> None:
@@ -172,7 +169,7 @@ def classify(exc: BaseException) -> ErrorCode:
 
     An explicit code on a :class:`WebSkrapError` always wins. Otherwise the
     message is matched against :data:`_MESSAGE_CODES`, which also covers
-    Playwright's own exceptions.
+    exceptions WebSkrap did not raise itself.
     """
     if isinstance(exc, WebSkrapError) and exc.code is not None:
         return exc.code
@@ -183,7 +180,7 @@ def classify(exc: BaseException) -> ErrorCode:
     return ErrorCode.INTERNAL
 
 
-#: Text Chromium or Playwright print when the OS sandbox cannot start. Narrower
+#: Text Chromium prints when the OS sandbox cannot start. Narrower
 #: than the ``--no-sandbox`` classification marker, which also matches any
 #: failed launch whose logged command line carries the opt-out flag.
 SANDBOX_FAILURE_MARKERS: tuple[str, ...] = (
@@ -199,14 +196,12 @@ def is_sandbox_failure(exc: BaseException) -> bool:
     return any(marker in text for marker in SANDBOX_FAILURE_MARKERS)
 
 
-#: Text Playwright prints when a browser channel cannot be started at all, as
+#: Text of errors that mean a browser channel cannot be started at all, as
 #: opposed to a page or navigation failing once it is running.
 LAUNCH_FAILURE_MARKERS: tuple[str, ...] = (
-    "executable doesn't exist",
     "is not found at",
-    "playwright install",
+    "webskrap install",
     "failed to launch",
-    "browsertype.launch",
 )
 
 
@@ -236,8 +231,8 @@ def scrub_userinfo(text: str) -> str:
 def first_line(exc: BaseException) -> str:
     """Return ``exc``'s first message line, or its type when it has none.
 
-    Playwright errors carry a call log spanning dozens of lines. Only the first
-    says what failed; the rest is noise in a tool result or a terminal.
+    Launch errors can carry a browser log spanning dozens of lines. Only the
+    first says what failed; the rest is noise in a tool result or a terminal.
     Embedded URL credentials are scrubbed before returning.
     """
     lines = str(exc).strip().splitlines()

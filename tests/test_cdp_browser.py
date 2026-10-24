@@ -2,25 +2,22 @@
 
 from __future__ import annotations
 
-import sys
 import tempfile
 import threading
 from collections.abc import Iterator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 from test_browser_integration import _Handler
 
-from webskrap import ResourcePolicy, SessionConfig
+from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
 from webskrap.cdp import find_executable, launch
-from webskrap.cdp_fetch import fetch
 from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.models import FetchResult
 
-pytestmark = [
-    pytest.mark.browser,
-    pytest.mark.skipif(sys.platform == "win32", reason="the CDP driver needs posix_spawn"),
-]
+pytestmark = pytest.mark.browser
 
 # Logs an Error whose `stack` getter records access. A driver that enabled the
 # Runtime or Console domain serializes logged errors and trips it.
@@ -98,6 +95,11 @@ def config(sandbox_supported: bool) -> SessionConfig:
     return SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
 
 
+async def fetch(url: str, *, config: SessionConfig, **kwargs: Any) -> FetchResult:
+    async with WebSkrapClient(default_config=config) as client:
+        return await client.fetch(url, **kwargs)
+
+
 async def test_fetch_reads_status_text_html_links_and_cookies(
     server: str, config: SessionConfig, tmp_path: Path
 ) -> None:
@@ -170,7 +172,7 @@ async def test_navigation_errors_and_cleanup(
     assert list(tmp_path.iterdir()) == []
 
 
-async def test_evaluate_matches_playwright_forms_under_a_strict_csp(
+async def test_evaluate_accepts_playwright_forms_under_a_strict_csp(
     server: str, sandbox_supported: bool
 ) -> None:
     browser = await launch(

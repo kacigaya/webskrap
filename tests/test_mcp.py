@@ -9,9 +9,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from playwright.async_api import BrowserContext
 
 from webskrap import browser_session, diagnostics, mcp_server
+from webskrap.cdp import CDPBrowser
 from webskrap.client import WebSkrapError, WebSkrapSession
 from webskrap.errors import RECOVERY_HINTS, ErrorCode
 from webskrap.fetch_runtime import FetchRuntime
@@ -107,13 +107,12 @@ def test_fetch_defaults_to_clean_text(monkeypatch: Any) -> None:
     assert result["text"] == "Readable body"
 
 
-def test_fetch_uses_stealth_driver_by_default(monkeypatch: Any) -> None:
+def test_fetch_uses_headless_chrome_by_default(monkeypatch: Any) -> None:
     _fake_client(monkeypatch)
 
     asyncio.run(mcp_server.fetch("https://example.test"))
 
     config = _FakeClient.calls[0]["config"]
-    assert config.driver == "patchright"
     assert config.channel == "chrome"
     assert config.headless is True
     assert _FakeClient.calls[0]["wait_until"] == "networkidle"
@@ -264,7 +263,6 @@ def test_search_uses_the_stealth_fetch_configuration(monkeypatch: Any, tmp_path:
     call = _FakeClient.calls[0]
     assert call["engine"] is SearchEngine.DDG
     config = call["config"]
-    assert config.driver == "patchright"
     assert config.channel == "chrome"
     assert config.headless is True
     assert config.user_data_dir == root / "search" / "ddg"
@@ -675,7 +673,7 @@ def test_fetch_failures_are_classified(monkeypatch: Any) -> None:
     assert "[code: navigation]" in str(caught.value)
 
 
-def test_a_playwright_call_log_is_reduced_to_its_first_line(monkeypatch: Any) -> None:
+def test_a_multiline_error_is_reduced_to_its_first_line(monkeypatch: Any) -> None:
     class _ChattyClient(_FakeClient):
         async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
             raise RuntimeError("Timeout 30000ms exceeded\nCall log:\n  - navigating\n  - waiting")
@@ -819,85 +817,8 @@ def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
             "headless": True,
             "webrtc_ip_handling_policy": "disable_non_proxied_udp",
             "fake_media_devices": True,
-            "driver": None,
         }
     ]
-
-
-def test_browser_open_passes_a_validated_driver(monkeypatch: Any) -> None:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
-        calls.append(kwargs)
-        return {"session": name, "reused": False, "proxy_server": None}
-
-    monkeypatch.setattr(browser_session, "open_session", fake_open)
-    asyncio.run(mcp_server.browser_open(driver="cdp"))
-    assert calls[0]["driver"] == "cdp"
-    with pytest.raises(WebSkrapError) as caught:
-        asyncio.run(mcp_server.browser_open(driver="selenium"))
-    assert "usage" in str(caught.value)
-
-
-def _fetch_result(url: str) -> Any:
-    from webskrap.models import FetchResult
-
-    return FetchResult(
-        url=url,
-        final_url=url,
-        status=200,
-        ok=True,
-        headers={},
-        text="body",
-        title="T",
-        cookies=[],
-        timings={"elapsed_ms": 1.0},
-    )
-
-
-def test_stealth_fetch_routes_driver_cdp(monkeypatch: Any) -> None:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_cdp_fetch(url: str, **kwargs: Any) -> Any:
-        calls.append(kwargs)
-        return _fetch_result(url)
-
-    monkeypatch.setattr(mcp_server, "cdp_fetch", fake_cdp_fetch)
-    payload = asyncio.run(
-        mcp_server.stealth_fetch("https://example.com", channel="chromium", driver="cdp")
-    )
-    assert payload["text"] == "body"
-    # The default-on consent dismissal does not apply to the cdp driver.
-    assert calls[0]["config"].decline_cookies is False
-    assert "decline_cookies" not in calls[0]
-    with pytest.raises(WebSkrapError) as caught:
-        asyncio.run(mcp_server.stealth_fetch("https://example.com", driver="cdp", session="warm"))
-    assert "usage" in str(caught.value)
-
-
-def test_search_routes_driver_cdp(monkeypatch: Any) -> None:
-    from webskrap.models import SearchEngine, SearchResult
-
-    calls: list[dict[str, Any]] = []
-
-    async def fake_cdp_search(query: str, **kwargs: Any) -> SearchResult:
-        calls.append({"query": query, **kwargs})
-        return SearchResult(
-            query=query,
-            engine=SearchEngine.BING,
-            url="https://www.bing.com/search?q=x",
-            final_url="https://www.bing.com/search?q=x",
-            status=200,
-            ok=True,
-            hits=[],
-            hits_total=0,
-            timings={"elapsed_ms": 1.0},
-        )
-
-    monkeypatch.setattr(mcp_server, "cdp_search", fake_cdp_search)
-    asyncio.run(mcp_server.search("x", channel="chromium", driver="cdp"))
-    assert calls[0]["query"] == "x"
-    assert calls[0]["config"].decline_cookies is False
 
 
 def test_browser_open_rejects_an_unknown_webrtc_policy() -> None:
@@ -913,16 +834,16 @@ def test_browser_open_takes_no_proxy_from_the_model() -> None:
 
 
 class _ChromeMissingClient(_FakeClient):
-    """Fails like Playwright does on hosts with no Chrome build (Linux ARM64)."""
+    """Fails like a launch does on hosts with no Chrome build (Linux ARM64)."""
 
     attempts: list[str | None] = []
 
     def _launch(self, config: Any) -> None:
         self.attempts.append(config.channel)
         if config.channel != "chromium":
-            raise RuntimeError(
-                "BrowserType.launch_persistent_context: Chromium distribution "
-                f"'{config.channel}' is not found at /opt/google/chrome/chrome"
+            raise WebSkrapError(
+                f"Chromium distribution '{config.channel}' is not found at /opt/google/chrome",
+                code=ErrorCode.BROWSER_LAUNCH,
             )
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
@@ -958,16 +879,15 @@ def test_tools_fall_back_to_chromium_when_chrome_is_missing(monkeypatch: Any, to
 
 async def test_warm_session_survives_the_channel_fallback(monkeypatch: Any) -> None:
     runtime = FetchRuntime()
-    monkeypatch.setattr(runtime.client, "start", AsyncMock())
     launched: list[str | None] = []
 
     async def create(name, config, profile):
         launched.append(config.channel)
         if config.channel != "chromium":
             raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
-        context = MagicMock(spec=BrowserContext)
-        context.close = AsyncMock()
-        return WebSkrapSession(name=name, config=config, profile=profile, context=context)
+        browser = MagicMock(spec=CDPBrowser)
+        browser.close = AsyncMock()
+        return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
 
     monkeypatch.setattr(runtime.client, "_create_session", create)
     monkeypatch.setattr(WebSkrapSession, "fetch", AsyncMock(return_value="page"))
@@ -993,7 +913,6 @@ async def test_warm_session_survives_the_channel_fallback(monkeypatch: Any) -> N
 
 async def test_concurrent_first_calls_on_one_session_share_the_fallback(monkeypatch: Any) -> None:
     runtime = FetchRuntime()
-    monkeypatch.setattr(runtime.client, "start", AsyncMock())
     launched: list[str | None] = []
 
     async def create(name, config, profile):
@@ -1001,9 +920,9 @@ async def test_concurrent_first_calls_on_one_session_share_the_fallback(monkeypa
         await asyncio.sleep(0)
         if config.channel != "chromium":
             raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
-        context = MagicMock(spec=BrowserContext)
-        context.close = AsyncMock()
-        return WebSkrapSession(name=name, config=config, profile=profile, context=context)
+        browser = MagicMock(spec=CDPBrowser)
+        browser.close = AsyncMock()
+        return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
 
     monkeypatch.setattr(runtime.client, "_create_session", create)
     monkeypatch.setattr(WebSkrapSession, "fetch", AsyncMock(return_value="page"))

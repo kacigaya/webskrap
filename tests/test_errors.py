@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from webskrap import browser_session
 from webskrap.errors import (
@@ -69,12 +68,16 @@ def test_a_sandbox_failure_outranks_the_launch_failure_wrapping_it() -> None:
     assert classify(WebSkrapError(message)) is ErrorCode.SANDBOX
 
 
-def test_playwright_errors_are_classified_too() -> None:
-    assert classify(PlaywrightTimeoutError("Timeout 5000ms exceeded")) is ErrorCode.TIMEOUT
+class _ForeignTimeout(Exception):
+    """An exception WebSkrap did not raise, such as one from user code."""
 
 
-def test_first_line_drops_the_playwright_call_log() -> None:
-    error = PlaywrightTimeoutError("Timeout 5000ms exceeded\nCall log:\n  - waiting for locator")
+def test_foreign_errors_are_classified_by_message() -> None:
+    assert classify(_ForeignTimeout("Timeout 5000ms exceeded")) is ErrorCode.TIMEOUT
+
+
+def test_first_line_drops_a_multi_line_log() -> None:
+    error = _ForeignTimeout("Timeout 5000ms exceeded\nCall log:\n  - waiting for locator")
 
     assert first_line(error) == "Timeout 5000ms exceeded"
 
@@ -163,17 +166,16 @@ def test_blocked_launch_argument_classifies_as_usage() -> None:
     assert classify(WebSkrapError("launch argument '--no-sandbox' is blocked")) is ErrorCode.USAGE
 
 
-# What Playwright raises when a sandboxed launch fails: the first line only says
-# the browser closed, and the cause sits in the browser log below it.
-PLAYWRIGHT_SANDBOX_FAILURE = (
-    "BrowserType.launch: Target page, context or browser has been closed\n"
-    "Browser logs:\nChromium sandboxing failed!\n"
-    "  - (alternative): Launch Chromium without sandbox using 'chromiumSandbox: false' option"
+# A sandbox failure whose first line only says the browser closed; the cause
+# sits in the browser log below it.
+LOGGED_SANDBOX_FAILURE = (
+    "browser exited during startup or closed the CDP pipe\n"
+    "Browser logs:\nChromium sandboxing failed!"
 )
 
 
-def test_playwright_sandbox_failure_is_classified_as_sandbox() -> None:
-    error = RuntimeError(PLAYWRIGHT_SANDBOX_FAILURE)
+def test_logged_sandbox_failure_is_classified_as_sandbox() -> None:
+    error = RuntimeError(LOGGED_SANDBOX_FAILURE)
 
     assert is_sandbox_failure(error)
     assert classify(error) is ErrorCode.SANDBOX
@@ -183,7 +185,7 @@ def test_opt_out_flag_in_a_logged_command_line_is_not_a_sandbox_failure() -> Non
     # Any failed launch logs its argv, which carries --no-sandbox when the
     # caller opted out; that alone must not read as a sandbox problem.
     error = RuntimeError(
-        "BrowserType.launch: Executable doesn't exist\n<launching> chrome --no-sandbox"
+        "Chromium is not installed. Executable doesn't exist\n<launching> chrome --no-sandbox"
     )
 
     assert not is_sandbox_failure(error)

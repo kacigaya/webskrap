@@ -1,15 +1,14 @@
 """Persistent interactive browser sessions shared by the CLI and MCP server.
 
 ``open_session`` launches a detached Chromium that outlives the calling
-process; every action reconnects to it over CDP, acts on the current page, and
-disconnects. The browser gets the same launch flags as a one-shot fetch, and
-actions attach through Patchright, which does not send the CDP
-``Runtime.enable`` command that detectors look for. Snapshots use
-Playwright's AI aria snapshot, so elements carry ``eN`` refs that interaction
-helpers accept alongside Playwright selectors.
+process; every action reconnects to it over CDP with WebSkrap's own client
+(:mod:`webskrap.cdp_session`), acts on the current page, and disconnects. The
+browser gets the same launch flags as a one-shot fetch, and no action sends
+the CDP ``Runtime.enable`` command that detectors look for. Snapshots carry
+``eN`` refs that interaction helpers accept alongside CSS selectors.
 
-All failures raise :class:`~webskrap.errors.WebSkrapError` (or propagate
-Playwright errors); presentation layers translate them for their medium.
+All failures raise :class:`~webskrap.errors.WebSkrapError`; presentation
+layers translate them for their medium.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ import os
 import re
 import shutil
 import signal
-import struct
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for Chromium, never a shell
 import sys
 import time
@@ -33,20 +31,13 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, BinaryIO, Literal, TypedDict, TypeVar
-
-from patchright.async_api import Error as PlaywrightError
-from patchright.async_api import Locator, Page
-from patchright.async_api import async_playwright as patchright_playwright
-from playwright.async_api import async_playwright
+from typing import Any, BinaryIO, TypedDict, TypeVar
 
 from webskrap import cdp_dom, cdp_session
-from webskrap import human as humanize
-from webskrap.cdp import CDPPage
+from webskrap.cdp import CDPPage, find_executable
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
     ElementState,
-    FetchDriver,
     LoadState,
     ProxyConfig,
     SessionConfig,
@@ -55,14 +46,13 @@ from webskrap.models import (
     text_window,
 )
 from webskrap.paths import secure_directory
-from webskrap.urls import validate_url
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-#: A session page on either driver; see :func:`run_page_action`.
-SessionPage = Page | CDPPage
+#: The page type session actions receive; see :func:`run_page_action`.
+SessionPage = CDPPage
 
 SESSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
@@ -310,22 +300,12 @@ def is_session_dir(path: Path) -> bool:
 
 
 async def chromium_executable() -> str:
-    """Return the Chromium binary path, preferring Playwright's download.
+    """Return the Chromium binary sessions launch; see :func:`webskrap.cdp.find_executable`.
 
     Raises:
-        WebSkrapError: If neither Playwright nor Patchright has Chromium
-            installed.
+        WebSkrapError: ``browser_launch`` when no Chromium is installed.
     """
-    async with async_playwright() as playwright:
-        path = playwright.chromium.executable_path
-    if Path(path).exists():
-        return path
-    async with patchright_playwright() as playwright:
-        path = playwright.chromium.executable_path
-    if Path(path).exists():
-        return path
-    msg = "Chromium is not installed. Run: webskrap install"
-    raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
+    return str(find_executable("chromium"))
 
 
 def _windows_session_running(pid: int, created_at: str | None) -> bool:
@@ -429,12 +409,8 @@ def stealth_launch_args(
     definition: ``--disable-blink-features=AutomationControlled`` (otherwise a
     remote-debugging port sets ``navigator.webdriver``), the headless virtual
     screen and smaller window (otherwise 800x600 at 10,10), ``--no-sandbox`` only
-    when the sandbox is off, and the WebRTC policy, which defaults to
-    ``disable_non_proxied_udp`` behind a proxy. ``driver="playwright"`` is
-    deliberate: Patchright injects the automation flag itself when it
-    launches, but here WebSkrap spawns the process, so the flag has to be on
-    the command line. The proxy itself is a Playwright context option there,
-    so it is added as ``--proxy-server`` here.
+    when the sandbox is off, ``--proxy-server`` for the proxy, and the WebRTC
+    policy, which defaults to ``disable_non_proxied_udp`` behind a proxy.
 
     Raises:
         WebSkrapError: If ``proxy_server`` is not a proxy URL WebSkrap accepts
@@ -448,10 +424,7 @@ def stealth_launch_args(
         webrtc_ip_handling_policy=webrtc_ip_handling_policy,
         fake_media_devices=fake_media_devices,
     )
-    args = list(config.launch_options().get("args", []))
-    if proxy is not None:
-        args.append(f"--proxy-server={proxy.server}")
-    return args
+    return config.browser_args()
 
 
 def persistent_proxy_server(server: str) -> str:
@@ -522,10 +495,14 @@ def launch_browser(
         "--no-first-run",
         "--no-default-browser-check",
         # A bfcache restore re-fires no load events, stranding the
-        # go_back/go_forward load wait. Playwright's own launcher keeps bfcache
-        # and tracks restores internally, but that tracking is unavailable when
-        # attaching over CDP, so trade bfcache for deterministic load events.
+        # go_back/go_forward load wait. Each command attaches anew and cannot
+        # track restores across attachments, so trade bfcache for
+        # deterministic load events.
         "--disable-features=BackForwardCache",
+        # As in webskrap.cdp.launch: Chromium builds apply testing field
+        # trials that stable Chrome never runs, one of which trims
+        # navigator.languages to a single entry.
+        "--disable-field-trial-config",
         *stealth_launch_args(
             headless=headless,
             chromium_sandbox=chromium_sandbox,
@@ -539,8 +516,8 @@ def launch_browser(
     command.append("about:blank")
 
     with log_path.open("wb") as log:
-        # Fixed argv, no shell. The executable comes from the installed
-        # Playwright/Patchright browser, and every argument is either a
+        # Fixed argv, no shell. The executable comes from find_executable (the
+        # installed Chrome for Testing), and every argument is either a
         # constant flag or this session's own validated directory -- nothing
         # here is reachable from page content.
         process = subprocess.Popen(  # nosec B603  # noqa: S603
@@ -642,7 +619,6 @@ async def open_session(
     proxy_server: str | None = None,
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
     fake_media_devices: bool = False,
-    driver: FetchDriver | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
@@ -660,14 +636,11 @@ async def open_session(
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy. Defaults to
             ``disable_non_proxied_udp`` when ``proxy_server`` is set.
         fake_media_devices: Supply a synthetic camera and microphone.
-        driver: How later actions attach: ``patchright`` (the default for a
-            new session) or ``cdp``, WebSkrap's own experimental driver.
-            None keeps a running session's driver.
 
     Returns:
         ``{"session", "pid", "port", "reused", "chromium_sandbox",
-        "proxy_server", "webrtc_ip_handling_policy", "fake_media_devices",
-        "driver"}``. The last four describe the running browser's settings.
+        "proxy_server", "webrtc_ip_handling_policy", "fake_media_devices"}``.
+        The last three describe the running browser's launch settings.
 
     Raises:
         WebSkrapError: If the name or proxy is invalid, the browser fails to
@@ -688,14 +661,6 @@ async def open_session(
         reused = state is not None
         if state is not None:
             _require_same_network(name, state, proxy_server, webrtc_ip_handling_policy)
-            running_driver = state.get("driver", "patchright")
-            if driver is not None and driver != running_driver:
-                # Snapshot refs from one driver do not resolve in the other.
-                msg = (
-                    f"session '{name}' is already running with driver '{running_driver}'. "
-                    f"Run: webskrap browser close --session {name}, then open it again"
-                )
-                raise WebSkrapError(msg, code=ErrorCode.USAGE)
             if fake_media_devices and not state.get("fake_media_devices", False):
                 msg = (
                     f"session '{name}' is already running without fake media devices. "
@@ -726,7 +691,6 @@ async def open_session(
                 # a different proxy. Never holds credentials; those are refused.
                 "proxy_server": proxy_server,
                 "fake_media_devices": fake_media_devices,
-                "driver": driver or "patchright",
                 "webrtc_ip_handling_policy": SessionConfig(
                     proxy=ProxyConfig(server=proxy_server) if proxy_server else None,
                     webrtc_ip_handling_policy=webrtc_ip_handling_policy,
@@ -750,7 +714,6 @@ async def open_session(
             "proxy_server": state.get("proxy_server"),
             "webrtc_ip_handling_policy": state.get("webrtc_ip_handling_policy"),
             "fake_media_devices": bool(state.get("fake_media_devices", False)),
-            "driver": state.get("driver", "patchright"),
         }
     finally:
         await asyncio.to_thread(operation_lock.release)
@@ -865,61 +828,19 @@ async def run_page_action(
 ) -> T:
     """Connect to the session's browser, run ``action`` on the current page.
 
-    The session's recorded driver decides the page type. A ``cdp`` session
-    attaches over WebSkrap's own WebSocket client (:func:`cdp_session.attach`).
-    Otherwise Patchright attaches, not Playwright: Playwright enables the CDP
-    ``Runtime`` domain on connect, which pages detect through console
-    serialization side effects in the page and in workers.
+    Attaches over WebSkrap's own WebSocket client (:func:`cdp_session.attach`)
+    to the newest page, as each CLI command and MCP call is a new connection.
+    Sessions opened by WebSkrap 2.x, with either driver, attach the same way.
     """
     directory = session_dir(name)
     state = read_state(directory)
     if state is None:
         msg = f"session '{name}' is not open. Run: webskrap browser open"
         raise WebSkrapError(msg, code=ErrorCode.NO_SESSION)
-    if state.get("driver") == "cdp":
-        async with cdp_session.attach(
-            name, directory / "user-data", state["port"], timeout_ms=timeout_ms
-        ) as cdp_page:
-            return await action(cdp_page)
-    async with patchright_playwright() as playwright:
-        try:
-            browser = await playwright.chromium.connect_over_cdp(
-                f"http://127.0.0.1:{state['port']}"
-            )
-        except PlaywrightError as exc:
-            msg = (
-                f"session '{name}' is not reachable. "
-                "Run: webskrap browser close, then webskrap browser open"
-            )
-            raise WebSkrapError(msg, code=ErrorCode.SESSION_UNREACHABLE) from exc
-        try:
-            context = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = context.pages[-1] if context.pages else await context.new_page()
-            page.set_default_timeout(timeout_ms)
-            page.set_default_navigation_timeout(timeout_ms)
-            return await action(page)
-        finally:
-            await browser.close()
-
-
-def target_selector(target: str) -> str:
-    """Map a snapshot ref like ``e12`` to its selector; pass selectors through."""
-    if SNAPSHOT_REF_PATTERN.fullmatch(target):
-        return f"aria-ref={target}"
-    return target
-
-
-async def resolve_locator(page: Page, target: str) -> Locator:
-    """Return a locator for a snapshot ref (``e12``) or a Playwright selector.
-
-    Refs only resolve against an aria snapshot taken on the current CDP
-    connection, and each action runs on a fresh one, so retake the snapshot
-    first. Refs are stable for an unchanged DOM; after a DOM change they are
-    stale and the caller should snapshot again.
-    """
-    if SNAPSHOT_REF_PATTERN.fullmatch(target):
-        await page.locator("body").aria_snapshot(mode="ai")
-    return page.locator(target_selector(target))
+    async with cdp_session.attach(
+        name, directory / "user-data", state["port"], timeout_ms=timeout_ms
+    ) as page:
+        return await action(page)
 
 
 def element_arguments(action: str, values: list[str]) -> list[Any]:
@@ -945,50 +866,31 @@ def element_arguments(action: str, values: list[str]) -> list[Any]:
     return [values]
 
 
-#: Actions driven through :mod:`webskrap.human` instead of the locator
-#: method, with extra mouse options: ``click`` and ``dblclick``.
-HUMAN_CLICK_ACTIONS: dict[str, dict[str, int]] = {"click": {}, "dblclick": {"click_count": 2}}
-
-
-async def element_action(page: SessionPage, action: str, target: str, values: list[str]) -> None:
+async def element_action(page: CDPPage, action: str, target: str, values: list[str]) -> None:
     """Run an :data:`ELEMENT_ACTIONS` interaction against ``target``.
 
-    Clicks go along a human cursor path with a human button hold, refusing a
-    covered element (see :func:`webskrap.human.click`). ``type``
-    clicks into the field and types with human keystroke timing (see
-    :func:`webskrap.human.type_text`); ``fill`` still sets the value at once.
+    ``target`` is a snapshot ref (``e12``) or a CSS selector. Clicks go along a
+    human cursor path with a human button hold, refusing a covered element;
+    ``type`` clicks into the field and types with human keystroke timing;
+    ``fill`` sets the value at once. See :func:`webskrap.cdp_dom.element_action`.
     """
     arguments = element_arguments(action, values)
-    if isinstance(page, CDPPage):
-        await cdp_dom.element_action(page, action, target, arguments)
-        return
-    locator = await resolve_locator(page, target)
-    if action in HUMAN_CLICK_ACTIONS:
-        await humanize.click(page, locator, description=target, **HUMAN_CLICK_ACTIONS[action])
-        return
-    if action == "type":
-        await humanize.type_text(page, locator, arguments[0], description=target)
-        return
-    await getattr(locator, ELEMENT_ACTIONS[action][0])(*arguments)
+    await cdp_dom.element_action(page, action, target, arguments)
 
 
-async def evaluate(page: SessionPage, expression: str) -> Any:
+async def evaluate(page: CDPPage, expression: str) -> Any:
     """Evaluate ``expression`` in the page's own JavaScript world.
 
-    Patchright evaluates in an isolated world by default, which shares the DOM
-    but not page globals, so ``window.app`` would read as undefined. An
-    ``eval`` caller expects what the page's scripts see.
+    An ``eval`` caller expects what the page's scripts see, such as
+    ``window.app``, so this does not use an isolated world. See
+    :func:`webskrap.cdp_session.evaluate`.
     """
-    if isinstance(page, CDPPage):
-        return await cdp_session.evaluate(page, expression)
-    return await page.evaluate(expression, isolated_context=False)
+    return await cdp_session.evaluate(page, expression)
 
 
-async def page_state(page: SessionPage) -> dict[str, Any]:
+async def page_state(page: CDPPage) -> dict[str, Any]:
     """Return the page's current ``{"url", "title"}``."""
-    if isinstance(page, CDPPage):
-        return await cdp_session.page_state(page)
-    return {"url": page.url, "title": await page.title()}
+    return await cdp_session.page_state(page)
 
 
 class Viewport(TypedDict):
@@ -1000,13 +902,9 @@ class Viewport(TypedDict):
     scroll_y: float
 
 
-async def viewport(page: SessionPage) -> Viewport:
-    """Read geometry even for CDP pages without an emulated viewport size."""
-    if isinstance(page, CDPPage):
-        return await cdp_session.viewport(page)
-    return await page.evaluate(
-        "() => ({width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY})"
-    )
+async def viewport(page: CDPPage) -> Viewport:
+    """Return viewport size and scroll offset in CSS pixels."""
+    return await cdp_session.viewport(page)
 
 
 @dataclass(frozen=True)
@@ -1035,26 +933,13 @@ class BrowserView:
         }
 
 
-async def view(page: SessionPage) -> BrowserView:
+async def view(page: CDPPage) -> BrowserView:
     """Capture the visible page at one image pixel per CSS pixel.
 
     Full-page and device-scale screenshots cannot be used directly with mouse
     coordinates. Read PNG dimensions so metadata describes the actual image.
     """
-    if isinstance(page, CDPPage):
-        return await cdp_session.view(page)
-    geometry = await viewport(page)
-    image = await page.screenshot(type="png", full_page=False, scale="css")
-    width, height = struct.unpack(">II", image[16:24])
-    return BrowserView(
-        image=image,
-        url=page.url,
-        title=await page.title(),
-        width=width,
-        height=height,
-        scroll_x=geometry["scroll_x"],
-        scroll_y=geometry["scroll_y"],
-    )
+    return await cdp_session.view(page)
 
 
 def validate_mouse(
@@ -1097,7 +982,7 @@ def validate_mouse(
 
 
 async def mouse_action(
-    page: SessionPage,
+    page: CDPPage,
     action: str,
     x: float,
     y: float,
@@ -1131,137 +1016,67 @@ async def mouse_action(
     if any(not (0 <= px < geometry["width"] and 0 <= py < geometry["height"]) for px, py in points):
         msg = "mouse coordinates are outside the viewport; take a fresh view before acting"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
-    if isinstance(page, CDPPage):
-        return await cdp_session.mouse_action(
-            page,
-            action,
-            x,
-            y,
-            end_x=end_x,
-            end_y=end_y,
-            delta_x=delta_x,
-            delta_y=delta_y,
-            button=button,
-        )
-    # Narrow once for Playwright's literal button contract, without unsafe casts.
-    mouse_button: Literal["left", "middle", "right"]
-    if button == "middle":
-        mouse_button = "middle"
-    elif button == "right":
-        mouse_button = "right"
-    else:
-        mouse_button = "left"
-    if action in {"click", "dblclick"}:
-        await page.mouse.click(
-            x, y, button=mouse_button, click_count=2 if action == "dblclick" else 1
-        )
-    elif action == "move":
-        await page.mouse.move(x, y)
-    elif action == "scroll":
-        await page.mouse.move(x, y)
-        await page.mouse.wheel(delta_x, delta_y)
-    elif action == "drag" and end_x is not None and end_y is not None:
-        await page.mouse.move(x, y)
-        await page.mouse.down(button=mouse_button)
-        try:
-            await page.mouse.move(end_x, end_y, steps=10)
-        finally:
-            await page.mouse.up(button=mouse_button)
-    return await page_state(page)
+    return await cdp_session.mouse_action(
+        page,
+        action,
+        x,
+        y,
+        end_x=end_x,
+        end_y=end_y,
+        delta_x=delta_x,
+        delta_y=delta_y,
+        button=button,
+    )
 
 
-async def insert_text(page: SessionPage, text: str) -> dict[str, Any]:
+async def insert_text(page: CDPPage, text: str) -> dict[str, Any]:
     """Insert literal text into the focused control without interpreting keys."""
-    if isinstance(page, CDPPage):
-        return await cdp_session.insert_text(page, text)
-    await page.keyboard.insert_text(text)
-    return await page_state(page)
+    return await cdp_session.insert_text(page, text)
 
 
-async def goto(page: SessionPage, url: str, wait_until: WaitUntil) -> dict[str, Any]:
+async def goto(page: CDPPage, url: str, wait_until: WaitUntil) -> dict[str, Any]:
     """Navigate ``page`` to ``url`` and return its status and state."""
-    if isinstance(page, CDPPage):
-        return await cdp_session.goto(page, url, wait_until)
-    url = validate_url(url)
-    response = await page.goto(url, wait_until=wait_until)
-    return {"status": response.status if response else None, **await page_state(page)}
+    return await cdp_session.goto(page, url, wait_until)
 
 
-#: History commands :func:`history` accepts, named after Playwright's methods.
+#: History commands :func:`history` accepts, named after the 2.x Playwright methods.
 HISTORY_METHODS = ("go_back", "go_forward", "reload")
 
 
-async def history(page: SessionPage, method: str) -> dict[str, Any]:
+async def history(page: CDPPage, method: str) -> dict[str, Any]:
     """Run a :data:`HISTORY_METHODS` command and return the page state after it."""
     if method not in HISTORY_METHODS:
         msg = f"history method must be one of {', '.join(HISTORY_METHODS)}"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
-    if isinstance(page, CDPPage):
-        return await cdp_session.history(page, method)
-    await getattr(page, method)()
+    return await cdp_session.history(page, method)
+
+
+async def press(page: CDPPage, key: str) -> dict[str, Any]:
+    """Press ``key`` (e.g. ``Enter`` or ``Control+a``); return the page state."""
+    await cdp_session.press(page, key)
     return await page_state(page)
 
 
-async def press(page: SessionPage, key: str) -> dict[str, Any]:
-    """Press ``key`` (Playwright syntax, e.g. ``Control+a``); return the page state."""
-    if isinstance(page, CDPPage):
-        await cdp_session.press(page, key)
-    else:
-        await page.keyboard.press(key)
-    return await page_state(page)
-
-
-async def screenshot(page: SessionPage, path: Path, *, full_page: bool) -> dict[str, Any]:
+async def screenshot(page: CDPPage, path: Path, *, full_page: bool) -> dict[str, Any]:
     """Write a PNG to ``path``; return the page state plus ``path``."""
-    if isinstance(page, CDPPage):
-        await cdp_session.screenshot(page, path, full_page=full_page)
-    else:
-        await page.screenshot(path=str(path), full_page=full_page)
+    await cdp_session.screenshot(page, path, full_page=full_page)
     return {**await page_state(page), "path": str(path)}
 
 
-async def snapshot(page: SessionPage, *, depth: int | None = None) -> dict[str, Any]:
-    """Return the page state plus an aria snapshot carrying ``eN`` refs."""
-    if isinstance(page, CDPPage):
-        tree = await cdp_dom.snapshot(page, depth=depth)
-        return {**await page_state(page), "snapshot": tree}
-    tree = await page.locator("body").aria_snapshot(mode="ai", depth=depth)
+async def snapshot(page: CDPPage, *, depth: int | None = None) -> dict[str, Any]:
+    """Return the page state plus a snapshot whose elements carry ``eN`` refs."""
+    tree = await cdp_dom.snapshot(page, depth=depth)
     return {**await page_state(page), "snapshot": tree}
 
 
-async def read_text(page: SessionPage, *, max_chars: int, offset: int = 0) -> dict[str, Any]:
+async def read_text(page: CDPPage, *, max_chars: int, offset: int = 0) -> dict[str, Any]:
     """Return a visible-text window, limiting data transferred from the browser.
 
-    Iterate Unicode code points to match Python's text_window offsets, including
-    astral characters. innerText preserves the existing visible-text semantics;
-    the browser still computes full body text to report its exact length.
+    Offsets count Unicode code points, to match Python's text_window offsets,
+    including astral characters. The browser still computes the full body
+    text to report its exact length.
     """
-    if isinstance(page, CDPPage):
-        return await cdp_session.read_text(page, max_chars=max_chars, offset=offset)
-    window = await page.locator("body").evaluate(
-        """(body, {limit, start}) => {
-          const text = body.innerText;
-          const end = start + limit;
-          const selected = [];
-          let length = 0;
-          for (const character of text) {
-            if (length >= start && length < end) selected.push(character);
-            length++;
-          }
-          const offset = Math.min(start, length);
-          const stop = Math.min(end, length);
-          return {
-            title: document.title,
-            text: selected.join(''),
-            text_length: length,
-            text_offset: offset,
-            text_truncated: stop < length,
-            next_text_offset: stop < length ? stop : null,
-          };
-        }""",
-        {"limit": max(0, max_chars), "start": max(0, offset)},
-    )
-    return {"url": page.url, **window}
+    return await cdp_session.read_text(page, max_chars=max_chars, offset=offset)
 
 
 def wait_condition(
@@ -1297,7 +1112,7 @@ def wait_condition(
 
 
 async def wait_for(
-    page: SessionPage,
+    page: CDPPage,
     *,
     text: str | None = None,
     text_gone: str | None = None,
@@ -1317,7 +1132,7 @@ async def wait_for(
         text: Wait until this text is visible.
         text_gone: Wait until this text is no longer visible. Text that was
             never there satisfies this immediately.
-        selector: Wait until this snapshot ref or Playwright selector reaches
+        selector: Wait until this snapshot ref or CSS selector reaches
             ``selector_state``.
         selector_state: Element state to wait for, with ``selector``.
         load_state: Wait until the page reaches this load state.
@@ -1330,27 +1145,16 @@ async def wait_for(
     # so these run as a chain of one; separate ifs keep each branch's argument
     # narrowed to a non-None type without an assert or a cast.
     condition = wait_condition(text, text_gone, selector, load_state)
-    if isinstance(page, CDPPage):
-        return await cdp_session.wait_for(
-            page,
-            condition=condition,
-            text=text,
-            text_gone=text_gone,
-            selector=selector,
-            selector_state=selector_state,
-            load_state=load_state,
-            timeout_ms=timeout_ms,
-        )
-    if text is not None:
-        await page.get_by_text(text).first.wait_for(state="visible", timeout=timeout_ms)
-    if text_gone is not None:
-        await page.get_by_text(text_gone).first.wait_for(state="hidden", timeout=timeout_ms)
-    if selector is not None:
-        locator = await resolve_locator(page, selector)
-        await locator.first.wait_for(state=selector_state, timeout=timeout_ms)
-    if load_state is not None:
-        await page.wait_for_load_state(load_state, timeout=timeout_ms)
-    return {**await page_state(page), "matched": condition}
+    return await cdp_session.wait_for(
+        page,
+        condition=condition,
+        text=text,
+        text_gone=text_gone,
+        selector=selector,
+        selector_state=selector_state,
+        load_state=load_state,
+        timeout_ms=timeout_ms,
+    )
 
 
 def shape_snapshot(result: dict[str, Any], max_chars: int, offset: int = 0) -> dict[str, Any]:

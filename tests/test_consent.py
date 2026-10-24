@@ -1,172 +1,124 @@
 from __future__ import annotations
 
-import pytest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from webskrap.consent import (
-    CMP_REJECT_CSS,
-    REJECT_TEXT_PATTERN,
-    decline_cookies,
+import pytest
+from conftest import set_page_content
+
+from webskrap import SessionConfig, WebSkrapClient
+from webskrap.cdp import CDPPage
+from webskrap.consent import REJECT_TEXT_PATTERN, decline_cookies
+
+# Each control records its own click in the DOM, where an isolated-world
+# evaluate can read it; input that is not trusted does not count.
+_RECORD = (
+    'onclick="event.isTrusted && '
+    "(document.body.dataset.clicked = (document.body.dataset.clicked || '') + this.id + ' ')\""
 )
 
 
-class _Element:
-    def __init__(self, *, visible: bool = True, clickable: bool = True) -> None:
-        self.visible = visible
-        self.clickable = clickable
-        self.clicked = False
-
-    async def is_visible(self) -> bool:
-        return self.visible
-
-    async def click(self, **_options: object) -> None:
-        # Even a trial click is visible to the page (a scroll, a mousemove
-        # and a click event); consent must only click through webskrap.human.
-        raise AssertionError("consent clicked through Playwright")
+@asynccontextmanager
+async def _page(html: str, sandbox: bool) -> AsyncIterator[CDPPage]:
+    async with WebSkrapClient(default_config=SessionConfig(chromium_sandbox=sandbox)) as client:
+        session = await client.session("consent")
+        page = await session.new_page()
+        await set_page_content(page, html)
+        yield page
 
 
-@pytest.fixture(autouse=True)
-def _record_human_clicks(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, object]]:
-    clicks: list[tuple[object, object]] = []
-
-    async def fake_click(page: object, element: _Element, **_options: object) -> None:
-        if not element.clickable:
-            raise RuntimeError("another element covers the click point")
-        clicks.append((page, element))
-        element.clicked = True
-
-    monkeypatch.setattr("webskrap.human.click", fake_click)
-    return clicks
+async def _clicked(page: CDPPage) -> list[str]:
+    return (await page.evaluate("document.body.dataset.clicked || ''")).split()
 
 
-class _Locator:
-    """Fake locator. ``elements`` is None to model a selector that never matches."""
-
-    def __init__(self, elements: list[_Element] | None = None) -> None:
-        self.elements = elements or []
-        self.filtered_with: list[object] = []
-
-    def locator(self, _selector: str) -> _Locator:
-        return self
-
-    def filter(self, *, has_text: object = None) -> _Locator:
-        self.filtered_with.append(has_text)
-        return self
-
-    async def count(self) -> int:
-        return len(self.elements)
-
-    def nth(self, index: int) -> _Element:
-        return self.elements[index]
+@pytest.mark.browser
+async def test_clicks_known_cmp_reject_button(sandbox_supported: bool) -> None:
+    html = f'<button id="onetrust-reject-all-handler" {_RECORD}>Reject</button>'
+    async with _page(html, sandbox_supported) as page:
+        assert await decline_cookies(page) == "cmp"
+        assert await _clicked(page) == ["onetrust-reject-all-handler"]
 
 
-class _Frame:
-    def __init__(self, cmp: _Locator | None = None, text: _Locator | None = None) -> None:
-        self.cmp = cmp or _Locator()
-        self.text = text or _Locator()
-        self.selectors: list[str] = []
-
-    def locator(self, selector: str) -> _Locator:
-        self.selectors.append(selector)
-        return self.cmp if selector == CMP_REJECT_CSS else self.text
-
-
-class _Page:
-    def __init__(self, frames: list[_Frame], *, notice_found: bool = True) -> None:
-        self.frames = frames
-        self.notice_found = notice_found
-        self.waited_selector: str | None = None
-        self.waited_timeout: float | None = None
-        self.settled = False
-
-    async def wait_for_selector(self, selector: str, *, timeout: float) -> object:
-        self.waited_selector = selector
-        self.waited_timeout = timeout
-        if not self.notice_found:
-            raise TimeoutError("no consent notice")
-        return object()
-
-    async def wait_for_timeout(self, _timeout: float) -> None:
-        self.settled = True
+@pytest.mark.browser
+async def test_falls_back_to_reject_text_inside_consent_container(
+    sandbox_supported: bool,
+) -> None:
+    # A "Decline" outside the notice is never a candidate.
+    html = (
+        f'<button id="outside" {_RECORD}>Decline invitation</button>'
+        f'<div class="cookie-banner"><button id="accept" {_RECORD}>Accept all</button>'
+        f'<button id="reject" {_RECORD}>Tout refuser</button></div>'
+    )
+    async with _page(html, sandbox_supported) as page:
+        assert await decline_cookies(page) == "text"
+        assert await _clicked(page) == ["reject"]
 
 
-@pytest.mark.asyncio
-async def test_clicks_known_cmp_reject_button() -> None:
-    button = _Element()
-    page = _Page([_Frame(cmp=_Locator([button]))])
-
-    assert await decline_cookies(page) == "cmp"
-    assert button.clicked is True
-    assert page.settled is True
-
-
-@pytest.mark.asyncio
-async def test_falls_back_to_reject_text_inside_consent_container() -> None:
-    button = _Element()
-    frame = _Frame(text=_Locator([button]))
-    page = _Page([frame])
-
-    assert await decline_cookies(page) == "text"
-    assert button.clicked is True
-    assert frame.text.filtered_with == [REJECT_TEXT_PATTERN]
+@pytest.mark.browser
+async def test_skips_hidden_and_covered_candidates(sandbox_supported: bool) -> None:
+    html = (
+        f'<button class="cc-deny" id="hidden" style="display:none" {_RECORD}>No</button>'
+        '<div style="position:relative">'
+        f'<button class="cc-deny" id="covered" {_RECORD}>No</button>'
+        '<div style="position:absolute;inset:0;background:#fff"></div></div>'
+        f'<button class="cc-deny" id="real" {_RECORD}>No</button>'
+    )
+    async with _page(html, sandbox_supported) as page:
+        assert await decline_cookies(page) == "cmp"
+        assert await _clicked(page) == ["real"]
 
 
-@pytest.mark.asyncio
-async def test_skips_hidden_and_unclickable_candidates() -> None:
-    hidden = _Element(visible=False)
-    covered = _Element(clickable=False)
-    real = _Element()
-    page = _Page([_Frame(cmp=_Locator([hidden, covered, real]))])
-
-    assert await decline_cookies(page) == "cmp"
-    assert (hidden.clicked, covered.clicked, real.clicked) == (False, False, True)
-
-
-@pytest.mark.asyncio
-async def test_searches_every_frame() -> None:
-    button = _Element()
-    page = _Page([_Frame(), _Frame(cmp=_Locator([button]))])
-
-    assert await decline_cookies(page) == "cmp"
-    assert button.clicked is True
+@pytest.mark.browser
+async def test_clicks_inside_a_consent_iframe(sandbox_supported: bool) -> None:
+    # Notices often live in CMP iframes; the click lands at the button's place
+    # in the page, through the frame's offset.
+    inner = f'<button class="cc-deny" id="framed" {_RECORD}>No</button>'.replace('"', "&quot;")
+    html = (
+        '<div style="height:120px"></div>'
+        f'<iframe id="consent-frame" style="margin-left:80px" srcdoc="{inner}"></iframe>'
+    )
+    async with _page(html, sandbox_supported) as page:
+        assert await decline_cookies(page) == "cmp"
+        clicked = await page.evaluate(
+            "document.getElementById('consent-frame').contentDocument.body.dataset.clicked"
+        )
+        assert clicked == "framed "
 
 
-@pytest.mark.asyncio
-async def test_returns_none_when_no_notice_appears() -> None:
-    button = _Element()
-    page = _Page([_Frame(cmp=_Locator([button]))], notice_found=False)
-
-    assert await decline_cookies(page, timeout_ms=500) is None
-    assert page.waited_timeout == 500
-    assert button.clicked is False
-
-
-@pytest.mark.asyncio
-async def test_zero_timeout_skips_the_wait() -> None:
-    button = _Element()
-    page = _Page([_Frame(cmp=_Locator([button]))], notice_found=False)
-
-    assert await decline_cookies(page, timeout_ms=0) == "cmp"
-    assert page.waited_selector is None
+@pytest.mark.browser
+async def test_waits_for_a_late_notice_unless_the_timeout_is_zero(
+    sandbox_supported: bool,
+) -> None:
+    # The notice is injected after DOMContentLoaded, as CMP scripts do.
+    html = (
+        f'<template id="notice"><button class="cc-deny" id="late" {_RECORD}>No</button></template>'
+        "<script>setTimeout(() => document.body.append("
+        "document.getElementById('notice').content.cloneNode(true)), 400)</script>"
+    )
+    async with _page(html, sandbox_supported) as page:
+        assert await decline_cookies(page, timeout_ms=0) is None
+        assert await decline_cookies(page, timeout_ms=3_000) == "cmp"
+        assert await _clicked(page) == ["late"]
 
 
-@pytest.mark.asyncio
-async def test_stops_clicking_once_the_budget_is_spent(monkeypatch: pytest.MonkeyPatch) -> None:
-    # First call sets the deadline, every later one is far past it.
-    calls = iter([0.0])
-    monkeypatch.setattr("webskrap.consent.monotonic", lambda: next(calls, 10_000.0))
-    button = _Element()
-    page = _Page([_Frame(cmp=_Locator([button]))], notice_found=False)
-
-    assert await decline_cookies(page, timeout_ms=0) is None
-    assert button.clicked is False
+@pytest.mark.browser
+async def test_returns_none_without_a_notice(sandbox_supported: bool) -> None:
+    async with _page(f'<button id="reject" {_RECORD}>Reject</button>', sandbox_supported) as page:
+        assert await decline_cookies(page, timeout_ms=300) is None
+        assert await _clicked(page) == []
 
 
-@pytest.mark.asyncio
-async def test_returns_none_when_nothing_matches() -> None:
-    page = _Page([_Frame()])
-
-    assert await decline_cookies(page) is None
-    assert page.settled is False
+@pytest.mark.browser
+async def test_stops_clicking_once_the_budget_is_spent(
+    sandbox_supported: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    html = f'<button class="cc-deny" id="deny" {_RECORD}>No</button>'
+    async with _page(html, sandbox_supported) as page:
+        # First call sets the deadline, every later one is far past it.
+        calls = iter([0.0])
+        monkeypatch.setattr("webskrap.consent.monotonic", lambda: next(calls, 10_000.0))
+        assert await decline_cookies(page, timeout_ms=0) is None
+        assert await _clicked(page) == []
 
 
 @pytest.mark.parametrize(
@@ -200,16 +152,3 @@ def test_reject_text_pattern_matches_reject_labels(label: str) -> None:
 )
 def test_reject_text_pattern_ignores_other_labels(label: str) -> None:
     assert REJECT_TEXT_PATTERN.search(label) is None
-
-
-@pytest.mark.asyncio
-async def test_clicks_with_the_pages_mouse_even_inside_a_frame(
-    _record_human_clicks: list[tuple[object, object]],
-) -> None:
-    # Notices often live in CMP iframes; the mouse belongs to the page, and
-    # bounding boxes are reported in the page's coordinates.
-    button = _Element()
-    page = _Page([_Frame(), _Frame(cmp=_Locator([button]))])
-
-    assert await decline_cookies(page) == "cmp"
-    assert _record_human_clicks == [(page, button)]

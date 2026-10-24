@@ -1,4 +1,4 @@
-"""Unit tests for WebSkrap's own CDP driver core and fetch flag assembly."""
+"""Unit tests for WebSkrap's own CDP driver core and launch flag assembly."""
 
 from __future__ import annotations
 
@@ -9,10 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from typer.testing import CliRunner
 
 from webskrap import cdp as cdp_module
-from webskrap import cli
 from webskrap.cdp import (
     _EVALUATE_SCRIPT,
     CDPConnection,
@@ -22,9 +20,8 @@ from webskrap.cdp import (
     PipeTransport,
     find_executable,
 )
-from webskrap.cdp_fetch import launch_args
 from webskrap.errors import ErrorCode, WebSkrapError, is_launch_failure
-from webskrap.models import FetchResult, ProxyConfig, SessionConfig
+from webskrap.models import ProxyConfig, SessionConfig
 from webskrap.profiles import get_profile
 
 
@@ -238,13 +235,13 @@ def test_find_executable_errors_trigger_channel_fallback(
     assert unknown.value.code is ErrorCode.USAGE
 
 
-def test_launch_args_share_patchright_flags_and_hide_webdriver() -> None:
+def test_browser_args_hide_webdriver_and_carry_proxy_flags() -> None:
     config = SessionConfig(
         chromium_sandbox=False,
         proxy=ProxyConfig(server="http://proxy.test:8080", bypass="localhost"),
         ignore_https_errors=True,
     )
-    args, env = launch_args(config, get_profile(None))
+    args = config.browser_args(get_profile(None))
 
     assert args[0] == "--disable-blink-features=AutomationControlled"
     assert "--no-sandbox" in args
@@ -253,60 +250,7 @@ def test_launch_args_share_patchright_flags_and_hide_webdriver() -> None:
     assert "--proxy-bypass-list=localhost" in args
     assert "--ignore-certificate-errors" in args
     assert not any(a.startswith("--remote-debugging") for a in args)
-    assert env == {}
-
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        SessionConfig(decline_cookies=True),
-        SessionConfig(mask_headless_user_agent=True),
-        SessionConfig(java_script_enabled=False),
-        SessionConfig(storage_state={"cookies": []}),
-        SessionConfig(patchright_context_profile=True),
-        SessionConfig(proxy=ProxyConfig(server="http://p.test:1", username="u", password="p")),
-    ],
-)
-def test_launch_args_reject_unsupported_options(config: SessionConfig) -> None:
-    with pytest.raises(WebSkrapError) as error:
-        launch_args(config, get_profile(None))
-    assert error.value.code is ErrorCode.USAGE
-
-
-def test_cli_driver_cdp_routes_to_the_cdp_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_fetch(url: str, **kwargs: Any) -> FetchResult:
-        calls.append({"url": url, **kwargs})
-        return FetchResult(
-            url=url,
-            final_url=url,
-            status=200,
-            ok=True,
-            headers={},
-            text="body",
-            title="T",
-            cookies=[],
-            timings={"elapsed_ms": 1.0},
-        )
-
-    monkeypatch.setattr(cli, "cdp_fetch", fake_fetch)
-    result = CliRunner().invoke(
-        cli.app, ["fetch", "https://example.test", "--driver", "cdp", "--channel", "chromium"]
-    )
-
-    assert result.exit_code == 0, result.output
-    assert calls[0]["url"] == "https://example.test"
-    # The CLI's default-on consent dismissal is dropped, not rejected.
-    assert calls[0]["config"].decline_cookies is False
-    assert calls[0]["config"].channel == "chromium"
-
-    # An explicit request is kept, so the CDP driver refuses it as usage.
-    explicit = CliRunner().invoke(
-        cli.app, ["fetch", "https://example.test", "--driver", "cdp", "--decline-cookies"]
-    )
-    assert explicit.exit_code == 0, explicit.output
-    assert calls[1]["config"].decline_cookies is True
+    assert config.browser_env(get_profile(None)) is None
 
 
 async def test_a_failing_event_handler_does_not_stop_replies() -> None:
@@ -329,41 +273,6 @@ def test_the_core_imports_without_fcntl() -> None:
 
     # fcntl does not exist on Windows; importing the CLI must still work there.
     assert "fcntl" not in vars(cdp_module)
-
-
-def test_cli_search_driver_cdp_routes_to_the_cdp_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    from webskrap.models import SearchEngine, SearchResult
-
-    calls: list[dict[str, Any]] = []
-
-    async def fake_search(query: str, **kwargs: Any) -> SearchResult:
-        calls.append({"query": query, **kwargs})
-        return SearchResult(
-            query=query,
-            engine=SearchEngine.BING,
-            url="https://www.bing.com/search?q=x",
-            final_url="https://www.bing.com/search?q=x",
-            status=200,
-            ok=True,
-            hits=[],
-            hits_total=0,
-            timings={"elapsed_ms": 1.0},
-        )
-
-    monkeypatch.setattr(cli, "cdp_search", fake_search)
-    result = CliRunner().invoke(cli.app, ["search", "x", "--driver", "cdp", "--format", "json"])
-
-    assert result.exit_code == 0, result.output
-    assert calls[0]["query"] == "x"
-    assert calls[0]["config"].decline_cookies is False
-
-
-async def test_fetch_rejects_an_unknown_ready_state() -> None:
-    from webskrap.cdp_fetch import fetch
-
-    with pytest.raises(WebSkrapError) as error:
-        await fetch("https://example.com", ready_selector="body", ready_state="hidden")  # type: ignore[arg-type]
-    assert error.value.code is ErrorCode.USAGE
 
 
 def test_find_executable_prefers_chrome_for_testing(

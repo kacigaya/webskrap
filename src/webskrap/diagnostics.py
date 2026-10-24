@@ -109,8 +109,8 @@ async def diagnose() -> dict[str, Any]:
     if timezone in UTC_ZONES:
         warnings.append(
             f"Host timezone is {timezone}, which pages read as a server. Apply a profile "
-            "timezone that matches your exit IP (patchright_context_profile / "
-            "--patchright-context-profile) or set TZ."
+            "timezone that matches your exit IP (profile_mode='locale' / "
+            "--profile-mode locale) or set TZ."
         )
     if probe.get("channel") == "chromium":
         # Bare Chromium is honest, but its Sec-CH-UA names only "Chromium" and
@@ -125,8 +125,6 @@ async def diagnose() -> dict[str, Any]:
         **probe,
         "versions": {
             "webskrap": package_version("webskrap"),
-            "playwright": package_version("playwright"),
-            "patchright": package_version("patchright"),
             "mcp": package_version("mcp"),
             "python": platform.python_version(),
         },
