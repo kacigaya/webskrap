@@ -366,7 +366,7 @@ async def main() -> None:
     )
     parser.add_argument(
         "--datadome-url",
-        help="Also run a DataDome-protected page you may test, as target 'datadome'.",
+        help="Also run a DataDome website you may test, as target 'datadome'.",
     )
     parser.add_argument("--target", action="append")
     parser.add_argument(

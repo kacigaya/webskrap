@@ -131,7 +131,7 @@ and mode, 30 to 90 s per run. Runs alternate which driver goes first.
 | Same, with a checkbox click (`--click`) | virtual display | 3/3 each, median 8.8 s | 3/3 each, median 7.3 to 8.2 s |
 | Cloudflare Turnstile (peet.ws) | headless, virtual display | 3/3 token | 3/3 token |
 | reCAPTCHA v3 demo | headless, virtual display | 3/3, score 0.9 | 3/3, score 0.9 |
-| DataDome-protected form (local test, `--datadome-url`) | headless, virtual display | same page as CDP every run | same page as Patchright every run |
+| DataDome website (`--datadome-url`) | headless, virtual display | same page as CDP every run | same page as Patchright every run |
 
 DataDome answered both drivers the same way on every run. Screenshots show
 what that is on this datacenter (VPS) IP: an "access restricted" block page
@@ -158,7 +158,7 @@ poll is a fresh attach, as with CLI commands and MCP tool calls:
 | --- | --- | --- |
 | Cloudflare Turnstile (peet.ws) | 3/3 token | 3/3 token |
 | reCAPTCHA v3 demo | 3/3, score 0.9 | 3/3, score 0.9 |
-| DataDome-protected form (local test) | same page as CDP every run | same page as Patchright every run |
+| DataDome website | same page as CDP every run | same page as Patchright every run |
 | Cloudflare challenge, no click | 0/3, challenge stays | 0/3, challenge stays |
 
 Result: the CDP driver matches Patchright on every signal measured. It is
