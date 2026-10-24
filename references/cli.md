@@ -7,7 +7,8 @@ for arguments and help text.
 ## One-shot commands
 
 `webskrap fetch` uses headless Patchright stealth mode. `webskrap install`
-downloads the Playwright and Patchright Chromium browsers. `doctor` reports
+downloads Chrome for Testing into the user cache folder
+(`WEBSKRAP_BROWSERS_PATH` overrides it); `--force` downloads it again. `doctor` reports
 readiness, browser identity, host CPU architecture, and Fontconfig family count.
 It warns when the host timezone is UTC. `fetch` and `search` try Chrome, Edge,
 then bundled Chromium when a channel cannot launch. `schema` describes commands

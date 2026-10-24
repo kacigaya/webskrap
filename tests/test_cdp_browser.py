@@ -186,3 +186,22 @@ async def test_evaluate_matches_playwright_forms_under_a_strict_csp(
             assert await page.evaluate(script, arg) == expected, script
     finally:
         await browser.close()
+
+
+async def test_port_transport_attaches_over_websocket(server: str, sandbox_supported: bool) -> None:
+    # Windows always launches this way; forcing it here tests that path on
+    # every platform.
+    browser = await launch(
+        find_executable("chromium"),
+        args=[] if sandbox_supported else ["--no-sandbox"],
+        transport="port",
+    )
+    try:
+        assert browser.process is not None
+        page = await browser.new_page()
+        response = await page.goto(server, wait_until="load", timeout_s=20)
+        assert response["status"] == 200
+        assert await page.evaluate("document.title") == "Hello"
+    finally:
+        await browser.close()
+    assert browser.process.poll() is not None  # the browser process exited

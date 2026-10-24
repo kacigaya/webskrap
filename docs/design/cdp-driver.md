@@ -21,7 +21,7 @@ Reasons:
 1. CDP core and a one-shot fetch backend. **Done on this branch.**
 2. Measure against Patchright on the same host and IP. **Done; see below.**
 3. Port persistent browser sessions. **In progress; see the stage 3 plan.**
-4. Make Playwright optional after full parity. Remove it in a major version.
+4. Remove Playwright and Patchright in v3.0.0. **In progress; see the v3 plan.**
 
 Stop at the first stage that does not match Patchright on detection.
 
@@ -66,6 +66,37 @@ driver do not resolve in the other. Patchright stays the default.
 Each step ends with tests, the full pipeline, and a commit. Measure
 `Accessibility.getFullAXTree` for detection before 3b ships, because neither
 Patchright nor Playwright uses that domain.
+
+## v3 plan
+
+v3.0.0 drives Chromium only through WebSkrap's own CDP client. Decisions:
+
+- **Browser install.** `webskrap install` downloads Chrome for Testing, the
+  build Google publishes for automation, for Linux (x64 and ARM64), macOS and
+  Windows. Installed Chrome and Edge channels keep working.
+- **Windows.** Windows launches with a loopback debugging port and attaches
+  with the WebSocket client. Linux and macOS keep the debugging pipe.
+- **Features.** Cookie-banner dismissal, proxy credentials, `storage_state`,
+  and profile emulation (viewport, user agent, locale, timezone, media) move
+  to CDP. The `firefox` and `webkit` browsers, the `driver` option and the
+  `patchright_*` options go away.
+- **Python API.** `WebSkrapClient`, its sessions, `fetch` and `search` keep
+  their names and arguments. Playwright objects, such as
+  `WebSkrapSession.context` and `Page` arguments, are replaced by CDP ones.
+
+Phases, each ending with tests, the full pipeline and a commit:
+
+1. Launch: the Chrome for Testing installer, executable lookup, and the
+   Windows port launch.
+2. Client: `WebSkrapClient` and `WebSkrapSession` on CDP, with profile
+   emulation, proxy credentials, `storage_state`, JavaScript and service
+   worker switches, consent dismissal, and the human click and type helpers.
+   Warm MCP fetch sessions run on it.
+3. Sessions, CLI and MCP: CDP only; the driver options are removed.
+4. Doctor and diagnostics on CDP.
+5. Remove the dependencies, port the tests, and update the documentation,
+   with a 2.x to 3.0 migration guide.
+6. Parity runs, review, pull request, release.
 
 ## Design
 

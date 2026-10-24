@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+from webskrap import cdp as cdp_module
 from webskrap import cli
 from webskrap.cdp import (
     _EVALUATE_SCRIPT,
@@ -185,6 +186,16 @@ def _fake_chromium(root: Path, revision: int) -> Path:
     return binary
 
 
+@pytest.fixture
+def no_installed_browsers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide Chrome for Testing installs and distribution Chromium from lookups."""
+    empty = tmp_path / "webskrap-browsers"
+    empty.mkdir()
+    monkeypatch.setenv("WEBSKRAP_BROWSERS_PATH", str(empty))
+    monkeypatch.setattr(cdp_module, "_SYSTEM_CHROMIUM", ())
+
+
+@pytest.mark.usefixtures("no_installed_browsers")
 def test_find_executable_picks_the_newest_downloaded_chromium(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,6 +207,7 @@ def test_find_executable_picks_the_newest_downloaded_chromium(
     assert find_executable("chromium") == newest
 
 
+@pytest.mark.usefixtures("no_installed_browsers")
 def test_find_executable_reads_package_local_browsers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,6 +223,7 @@ def test_find_executable_reads_package_local_browsers(
     assert find_executable("chromium") == binary
 
 
+@pytest.mark.usefixtures("no_installed_browsers")
 def test_find_executable_errors_trigger_channel_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -351,3 +364,24 @@ async def test_fetch_rejects_an_unknown_ready_state() -> None:
     with pytest.raises(WebSkrapError) as error:
         await fetch("https://example.com", ready_selector="body", ready_state="hidden")  # type: ignore[arg-type]
     assert error.value.code is ErrorCode.USAGE
+
+
+def test_find_executable_prefers_chrome_for_testing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from webskrap.install import _COMPLETE_MARKER, executable_in, platform_key
+
+    key = platform_key()
+    for version in ("150.0.1.2", "156.0.8078.47"):
+        folder = tmp_path / f"chrome-{version}-{key}"
+        binary = executable_in(folder, key)
+        binary.parent.mkdir(parents=True)
+        binary.write_text("")
+        (folder / _COMPLETE_MARKER).write_text(version)
+    # An interrupted install has no completion marker and must be skipped.
+    partial = executable_in(tmp_path / f"chrome-999.0.0.0-{key}", key)
+    partial.parent.mkdir(parents=True)
+    partial.write_text("")
+    monkeypatch.setenv("WEBSKRAP_BROWSERS_PATH", str(tmp_path))
+
+    assert find_executable(None) == executable_in(tmp_path / f"chrome-156.0.8078.47-{key}", key)

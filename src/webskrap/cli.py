@@ -10,11 +10,9 @@ non-zero exit code.
 from __future__ import annotations
 
 import asyncio
-import subprocess  # nosec B404  # noqa: S404 - fixed argv for browser installs, no shell
-import sys
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, Protocol, TypedDict, TypeVar
+from typing import Annotated, Any, NoReturn, Protocol, TypeVar
 
 import typer
 from rich.console import Console
@@ -42,6 +40,7 @@ from webskrap.errors import (
     is_launch_failure,
     is_sandbox_failure,
 )
+from webskrap.install import install as install_browser
 from webskrap.models import (
     FetchDriver,
     FetchResult,
@@ -67,38 +66,31 @@ console = Console()
 T = TypeVar("T")
 
 
-class InstallResult(TypedDict):
-    """Outcome of one browser-install step."""
-
-    ok: bool
-    command: list[str]
-    message: str
-
-
-INSTALL_COMMANDS = (
-    (sys.executable, "-m", "playwright", "install", "chromium"),
-    (sys.executable, "-m", "patchright", "install", "chromium"),
-)
-
-
 @app.command("install")
 def install_command(
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Download again even when this version is installed."),
+    ] = False,
     format: Annotated[
         str,
         typer.Option("--format", help="Output format: human or json."),
     ] = "human",
 ) -> None:
-    """Download the Chromium builds Playwright and Patchright need."""
+    """Download Chrome for Testing, the browser WebSkrap drives by default."""
     output_format = parse_output_format(format)
-    results = [_run_install_command(command) for command in INSTALL_COMMANDS]
-    ok = all(result["ok"] for result in results)
-    payload = {"ok": ok, "steps": results}
+    try:
+        result = install_browser(force=force)
+    except WebSkrapError as exc:
+        fail(exc, output_format)
     if output_format == "json":
-        print_json(payload)
-    else:
-        _print_install_result(results)
-    if not ok:
-        raise typer.Exit(code=1)
+        print_json({"ok": True, **result})
+        return
+    state = "Installed" if result["installed"] else "Already installed:"
+    console.print(
+        f"[green]{state} Chrome for Testing {result['version']}[/green] ({result['platform']})"
+    )
+    console.print(f"[bold]Executable:[/bold] {result['executable']}", soft_wrap=True)
 
 
 @app.command("profiles")
@@ -835,38 +827,6 @@ async def _fetch_with_channel_fallback(
     return await _with_channel_fallback(
         lambda resolved: _run_fetch(resolved, **kwargs), config, output_format
     )
-
-
-def _run_install_command(command: tuple[str, ...]) -> InstallResult:
-    try:
-        # argv is one of the INSTALL_COMMANDS constants, built from
-        # sys.executable. No shell, and no caller-supplied argument.
-        completed = subprocess.run(  # nosec B603  # noqa: S603
-            command, capture_output=True, text=True, check=False
-        )
-    except OSError as exc:
-        return {
-            "ok": False,
-            "command": list(command),
-            "message": str(exc),
-        }
-    output = (completed.stdout or completed.stderr).strip()
-    return {
-        "ok": completed.returncode == 0,
-        "command": list(command),
-        "message": output,
-    }
-
-
-def _print_install_result(results: list[InstallResult]) -> None:
-    for result in results:
-        command = " ".join(str(part) for part in result["command"])
-        if result["ok"]:
-            console.print(f"[green]OK:[/green] {command}")
-        else:
-            console.print(f"[red]FAILED:[/red] {command}")
-        if result["message"]:
-            console.print(str(result["message"]))
 
 
 def _print_doctor_result(result: dict[str, Any]) -> None:

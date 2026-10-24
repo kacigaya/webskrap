@@ -64,8 +64,8 @@ RECOVERY_HINTS: dict[ErrorCode, str] = {
     ),
     ErrorCode.NAVIGATION: "Check the URL, the scheme, and that the host is reachable.",
     ErrorCode.BROWSER_LAUNCH: (
-        "Run `webskrap install`. On Linux ARM64 there is no Chrome build, so pass "
-        "channel='chromium'."
+        "Run `webskrap install` to download Chrome for Testing. Where Google Chrome "
+        "is not installed (Linux ARM64 has no build), pass channel='chromium'."
     ),
     ErrorCode.SANDBOX: (
         "Chromium's OS sandbox could not start. Check user namespaces and any AppArmor policy "
