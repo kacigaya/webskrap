@@ -191,8 +191,8 @@ def _page(page: CDPPage) -> Page:
             },
         )
 
-    # Main-world evaluation, so checks see the page's own globals.
-    return Page(lambda script: browser_session.evaluate(page, script), screenshot, mouse)
+    # Isolated worlds: the page cannot see the checks, and they need no globals.
+    return Page(page.evaluate, screenshot, mouse)
 
 
 @asynccontextmanager

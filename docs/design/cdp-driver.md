@@ -242,6 +242,10 @@ the same.
   `[Circular]`.
 - `CDPPage.evaluate` runs in an isolated world; use
   `browser_session.evaluate` for the page's own globals.
+- Main-world evaluation is visible to the page. Polling a check in the main
+  world while a Cloudflare challenge runs kept the challenge from clearing
+  after the checkbox click; the same check in an isolated world cleared it
+  (3.0 parity run). Keep `browser eval` for reads that need page globals.
 
 ## Conditions for more work
 
