@@ -311,3 +311,34 @@ async def test_a_detached_session_loses_its_handlers() -> None:
     assert seen == ["other"]
     assert all(key[0] != "S1" for key in connection._handlers)
     await connection.close()
+
+
+async def test_goto_waits_for_the_response_only_within_its_deadline() -> None:
+    connection, reader, writer = _connection()
+    page = CDPPage(connection, "S1", "F1")
+
+    async def browser() -> None:
+        answered = 0
+        while True:
+            while len(writer.sent) <= answered:
+                await asyncio.sleep(0)
+            message = writer.sent[answered]
+            answered += 1
+            result = (
+                {"frameId": "F1", "loaderId": "L1"} if message["method"] == "Page.navigate" else {}
+            )
+            _feed(reader, {"id": message["id"], "result": result})
+            if message["method"] == "Page.navigate":
+                # The load state arrives late and no document response follows.
+                await asyncio.sleep(0.8)
+                event = {"frameId": "F1", "loaderId": "L1", "name": "load"}
+                _feed(reader, {"method": "Page.lifecycleEvent", "sessionId": "S1", "params": event})
+
+    fake = asyncio.create_task(browser())
+    started = asyncio.get_running_loop().time()
+    try:
+        assert await page.goto("https://example.test", wait_until="load", timeout_s=1.0) == {}
+        assert asyncio.get_running_loop().time() - started < 1.5
+    finally:
+        fake.cancel()
+        await connection.close()
