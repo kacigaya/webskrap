@@ -9,12 +9,21 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-10-25
+
 ### Changed
 
 - `scripts/driver_parity.py` reads DataDome's `/captcha/` iframe and reports
   `captcha` (the slider) or `blocked` (the hard block) instead of a neutral
   `datadome` verdict. Persistent-session runs (`--via session`) still report
   `datadome`.
+- The benchmarks page shows measurements of 3.0.0 with Chrome for Testing 156.
+
+### Fixed
+
+- The live WebRTC test read the launch flags through the removed
+  `launch_options()` and failed before it checked the page.
+- A test now covers the `goto()` document-response deadline fixed in 3.0.0.
 
 ### Security
 
@@ -838,7 +847,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.0.1...HEAD
+[3.0.1]: https://github.com/kacigaya/webskrap/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/kacigaya/webskrap/compare/v2.15.0...v3.0.0
 [2.15.0]: https://github.com/kacigaya/webskrap/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/kacigaya/webskrap/compare/v2.13.3...v2.14.0
