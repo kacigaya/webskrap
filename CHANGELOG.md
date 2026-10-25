@@ -14,6 +14,13 @@ history, so they summarize each release rather than list every change.
 - Snapshots walk into iframes, same-site and cross-site. Frame content is
   listed under its `iframe` line. Its refs look like `f12345e15` and work with
   every element action and `wait_for`.
+- Persistent sessions can use a proxy that asks for a password. Set
+  `WEBSKRAP_PROXY_USERNAME` and `WEBSKRAP_PROXY_PASSWORD` and run
+  `webskrap browser open --proxy http://...`, or pass `proxy_username` and
+  `proxy_password` to `open_session`. A helper process keeps the credentials
+  in memory and answers the proxy while the browser runs. They are never
+  written to disk or put on a command line. `browser list` marks these
+  sessions with `(auth)`.
 
 ### Fixed
 

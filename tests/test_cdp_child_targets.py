@@ -8,12 +8,21 @@ import json
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
 
-from webskrap import ProxyConfig, ResourcePolicy, SessionConfig, WebSkrapClient, cdp_dom
+from webskrap import (
+    ProxyConfig,
+    ResourcePolicy,
+    SessionConfig,
+    WebSkrapClient,
+    browser_session,
+    cdp_dom,
+)
+from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import BrowserProfile
 
 pytestmark = pytest.mark.browser
@@ -186,3 +195,66 @@ async def test_native_profile_leaves_child_targets_alone(sandbox_supported: bool
         session = await client.session("native")
         page = await session.new_page()
         assert page.iframe_targets is None
+
+
+def test_persistent_session_answers_an_authenticated_proxy(
+    proxy: str, persistent_session_env: Path
+) -> None:
+    _Proxy.require_auth = True
+    name = "proxy-auth"
+
+    async def exercise() -> dict[str, Any]:
+        opened = await browser_session.open_session(
+            name, proxy_server=proxy, proxy_username="user", proxy_password="secret"
+        )
+        results: dict[str, Any] = {"opened": opened}
+
+        async def run(action: Any) -> Any:
+            return await browser_session.run_page_action(name, action, timeout_ms=20_000)
+
+        # Each action attaches and leaves; the helper answers in between.
+        results["goto"] = await run(
+            lambda page: browser_session.goto(page, "http://site-a.test/", "load")
+        )
+        results["again"] = await run(
+            lambda page: browser_session.goto(page, "http://site-b.test/frame", "load")
+        )
+        results["reused"] = await browser_session.open_session(name)
+        results["listed"] = browser_session.list_sessions()
+        state = browser_session.read_state(browser_session.session_dir(name)) or {}
+        results["helper"] = helper = state["proxy_auth_pid"]
+        browser_session.kill_browser(helper, force=True)
+        for _ in range(50):
+            if not browser_session.proxy_auth_running(helper):
+                break
+            await asyncio.sleep(0.05)
+        with pytest.raises(WebSkrapError) as lost:
+            await run(browser_session.page_state)
+        results["lost"] = lost.value.code
+        return results
+
+    try:
+        results = asyncio.run(exercise())
+    finally:
+        browser_session.close_session(name, delete_data=True)
+
+    assert results["opened"]["proxy_auth"] is True
+    assert results["goto"]["status"] == 200
+    assert results["again"]["status"] == 200
+    assert results["reused"]["reused"] is True and results["reused"]["proxy_auth"] is True
+    assert [entry["proxy_auth"] for entry in results["listed"]] == [True]
+    site = [r for r in _Proxy.requests if r["url"].startswith(("site-a", "site-b"))]
+    assert {"site-a.test/", "site-b.test/frame", "site-b.test/frame-worker.js"} <= {
+        r["url"] for r in site
+    }
+    assert site[0]["authed"] == "False"
+    assert all(request["authed"] == "True" for request in site[1:])
+    assert results["lost"] is ErrorCode.SESSION_UNREACHABLE
+
+
+async def test_proxy_credentials_need_an_http_proxy() -> None:
+    with pytest.raises(WebSkrapError) as socks:
+        await browser_session.open_session(
+            "socks", proxy_server="socks5://127.0.0.1:1080", proxy_password="secret"
+        )
+    assert socks.value.code is ErrorCode.USAGE

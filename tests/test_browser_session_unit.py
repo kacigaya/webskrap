@@ -263,6 +263,7 @@ def test_list_sessions_reports_sandbox_state(
             "port": None,
             "chromium_sandbox": None,
             "proxy_server": None,
+            "proxy_auth": None,
         }
     ]
 
@@ -625,8 +626,10 @@ def test_launch_explicit_webrtc_policy_wins(
     [
         pytest.param("proxy.test:8080", "must start with", id="no-scheme"),
         pytest.param("ftp://proxy.test", "must start with", id="bad-scheme"),
-        pytest.param("http://user:secret@proxy.test:8080", "cannot authenticate", id="credentials"),
-        pytest.param("socks5://user@proxy.test:1080", "cannot authenticate", id="username-only"),
+        pytest.param(
+            "http://user:secret@proxy.test:8080", "WEBSKRAP_PROXY_PASSWORD", id="credentials"
+        ),
+        pytest.param("socks5://user@proxy.test:1080", "must not embed", id="username-only"),
     ],
 )
 def test_persistent_proxy_is_validated(server: str, message: str) -> None:
@@ -764,7 +767,7 @@ def test_open_rejects_a_credentialed_proxy_before_launching(
 ) -> None:
     launches = _stub_session_launch(monkeypatch, tmp_path)
 
-    with pytest.raises(WebSkrapError, match="cannot authenticate"):
+    with pytest.raises(WebSkrapError, match="must not embed"):
         asyncio.run(browser_session.open_session("net", proxy_server="http://u:p@proxy.test:8080"))
 
     assert launches == []
@@ -798,3 +801,14 @@ def test_kill_browser_signals_the_process_group(monkeypatch: pytest.MonkeyPatch)
     browser_session.kill_browser(7, force=True)
 
     assert sent == [(7, signal.SIGTERM), (7, signal.SIGKILL)]
+
+
+def test_child_processes_do_not_inherit_proxy_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WEBSKRAP_PROXY_USERNAME", "user")
+    monkeypatch.setenv("WEBSKRAP_PROXY_PASSWORD", "secret")
+    monkeypatch.setenv("WEBSKRAP_KEPT", "1")
+
+    env = browser_session._child_env()
+
+    assert "WEBSKRAP_PROXY_USERNAME" not in env and "WEBSKRAP_PROXY_PASSWORD" not in env
+    assert env["WEBSKRAP_KEPT"] == "1"

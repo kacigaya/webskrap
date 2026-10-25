@@ -63,6 +63,11 @@ _STILL_ACTIVE = 259
 DEFAULT_ACTION_TIMEOUT_MS = 10_000.0
 DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000.0
 SANDBOX_ENV = "WEBSKRAP_CHROMIUM_SANDBOX"
+#: Where ``webskrap browser open --proxy`` reads proxy credentials. They are
+#: removed from the environment of the browser and the helper it starts.
+PROXY_USERNAME_ENV = "WEBSKRAP_PROXY_USERNAME"
+PROXY_PASSWORD_ENV = "WEBSKRAP_PROXY_PASSWORD"  # nosec B105  # noqa: S105 - a variable name
+PROXY_AUTH_MODULE = "webskrap.proxy_auth"
 # Chromium prints one of these when its setuid/namespace sandbox cannot start
 # (unprivileged user namespaces off, or running as root in a container).
 SANDBOX_FAILURE_MARKERS = (
@@ -429,11 +434,9 @@ def stealth_launch_args(
 def persistent_proxy_server(server: str) -> str:
     """Validate a proxy URL for a persistent session and return it.
 
-    Credentials are refused: Chromium ignores them in ``--proxy-server``, and
-    a session whose every action attaches over CDP briefly and disconnects
-    has nobody listening when the proxy asks for authentication. Use an
-    unauthenticated or IP-allowlisted proxy, or a one-shot fetch, whose
-    ``ProxyConfig`` handles credentials.
+    Credentials in the URL are refused: Chromium ignores them in
+    ``--proxy-server``, and other local users can read a command line. Pass
+    them to :func:`open_session` as ``proxy_username`` and ``proxy_password``.
 
     Raises:
         WebSkrapError: If ``server`` has no http/https/socks4/socks5 scheme or
@@ -441,8 +444,8 @@ def persistent_proxy_server(server: str) -> str:
     """
     if "@" in server.split("://", 1)[-1].split("/", 1)[0]:
         msg = (
-            "persistent sessions cannot authenticate to a proxy: pass a proxy URL "
-            "without user:password@"
+            "proxy URL must not embed user:password@: set "
+            f"{PROXY_USERNAME_ENV} and {PROXY_PASSWORD_ENV} instead"
         )
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     try:
@@ -523,6 +526,7 @@ def launch_browser(
             command,
             stdout=log,
             stderr=log,
+            env=_child_env(),
             start_new_session=True,
         )
     try:
@@ -534,6 +538,74 @@ def launch_browser(
         # holds the profile lock with no state file pointing at it.
         kill_browser(process.pid, force=True)
         raise
+
+
+def _child_env() -> dict[str, str]:
+    """Return this process's environment without the proxy credentials."""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {PROXY_USERNAME_ENV, PROXY_PASSWORD_ENV}
+    }
+
+
+async def start_proxy_auth(directory: Path, port: int, credentials: tuple[str, str]) -> int:
+    """Start the helper that answers the session proxy's challenges; return its PID.
+
+    The helper (:mod:`webskrap.proxy_auth`) gets the credentials on stdin and
+    keeps them in memory only. It stays connected to the browser and exits
+    when the browser does.
+
+    Raises:
+        WebSkrapError: ``browser_launch`` if the helper exits or is not ready
+            within ``LAUNCH_TIMEOUT_S``.
+    """
+    log_path = directory / "proxy-auth.log"
+    with log_path.open("wb") as log:
+        # Fixed argv, no shell: this interpreter, a module of this package,
+        # the browser's port and the session's own validated directory.
+        process = subprocess.Popen(  # nosec B603  # noqa: S603
+            [sys.executable, "-m", PROXY_AUTH_MODULE, str(port), str(directory / "user-data")],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=log,
+            env=_child_env(),
+            start_new_session=True,
+        )
+    stdin, stdout = process.stdin, process.stdout
+    try:
+        if stdin is None or stdout is None:  # pragma: no cover - PIPE sets both
+            raise WebSkrapError("proxy authentication helper has no pipes")
+        username, password = credentials
+        stdin.write(json.dumps({"username": username, "password": password}).encode() + b"\n")
+        stdin.close()
+        try:
+            line = await asyncio.wait_for(asyncio.to_thread(stdout.readline), LAUNCH_TIMEOUT_S)
+        except TimeoutError:
+            line = b""
+        if line.strip() != b"ready":
+            msg = f"proxy authentication helper did not start; see {log_path}"
+            raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
+    except BaseException:
+        process.kill()
+        process.wait(timeout=CLOSE_TIMEOUT_S)
+        raise
+    finally:
+        if stdout is not None:
+            stdout.close()
+    return process.pid
+
+
+def proxy_auth_running(pid: int) -> bool:
+    """True when ``pid`` is a live proxy authentication helper."""
+    if sys.platform == "win32":
+        # No command line to check; a recycled PID only skips a warning.
+        return _windows_process_start(pid) is not None
+    try:
+        command: bytes | None = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except FileNotFoundError:
+        command = None if Path("/proc/self").exists() else _ps_command(pid)
+    return command is not None and PROXY_AUTH_MODULE.encode() in command
 
 
 def _sandbox_hint(log_path: Path) -> str:
@@ -618,6 +690,8 @@ async def open_session(
     proxy_server: str | None = None,
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
     fake_media_devices: bool = False,
+    proxy_username: str | None = None,
+    proxy_password: str | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
@@ -630,26 +704,40 @@ async def open_session(
         chromium_sandbox: Keep Chromium's OS sandbox. None consults
             ``WEBSKRAP_CHROMIUM_SANDBOX`` and otherwise sandboxes. See
             :func:`sandbox_enabled` and :func:`launch_browser`.
-        proxy_server: Unauthenticated proxy URL for all of the session's
-            traffic; see :func:`persistent_proxy_server`.
+        proxy_server: Proxy URL for all of the session's traffic, without
+            credentials; see :func:`persistent_proxy_server`.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy. Defaults to
             ``disable_non_proxied_udp`` when ``proxy_server`` is set.
         fake_media_devices: Supply a synthetic camera and microphone.
+        proxy_username: User name for an http or https ``proxy_server``.
+        proxy_password: Password for an http or https ``proxy_server``. With
+            either one set, a helper process (:func:`start_proxy_auth`) keeps
+            both in memory and answers the proxy for as long as the browser
+            runs. Neither is written to disk.
 
     Returns:
         ``{"session", "pid", "port", "reused", "chromium_sandbox",
-        "proxy_server", "webrtc_ip_handling_policy", "fake_media_devices"}``.
-        The last three describe the running browser's launch settings.
+        "proxy_server", "proxy_auth", "webrtc_ip_handling_policy",
+        "fake_media_devices"}``. The last five describe the running
+        browser's launch settings.
 
     Raises:
-        WebSkrapError: If the name or proxy is invalid, the browser fails to
-            start, or a running session was launched with a different proxy
-            or WebRTC policy than requested (``usage``). Launch flags cannot
-            change on a running browser, and silently reusing it would send
-            traffic outside the requested proxy.
+        WebSkrapError: If the name or proxy is invalid, the browser or the
+            proxy helper fails to start, or a running session was launched
+            with a different proxy, proxy authentication or WebRTC policy than
+            requested (``usage``). Launch flags cannot change on a running
+            browser, and silently reusing it would send traffic outside the
+            requested proxy.
     """
+    credentials = None
+    if proxy_username is not None or proxy_password is not None:
+        credentials = (proxy_username or "", proxy_password or "")
     if proxy_server is not None:
         persistent_proxy_server(proxy_server)
+    if credentials is not None and not (proxy_server or "").startswith(("http://", "https://")):
+        # Chromium answers no challenge from a SOCKS proxy.
+        msg = "proxy credentials need an http:// or https:// proxy server"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
     operation_lock = await _acquire_session_operation_lock(name)
     try:
         # Unconditional, so a session directory created by an older version (or
@@ -660,6 +748,12 @@ async def open_session(
         reused = state is not None
         if state is not None:
             _require_same_network(name, state, proxy_server, webrtc_ip_handling_policy)
+            if credentials is not None and not state.get("proxy_auth_pid"):
+                msg = (
+                    f"session '{name}' is already running without proxy authentication. "
+                    f"Run: webskrap browser close --session {name}, then open it again"
+                )
+                raise WebSkrapError(msg, code=ErrorCode.USAGE)
             if fake_media_devices and not state.get("fake_media_devices", False):
                 msg = (
                     f"session '{name}' is already running without fake media devices. "
@@ -679,6 +773,13 @@ async def open_session(
                 webrtc_ip_handling_policy=webrtc_ip_handling_policy,
                 fake_media_devices=fake_media_devices,
             )
+            helper = None
+            if credentials is not None:
+                try:
+                    helper = await start_proxy_auth(directory, port, credentials)
+                except BaseException:
+                    kill_browser(pid, force=True)
+                    raise
             state = {
                 "pid": pid,
                 "port": port,
@@ -689,6 +790,8 @@ async def open_session(
                 # Recorded so a later open can refuse to reuse this browser for
                 # a different proxy. Never holds credentials; those are refused.
                 "proxy_server": proxy_server,
+                # The helper that answers the proxy; it holds the credentials.
+                "proxy_auth_pid": helper,
                 "fake_media_devices": fake_media_devices,
                 "webrtc_ip_handling_policy": SessionConfig(
                     proxy=ProxyConfig(server=proxy_server) if proxy_server else None,
@@ -711,6 +814,7 @@ async def open_session(
             "reused": reused,
             "chromium_sandbox": bool(state.get("chromium_sandbox", False)),
             "proxy_server": state.get("proxy_server"),
+            "proxy_auth": bool(state.get("proxy_auth_pid")),
             "webrtc_ip_handling_policy": state.get("webrtc_ip_handling_policy"),
             "fake_media_devices": bool(state.get("fake_media_devices", False)),
         }
@@ -794,8 +898,8 @@ def list_sessions() -> list[dict[str, Any]]:
     """Return one entry per session.
 
     Each is ``{"session", "running", "pid", "port", "chromium_sandbox",
-    "proxy_server"}``. The last four are None for a session that is not
-    running. ``chromium_sandbox`` and ``proxy_server`` report how the running
+    "proxy_server", "proxy_auth"}``. The last five are None for a session
+    that is not running. ``chromium_sandbox`` and ``proxy_server`` report how the running
     browser was launched, so an operator can see which sessions gave up
     renderer isolation and where each one's traffic goes.
     """
@@ -814,6 +918,7 @@ def list_sessions() -> list[dict[str, Any]]:
                     bool(state.get("chromium_sandbox", False)) if running and state else None
                 ),
                 "proxy_server": state.get("proxy_server") if running and state else None,
+                "proxy_auth": bool(state.get("proxy_auth_pid")) if running and state else None,
             }
         )
     return sessions
@@ -836,6 +941,14 @@ async def run_page_action(
     if state is None:
         msg = f"session '{name}' is not open. Run: webskrap browser open"
         raise WebSkrapError(msg, code=ErrorCode.NO_SESSION)
+    helper = state.get("proxy_auth_pid")
+    if helper and not proxy_auth_running(helper):
+        # Without it every request would fail at the proxy with a 407.
+        msg = (
+            f"session '{name}' lost its proxy authentication helper. "
+            "Run: webskrap browser close, then webskrap browser open"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.SESSION_UNREACHABLE)
     async with cdp_session.attach(
         name, directory / "user-data", state["port"], timeout_ms=timeout_ms
     ) as page:

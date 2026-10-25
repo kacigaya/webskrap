@@ -83,6 +83,7 @@ def test_diagnose_lists_sessions_even_when_the_browser_is_broken(
             "port": None,
             "chromium_sandbox": None,
             "proxy_server": None,
+            "proxy_auth": None,
         }
     ]
 

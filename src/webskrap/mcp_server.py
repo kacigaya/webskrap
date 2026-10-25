@@ -567,7 +567,8 @@ async def browser_open(
     is deliberately not a tool argument, so a page cannot talk the model into
     weakening renderer isolation. A proxy is not a tool argument either, for
     the same reason: sessions opened with `webskrap browser open --proxy`
-    keep theirs, and the result reports it as proxy_server.
+    keep theirs, and the result reports it as proxy_server (proxy_auth is
+    true when a helper answers its password challenge).
 
     Args:
         url: Optional URL to open after launch.

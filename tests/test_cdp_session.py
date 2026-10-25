@@ -20,7 +20,7 @@ from test_cdp_browser import _CDPHandler
 
 from webskrap import browser_session
 from webskrap.cdp import _WEBSOCKET_GUID, WebSocketTransport, _mask
-from webskrap.cdp_session import PAGE_ORDER_FILE, _devtools_path, _ordered_pages, _poll, key_events
+from webskrap.cdp_session import PAGE_ORDER_FILE, _ordered_pages, _poll, devtools_path, key_events
 from webskrap.errors import ErrorCode, WebSkrapError
 
 
@@ -133,9 +133,9 @@ async def test_websocket_handshake_checks_the_accept_key() -> None:
 
 def test_devtools_path_must_match_the_session_port(tmp_path: Path) -> None:
     (tmp_path / "DevToolsActivePort").write_text("4242\n/devtools/browser/abc\n")
-    assert _devtools_path(tmp_path, 4242) == "/devtools/browser/abc"
+    assert devtools_path(tmp_path, 4242) == "/devtools/browser/abc"
     with pytest.raises(WebSkrapError) as error:
-        _devtools_path(tmp_path, 9999)
+        devtools_path(tmp_path, 9999)
     assert error.value.code is ErrorCode.SESSION_UNREACHABLE
 
 

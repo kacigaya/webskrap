@@ -57,10 +57,12 @@ first attempt.
 `webskrap browser open` launches detached Chromium. Later commands reconnect
 over CDP, act on its current page, and exit. The browser
 gets the same automation and headless-screen flags as `fetch`; `--headed`
-also drops the `HeadlessChrome` user-agent token. `--proxy URL` (no
-credentials) routes the session through a proxy and defaults WebRTC to
-`disable_non_proxied_udp`; `--webrtc-ip-handling-policy` overrides it. Both are
-fixed at launch, and reopening with different values is refused.
+also drops the `HeadlessChrome` user-agent token. `--proxy URL` routes the
+session through a proxy and defaults WebRTC to `disable_non_proxied_udp`;
+`--webrtc-ip-handling-policy` overrides it. Both are fixed at launch, and
+reopening with different values is refused. The URL never holds credentials:
+for an http or https proxy, set `WEBSKRAP_PROXY_USERNAME` and
+`WEBSKRAP_PROXY_PASSWORD`, and a helper process answers the proxy.
 
 ```bash
 webskrap browser open https://example.com

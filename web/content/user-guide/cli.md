@@ -336,13 +336,31 @@ webskrap browser open --proxy http://proxy.example:8080 \
 
 With `--proxy`, WebRTC defaults to `disable_non_proxied_udp`, so pages see
 neither the host's LAN address nor its direct public address in ICE candidates;
-`--webrtc-ip-handling-policy` overrides it, with or without a proxy. The proxy
-URL must not carry credentials: a persistent session has nobody attached to
-answer the proxy's authentication challenge. Both settings are fixed at launch.
+`--webrtc-ip-handling-policy` overrides it, with or without a proxy. Both
+settings are fixed at launch.
+
+For an http or https proxy that asks for a password, put the credentials in
+the environment, not in the URL:
+
+```bash
+export WEBSKRAP_PROXY_USERNAME=user
+read -rs WEBSKRAP_PROXY_PASSWORD && export WEBSKRAP_PROXY_PASSWORD
+webskrap browser open --proxy http://proxy.example:8080
+```
+
+WebSkrap starts a helper process that keeps the credentials in memory. It
+answers the proxy for every page, frame and worker, and stops when the browser
+closes. The credentials are not written to disk, not put on a command line,
+and not passed on to the browser's environment. SOCKS proxies cannot use
+credentials, because Chromium does not answer their challenge. If the helper
+stops, later commands fail with `session_unreachable`: close the session and
+open it again.
+
+
 Reopening a running session with a different proxy or policy fails with a
 `usage` error instead of reusing a browser that bypasses the proxy; reopening
 it without `--proxy` reuses it as it is. `webskrap browser list` shows each
-running session's proxy.
+running session's proxy, with `(auth)` when the helper answers it.
 
 Deliberate limitations versus the official Playwright CLI: one page per
 session (no tab commands), Chrome for Testing only, and no commands for network

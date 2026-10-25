@@ -296,6 +296,7 @@ def test_browser_session_lifecycle(persistent_session_env: Path) -> None:
                 "port": sessions[0]["port"],
                 "chromium_sandbox": sessions[0]["chromium_sandbox"],
                 "proxy_server": None,
+                "proxy_auth": False,
             }
         ]
     finally:
@@ -480,6 +481,7 @@ def _capture_open(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
             "reused": False,
             "chromium_sandbox": True,
             "proxy_server": kwargs.get("proxy_server"),
+            "proxy_auth": kwargs.get("proxy_password") is not None,
             "webrtc_ip_handling_policy": kwargs.get("webrtc_ip_handling_policy")
             or ("disable_non_proxied_udp" if kwargs.get("proxy_server") else None),
         }
@@ -512,6 +514,30 @@ def test_open_passes_the_proxy_and_webrtc_policy(
     assert calls[0]["proxy_server"] == "socks5://proxy.test:1080"
     assert calls[0]["webrtc_ip_handling_policy"] == "default_public_interface_only"
     assert json.loads(result.output)["proxy_server"] == "socks5://proxy.test:1080"
+
+
+def test_open_reads_proxy_credentials_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = _capture_open(monkeypatch)
+    env = {
+        **_env(tmp_path),
+        "WEBSKRAP_PROXY_USERNAME": "user",
+        "WEBSKRAP_PROXY_PASSWORD": "secret",
+    }
+
+    proxied = runner.invoke(
+        cli.app, ["browser", "open", "--proxy", "http://proxy.test:8080"], env=env
+    )
+    direct = runner.invoke(cli.app, ["browser", "open"], env=env)
+
+    assert proxied.exit_code == 0, proxied.output
+    assert (calls[0]["proxy_username"], calls[0]["proxy_password"]) == ("user", "secret")
+    assert "Proxy: http://proxy.test:8080 (authenticated)" in proxied.output
+    assert "secret" not in proxied.output
+    # Without --proxy the variables are ignored, not refused.
+    assert direct.exit_code == 0, direct.output
+    assert calls[1]["proxy_username"] is None and calls[1]["proxy_password"] is None
 
 
 def test_open_names_the_proxy_in_human_output(
@@ -558,7 +584,7 @@ def test_open_reports_a_credentialed_proxy_as_usage(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == EXIT_CODES[ErrorCode.USAGE]
-    assert "cannot authenticate" in result.output
+    assert "must not embed" in result.output
     assert "pw@" not in result.output
 
 

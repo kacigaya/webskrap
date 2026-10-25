@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
 from typing import Annotated, Any, TypeVar
@@ -121,7 +122,8 @@ def open_command(
             "--proxy",
             help=(
                 "Route the session through this proxy (http, https, socks4 or socks5 URL, "
-                "no credentials)."
+                "no credentials). Set WEBSKRAP_PROXY_USERNAME and WEBSKRAP_PROXY_PASSWORD "
+                "for an http or https proxy that asks for them."
             ),
         ),
     ] = None,
@@ -151,7 +153,9 @@ def open_command(
     With --proxy, all traffic goes through the proxy and WebRTC stops offering
     non-proxied UDP candidates, so pages see neither the host's LAN addresses
     nor its direct public address. The proxy is fixed at launch: reopening a
-    running session with a different one is refused.
+    running session with a different one is refused. Proxy credentials come
+    from WEBSKRAP_PROXY_USERNAME and WEBSKRAP_PROXY_PASSWORD, never from the
+    command line; a helper process keeps them in memory while the browser runs.
     """
     output_format = parse_output_format(format)
     policy = parse_cli_value(
@@ -169,6 +173,8 @@ def open_command(
             proxy_server=proxy,
             webrtc_ip_handling_policy=policy,
             fake_media_devices=fake_media_devices,
+            proxy_username=os.environ.get(browser_session.PROXY_USERNAME_ENV) if proxy else None,
+            proxy_password=os.environ.get(browser_session.PROXY_PASSWORD_ENV) if proxy else None,
         ),
         output_format,
     )
@@ -188,7 +194,8 @@ def open_command(
     verb = "Reusing" if payload["reused"] else "Opened"
     console.print(f"{verb} session [bold]{session}[/bold] (pid {payload['pid']})")
     if payload.get("proxy_server"):
-        console.print(f"Proxy: {payload['proxy_server']}")
+        auth = " (authenticated)" if payload.get("proxy_auth") else ""
+        console.print(f"Proxy: {payload['proxy_server']}{auth}")
     if not payload["chromium_sandbox"]:
         stderr_console.print("[yellow]warning:[/yellow] Chromium sandbox disabled")
     if url:
@@ -248,7 +255,7 @@ def list_command(format: FormatOption = "human") -> None:
             str(entry["pid"] or ""),
             str(entry["port"] or ""),
             "" if sandbox is None else ("yes" if sandbox else "no"),
-            str(entry.get("proxy_server") or ""),
+            str(entry.get("proxy_server") or "") + (" (auth)" if entry.get("proxy_auth") else ""),
         )
     console.print(table)
 

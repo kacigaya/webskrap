@@ -141,6 +141,14 @@ core. `src/webskrap/cdp_setup.py` prepares every page before it navigates:
   for frames and workers too, so pausing less would work, but then a new
   challenge (a proxy restart, another realm) would meet no handler and fail
   the request. Revisit if a real proxy shows a larger cost.
+- Persistent sessions disconnect after each action, so `proxy_auth.py` runs
+  as a detached helper that stays connected. It enables `Fetch` on the
+  browser target (session id None), which pauses requests from every page,
+  frame and worker; measured in 3.1, a cross-site iframe's requests reach it
+  too. It gets the credentials on stdin, prints `ready`, and exits when the
+  DevTools socket closes. Session actions use no `Fetch`, so they do not
+  compete with it. Its PID is in `state.json`; an action fails with
+  `session_unreachable` when the helper is gone, instead of meeting a 407.
 - `Emulation.setUserAgentOverride` carries `userAgentMetadata` built from the
   profile user agent (`models.user_agent_metadata`). Measured before: with a
   profile user agent, `navigator.userAgentData` had empty brands and platform,

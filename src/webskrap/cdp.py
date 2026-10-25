@@ -334,6 +334,11 @@ class CDPConnection:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._read_task
 
+    async def wait_closed(self) -> None:
+        """Return when the browser side closes the transport."""
+        if self._read_task is not None:
+            await asyncio.shield(self._read_task)
+
     def _fail_pending(self, error: WebSkrapError) -> None:
         if self._closed_error is None:
             self._closed_error = error

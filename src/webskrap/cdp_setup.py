@@ -214,20 +214,36 @@ def _routes(config: SessionConfig) -> bool:
 
 
 async def _route(page: CDPPage, config: SessionConfig) -> None:
-    """Block resource types and answer proxy authentication through ``Fetch``.
+    """Block resource types and answer proxy authentication through ``Fetch``."""
+    await intercept(
+        page.connection,
+        page.session_id,
+        blocked=BLOCKED_TYPES[config.resource_policy],
+        credentials=_credentials(config),
+    )
 
-    Without credentials only the blocked types are paused, so other requests
-    never wait on this process. With credentials every request is paused,
-    because ``Fetch`` reports authentication only for requests it intercepts.
+
+async def intercept(
+    connection: CDPConnection,
+    session_id: str | None,
+    *,
+    blocked: tuple[str, ...] = (),
+    credentials: tuple[str, str] | None = None,
+) -> None:
+    """Fail ``blocked`` resource types and answer proxy authentication.
+
+    ``session_id`` None intercepts at the browser target, which covers every
+    page, frame and worker of the browser. Without credentials only the
+    blocked types are paused, so other requests never wait on this process.
+    With credentials every request is paused, because ``Fetch`` reports
+    authentication only for requests it intercepts.
     """
-    blocked = BLOCKED_TYPES[config.resource_policy]
-    credentials = _credentials(config)
     if not blocked and credentials is None:
         return
     tasks: set[asyncio.Task[Any]] = set()
 
     def spawn(method: str, params: dict[str, Any]) -> None:
-        task = asyncio.create_task(_send_quietly(page, method, params))
+        task = asyncio.create_task(_send_quietly(connection, session_id, method, params))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 
@@ -251,24 +267,22 @@ async def _route(page: CDPPage, config: SessionConfig) -> None:
             {"requestId": params["requestId"], "authChallengeResponse": answer},
         )
 
-    page.connection.on("Fetch.requestPaused", on_paused, session_id=page.session_id)
+    connection.on("Fetch.requestPaused", on_paused, session_id=session_id)
     if credentials is not None:
-        page.connection.on("Fetch.authRequired", on_auth, session_id=page.session_id)
-        await page.send(
-            "Fetch.enable", {"patterns": [{"urlPattern": "*"}], "handleAuthRequests": True}
-        )
+        connection.on("Fetch.authRequired", on_auth, session_id=session_id)
+        params: dict[str, Any] = {"patterns": [{"urlPattern": "*"}], "handleAuthRequests": True}
     else:
-        await page.send(
-            "Fetch.enable",
-            {"patterns": [{"urlPattern": "*", "resourceType": kind} for kind in blocked]},
-        )
+        params = {"patterns": [{"urlPattern": "*", "resourceType": kind} for kind in blocked]}
+    await connection.send("Fetch.enable", params, session_id=session_id)
 
 
-async def _send_quietly(page: CDPPage, method: str, params: dict[str, Any]) -> None:
+async def _send_quietly(
+    connection: CDPConnection, session_id: str | None, method: str, params: dict[str, Any]
+) -> None:
     # The page may navigate or close while a request is paused; its id is then
     # gone and the browser answers with an error nobody needs.
     try:
-        await page.send(method, params)
+        await connection.send(method, params, session_id=session_id)
     except WebSkrapError:
         return
 
@@ -387,7 +401,9 @@ async def _write_local_storage(browser: CDPBrowser, origin: str, entries: list[l
 
         def serve_blank(params: dict[str, Any]) -> None:
             reply = {"requestId": params["requestId"], "responseCode": 200, "body": _BLANK_PAGE}
-            task = asyncio.create_task(_send_quietly(page, "Fetch.fulfillRequest", reply))
+            task = asyncio.create_task(
+                _send_quietly(page.connection, page.session_id, "Fetch.fulfillRequest", reply)
+            )
             tasks.add(task)
             task.add_done_callback(tasks.discard)
 

@@ -120,7 +120,7 @@ PAGE_ORDER_FILE = "cdp-pages.json"
 _NETWORK_QUIET_S = 0.5
 
 
-def _devtools_path(user_data_dir: Path, port: int) -> str:
+def devtools_path(user_data_dir: Path, port: int) -> str:
     """Return the browser WebSocket path Chromium wrote for ``port``.
 
     Chromium writes ``DevToolsActivePort`` as the port on line one and the
@@ -181,7 +181,7 @@ async def attach(
         WebSkrapError: ``session_unreachable`` when nothing answers on the
             session's port.
     """
-    path = _devtools_path(user_data_dir, port)
+    path = devtools_path(user_data_dir, port)
     try:
         transport = await WebSocketTransport.connect(
             "127.0.0.1", port, path, timeout_s=min(timeout_ms / 1000, 10.0)
