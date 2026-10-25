@@ -3,7 +3,7 @@ export const SITE_NAME = "WebSkrap";
 export const SOCIAL_IMAGE_URL = `${SITE_URL}/webskrap-og.png`;
 export const DEFAULT_TITLE = "WebSkrap: Python Web Scraping and Browser Automation";
 export const DEFAULT_DESCRIPTION =
-  "WebSkrap is a Python web scraping and web crawling toolkit with its own Chrome DevTools Protocol client. Scrape JavaScript pages, automate browsers, use persistent sessions, and expose scraping tools to LLM agents through MCP.";
+  "Python web scraping and browser automation on real Chromium, with its own CDP client, persistent sessions, and an MCP server for LLM agents.";
 
 export const SEO_KEYWORDS = [
   "web scraping",
