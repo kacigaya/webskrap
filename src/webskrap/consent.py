@@ -161,7 +161,10 @@ REJECT_TEXT_PATTERN = re.compile(
 # A banner has a handful of buttons at most; scanning more means we matched the
 # wrong container.
 MAX_CANDIDATES = 6
-CLICK_TIMEOUT_MS = 1_500
+# The humanized click (wheel scroll, a curved cursor path, pauses, a button
+# hold) takes about 0.7 to 1.2 s on a fast host and more on a slow one; a
+# click cut short is a notice left up.
+CLICK_TIMEOUT_MS = 4_000
 # Time for the notice to animate away before the page is read.
 SETTLE_MS = 300
 # A consent platform's iframe is visible before its contents finish rendering,
@@ -173,7 +176,7 @@ POLL_INTERVAL_MS = 250
 POLL_ATTEMPTS = 12
 # Hard cap on everything after detection (polling plus click attempts), so the
 # total cost stays timeout_ms + this instead of growing with candidate count.
-POST_DETECT_BUDGET_MS = 3_000
+POST_DETECT_BUDGET_MS = 5_000
 # A caller that already waited for networkidle gave CMP scripts their chance to
 # inject, so the detection wait on top of that is mostly dead time.
 SETTLED_PAGE_TIMEOUT_MS = 500
