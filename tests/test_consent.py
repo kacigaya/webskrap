@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -80,6 +81,15 @@ async def test_clicks_inside_a_consent_iframe(sandbox_supported: bool) -> None:
         f'<iframe id="consent-frame" style="margin-left:80px" srcdoc="{inner}"></iframe>'
     )
     async with _page(html, sandbox_supported) as page:
+        # An about:srcdoc frame does not look like a CMP's, so consent makes
+        # one pass only; wait until the frame's document holds the button.
+        for _ in range(100):
+            if await page.evaluate(
+                "!!document.getElementById('consent-frame').contentDocument"
+                "?.getElementById('framed')"
+            ):
+                break
+            await asyncio.sleep(0.05)
         assert await decline_cookies(page) == "cmp"
         clicked = await page.evaluate(
             "document.getElementById('consent-frame').contentDocument.body.dataset.clicked"
