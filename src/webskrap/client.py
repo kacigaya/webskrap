@@ -519,7 +519,9 @@ class WebSkrapSession:
 
         The cursor moves on an eased Bezier curve with jitter and pauses, the
         button is held as long as a person holds it, and a covered element is
-        refused. ``human=False`` clicks at the element's center at once.
+        refused. An empty box gets one scroll and measurement retry. The target
+        is checked again after moving the cursor, before pressing the button.
+        ``human=False`` clicks at the element's center at once.
 
         Args:
             page: Page from :meth:`new_page`.

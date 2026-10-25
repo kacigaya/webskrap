@@ -17,6 +17,13 @@ history, so they summarize each release rather than list every change.
 
 ### Fixed
 
+- Humanized clicks retry an empty bounding box after scrolling and check the
+  target again after moving the pointer. Hover handlers that move, hide,
+  disable, or cover the target can no longer cause a click at an unsafe point.
+- Humanized pointer paths end at the target point, including for tiny hover
+  targets. Click offsets now reach up to 12 CSS pixels horizontally and 10
+  vertically, with smaller offsets for small targets. Clicks pause for
+  200–500 ms before pressing.
 - With `profile_mode="full"`, a profile user agent now comes with matching
   client hints: `navigator.userAgentData` and the `Sec-CH-UA` headers. Before,
   the brands and platform were empty and no `Sec-CH-UA` header was sent,

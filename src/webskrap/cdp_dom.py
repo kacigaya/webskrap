@@ -282,12 +282,11 @@ _BOX_FUNCTION = """function () {
   return { x: r.left, y: r.top, width: r.width, height: r.height,
            viewportHeight: innerHeight };
 }"""
-# Same hit test as human._HIT_TEST: dispatches nothing, unlike a trial click.
-_HIT_TEST_FUNCTION = """function (dx, dy) {
-  const rect = this.getBoundingClientRect();
+# Fixed frame coordinates keep layout shifts from moving the tested point.
+_HIT_TEST_FUNCTION = """function (x, y) {
   const root = this.getRootNode();
   const scope = typeof root.elementFromPoint === 'function' ? root : document;
-  const hit = scope.elementFromPoint(rect.left + dx, rect.top + dy);
+  const hit = scope.elementFromPoint(x, y);
   return !!hit && (hit === this || this.contains(hit));
 }"""
 # Playwright's enabled check: not :disabled (which covers disabled fieldsets)
@@ -760,8 +759,15 @@ async def _actionable(
         await asyncio.sleep(_POLL_S)
 
 
-async def _box(element: _Element) -> dict[str, float]:
+async def _box(element: _Element, *, recover: bool = False) -> dict[str, float]:
     box = await element.call(_BOX_FUNCTION)
+    if recover and (not box or box["width"] <= 0 or box["height"] <= 0):
+        if element.frame_id is not None:
+            await _scroll_frame_element(element)
+        else:
+            await element.call(_SCROLL_FUNCTION)
+        await asyncio.sleep(uniform(0.3, 0.6))
+        box = await element.call(_BOX_FUNCTION)
     if not box or box["width"] <= 0 or box["height"] <= 0:
         msg = f"could not find a visible bounding box for selector: {element.description}"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
@@ -788,7 +794,7 @@ async def _scroll_into_view(element: _Element) -> None:
     wheel_x, wheel_y = element.offset[0] + 1, element.offset[1] + 1
     previous_top: float | None = None
     for _ in range(MAX_WHEEL_BATCHES):
-        box = await _box(element)
+        box = await _box(element, recover=True)
         top, bottom, height = box["y"], box["y"] + box["height"], box["viewportHeight"]
         if top >= VIEW_MARGIN and bottom <= height - VIEW_MARGIN:
             return
@@ -822,34 +828,40 @@ async def _scroll_frame_element(element: _Element) -> None:
 async def _human_pointer(element: _Element, *, click_count: int = 0) -> None:
     """Move along a curved path to ``element`` and click ``click_count`` times.
 
-    Port of :func:`webskrap.human.click`: scroll by wheel, refuse a covered
-    point, pause, teleport near the target, follow a Bezier path, pause, then
-    hold the button 60 to 140 ms per click. ``click_count=0`` only hovers.
+    Scroll by wheel, recover an empty box once, follow a Bezier path, pause,
+    then check the click point again before pressing. Hold the button for
+    60 to 140 ms per click. ``click_count=0`` only hovers.
     """
     page = element.input_page
     await _scroll_into_view(element)
-    box = await _box(element)
+    box = await _box(element, recover=True)
     frame_x, frame_y = click_point(
         {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]}, None
     )
-    if not await element.call(_HIT_TEST_FUNCTION, frame_x - box["x"], frame_y - box["y"]):
+    if not await element.call(_HIT_TEST_FUNCTION, frame_x, frame_y):
         msg = f"another element covers the click point of: {element.description}"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     x, y = frame_x + element.offset[0], frame_y + element.offset[1]
     await asyncio.sleep(uniform(80, 220) / 1000)
     start_x, start_y = x + uniform(-160, 160), y + uniform(-90, 90)
     await _move(page, start_x, start_y)
-    end_x, end_y = x + uniform(-8, 8), y + uniform(-6, 6)
-    distance = ((end_x - start_x) ** 2 + (end_y - start_y) ** 2) ** 0.5
+    distance = ((x - start_x) ** 2 + (y - start_y) ** 2) ** 0.5
     steps = max(12, min(48, int(distance / 6)))
-    for px, py in bezier_path((start_x, start_y), (end_x, end_y), steps):
+    for px, py in bezier_path((start_x, start_y), (x, y), steps):
         await _move(page, px, py)
         await asyncio.sleep(uniform(2, 9) / 1000)
-    await asyncio.sleep(uniform(40, 140) / 1000)
-    # Playwright's mouse.click(x, y) moves to the exact point before pressing.
-    if click_count:
-        await _move(page, x, y)
+    await asyncio.sleep(uniform(0.2, 0.5) if click_count else uniform(0.04, 0.14))
     for count in range(1, click_count + 1):
+        # Hover handlers can move, cover, hide or disable the target.
+        await _box(element)
+        if await element.call(_STATE_FUNCTION) != "visible" or not await element.call(
+            _ENABLED_FUNCTION
+        ):
+            msg = f"element is no longer visible and enabled: {element.description}"
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
+        if not await element.call(_HIT_TEST_FUNCTION, frame_x, frame_y):
+            msg = f"another element covers the click point of: {element.description}"
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
         press = {"x": x, "y": y, "button": "left", "clickCount": count}
         await page.send("Input.dispatchMouseEvent", {"type": "mousePressed", "buttons": 1, **press})
         await asyncio.sleep(uniform(60, 140) / 1000)
