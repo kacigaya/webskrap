@@ -291,7 +291,7 @@ async def test_browserleaks_webrtc_policy_hides_private_candidates() -> None:
             timeout=30_000,
         )
         text = await page.evaluate("() => document.body.innerText")
-    assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in STEALTH.launch_options()["args"]
+    assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in STEALTH.browser_args()
     assert _private_candidate_ips(text) == [], text[:1000]
 
 
