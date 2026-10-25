@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "mcp>=2,<3",
-  "pydantic>=2.8",
+  "pydantic>=2.14.1",
   "rich>=13.9",
   "typer>=0.15",
 ]
@@ -37,7 +37,7 @@ dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "pytest-cov>=6.0",
-  "ruff>=0.8",
+  "ruff>=0.17.1",
   # Windows has no system timezone database; tests that fake Linux need one.
   "tzdata>=2024.1; sys_platform == 'win32'",
 ]

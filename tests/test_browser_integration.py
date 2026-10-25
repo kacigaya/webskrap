@@ -470,14 +470,25 @@ async def test_mesa_gpu_replaces_swiftshader(test_server: str, sandbox_supported
 
 
 _ICE_CANDIDATE_TYPES = """async () => {
-    const pc = new RTCPeerConnection();
+    const pc = new RTCPeerConnection({iceServers: []});
     const types = [];
-    pc.onicecandidate = (e) => { if (e.candidate) types.push(e.candidate.type); };
-    pc.createDataChannel('probe');
-    await pc.setLocalDescription(await pc.createOffer());
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    pc.close();
-    return types;
+    let timeout;
+    try {
+        const complete = new Promise((resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error('ICE gathering timed out')), 10000);
+            pc.onicecandidate = (e) => {
+                if (e.candidate) types.push(e.candidate.type);
+                else resolve();
+            };
+        });
+        pc.createDataChannel('probe');
+        await pc.setLocalDescription(await pc.createOffer());
+        await complete;
+        return types;
+    } finally {
+        clearTimeout(timeout);
+        pc.close();
+    }
 }"""
 
 
