@@ -1,11 +1,11 @@
 # Own CDP driver
 
-Status: experimental. One-shot fetch only.
+Status: the only driver since 3.0. Patchright and Playwright are removed.
 
 ## Goal
 
-WebSkrap drives Chromium through Patchright, a patched Playwright. This
-project replaces that stack with WebSkrap's own Chrome DevTools Protocol (CDP)
+WebSkrap 2.x drove Chromium through Patchright, a patched Playwright. This
+project replaced that stack with WebSkrap's own Chrome DevTools Protocol (CDP)
 client, in stages. Each stage must match Patchright on detection before the
 next stage starts.
 
@@ -21,7 +21,7 @@ Reasons:
 1. CDP core and a one-shot fetch backend. **Done on this branch.**
 2. Measure against Patchright on the same host and IP. **Done; see below.**
 3. Port persistent browser sessions. **In progress; see the stage 3 plan.**
-4. Make Playwright optional after full parity. Remove it in a major version.
+4. Remove Playwright and Patchright in v3.0.0. **In progress; see the v3 plan.**
 
 Stop at the first stage that does not match Patchright on detection.
 
@@ -67,14 +67,49 @@ Each step ends with tests, the full pipeline, and a commit. Measure
 `Accessibility.getFullAXTree` for detection before 3b ships, because neither
 Patchright nor Playwright uses that domain.
 
+## v3 plan
+
+v3.0.0 drives Chromium only through WebSkrap's own CDP client. Decisions:
+
+- **Browser install.** `webskrap install` downloads Chrome for Testing, the
+  build Google publishes for automation, for Linux (x64 and ARM64), macOS and
+  Windows. Installed Chrome and Edge channels keep working.
+- **Windows.** Windows launches with a loopback debugging port and attaches
+  with the WebSocket client. Linux and macOS keep the debugging pipe.
+- **Features.** Cookie-banner dismissal, proxy credentials, `storage_state`,
+  and profile emulation (viewport, user agent, locale, timezone, media) move
+  to CDP. The `firefox` and `webkit` browsers, the `driver` option and the
+  `patchright_*` options go away.
+- **Python API.** `WebSkrapClient`, its sessions, `fetch` and `search` keep
+  their names and arguments. Playwright objects, such as
+  `WebSkrapSession.context` and `Page` arguments, are replaced by CDP ones.
+
+Phases, each ending with tests, the full pipeline and a commit. Phases 1 to 5
+are done:
+
+1. Launch: the Chrome for Testing installer, executable lookup, and the
+   Windows port launch.
+2. Client: `WebSkrapClient` and `WebSkrapSession` on CDP, with profile
+   emulation, proxy credentials, `storage_state`, JavaScript and service
+   worker switches, consent dismissal, and the human click and type helpers.
+   Warm MCP fetch sessions run on it.
+3. Sessions, CLI and MCP: CDP only; the driver options are removed.
+4. Doctor and diagnostics on CDP.
+5. Remove the dependencies, port the tests, and update the documentation,
+   with a 2.x to 3.0 migration guide.
+6. Parity runs, review, pull request, release.
+
 ## Design
 
 `src/webskrap/cdp.py` is the core:
 
-- **Transport.** Chromium starts with `--remote-debugging-pipe`. It reads
+- **Transport.** On Linux and macOS, Chromium starts with
+  `--remote-debugging-pipe`. It reads
   NUL-terminated JSON on file descriptor 3 and writes on descriptor 4.
   `os.posix_spawn` maps the descriptors. The browser opens no TCP port, so no
-  other local process can attach.
+  other local process can attach. Windows cannot map the descriptors, so there
+  Chromium opens a loopback debugging port and WebSkrap attaches with its own
+  WebSocket client.
 - **Connection.** `CDPConnection` sends commands with increasing ids, matches
   replies, and routes events by session id and method. When the pipe closes,
   all pending commands fail with a launch or sandbox error.
@@ -85,24 +120,30 @@ Patchright nor Playwright uses that domain.
   `Console.enable`. Page code cannot see or patch the objects that the scripts
   use. The page's Content Security Policy does not block these scripts.
 - **Launch flags.** The command line is short: the pipe, the profile, first-run
-  suppression, `--disable-field-trial-config`, and the flags that a Patchright
-  fetch gets from `SessionConfig.launch_options`. The driver also adds
+  suppression, `--disable-field-trial-config`, and
+  `SessionConfig.browser_args()`. That includes
   `--disable-blink-features=AutomationControlled`, because no driver patch
   hides `navigator.webdriver`.
 
-`src/webskrap/cdp_fetch.py` builds `fetch()` on the core. It returns the same
-`FetchResult` as `WebSkrapClient.fetch`. It uses these CDP domains on the page:
+`src/webskrap/client.py` builds `WebSkrapClient` and `WebSkrapSession` on the
+core. `src/webskrap/cdp_setup.py` prepares every page before it navigates:
 
-- `Page`: navigation and lifecycle events.
-- `Network`: status and headers of the main document.
-- `Fetch`: only when a resource policy blocks resource types, and then only
-  for those types.
+- `Emulation` and `Network.setExtraHTTPHeaders`: the profile, as
+  `SessionConfig.profile_mode` asks. Nothing is overridden by default.
+- `Fetch`: only when a resource policy blocks resource types (then only for
+  those types), or when proxy credentials are set. Credentials go only to
+  challenges whose source is the proxy.
+- `Storage.setCookies` and a throwaway page restore `storage_state` once per
+  session.
 
 ## Measured results
 
+These runs compared Patchright with the CDP driver in 2.15, before
+Patchright was removed.
+
 Host: Linux ARM64, bundled Chromium, sandbox off, same IP for both drivers.
 
-Local probe page (`scripts/compare_drivers.py`). It checks `navigator.webdriver`,
+Local probe page (`scripts/compare_drivers.py`, removed in 3.0). It checks `navigator.webdriver`,
 the console `Runtime.enable` probe, the user agent, client-hint brands,
 `window.chrome`, plugins, languages, screen, window, WebGL, and automation
 globals.
@@ -173,49 +214,38 @@ the same.
 
 ## Limits
 
-- Linux and macOS only, because of `posix_spawn` with descriptor mapping.
-- One page per fetch. No auto-attach to out-of-process iframes or workers, so
-  a resource policy does not cover requests that they make.
-- `ready_selector` takes CSS only. Playwright engines such as `text=` and
+- One page per fetch. No auto-attach to workers, so a resource policy does not
+  cover requests that they make.
+- Selectors are CSS or snapshot refs. Playwright engines such as `text=` and
   `role=` do not work.
-- No consent dismissal, proxy credentials, `storage_state`, JavaScript off,
-  service-worker blocking, `slow_mo_ms`, `mask_headless_user_agent`, or
-  `patchright_context_profile`. Each raises `usage`. See `UNSUPPORTED_FIELDS`
-  in `cdp_fetch.py`.
-- Profile settings are not applied. A Patchright fetch also ignores them
-  unless `patchright_context_profile` is set, so both drivers present the
-  browser's native identity.
-- `PLAYWRIGHT_BROWSERS_PATH` is honored, including `0` (package-local
-  browsers). The driver finds Chromium without starting Playwright.
-- Entry points: `--driver cdp` on `webskrap fetch`, `search` and
-  `browser open`, and `driver="cdp"` on the MCP `stealth_fetch`, `search` and
-  `browser_open` tools. `WebSkrapClient`, the MCP `fetch` tool and warm MCP
-  fetch sessions still use Patchright only.
-- DuckDuckGo answers both drivers with a bot challenge from this host's IP;
-  Bing serves results to both.
-- The CDP snapshot leaves out `generic` wrappers and Playwright's
-  `[cursor=pointer]` marks, so it is about a third shorter. It does not
-  descend into iframes; an iframe is listed as one node. Roles and names
-  cover the ARIA implicit-role table and the common accessible-name rules,
-  not the full specification.
-- Element targets are refs or CSS selectors. As in Playwright's strict mode,
-  a CSS selector that matches several elements is refused; use a ref.
-- Session waits take CSS selectors only. A `networkidle` wait on an already
-  loaded page means 500 ms with no request in flight that the command saw
-  start and no new resource-timing entry, because the live lifecycle event
-  fired before the command attached. A request that began earlier and still
-  runs is invisible until it ends. Patchright has the same limit, because it
-  also attaches fresh for each command.
-- Each command acts on the newest open page, as Patchright's `pages[-1]`
-  does. CDP lists targets in no defined order, so the session directory
-  keeps the creation order in `cdp-pages.json` (target ids only). Pages that
-  a command opens are recorded in creation order while it is attached.
-  Several pages opened while no command runs have no known order, as with
-  Patchright.
-- `eval` runs with a user gesture, as Playwright's does, so it can open one
-  popup per call.
-- `eval` results follow Patchright's shapes: `ref: <Window>`, `ref: <Node>`,
-  and `[Circular]` where Patchright rebuilds the cycle.
+- `PLAYWRIGHT_BROWSERS_PATH` is still read, including `0` (package-local
+  browsers), so a browser that 2.x downloaded is found.
+- DuckDuckGo answers with a bot challenge from this host's IP; Bing serves
+  results.
+- The snapshot leaves out `generic` wrappers and Playwright's
+  `[cursor=pointer]` marks. It does not descend into iframes; an iframe is
+  listed as one node. Roles and names cover the ARIA implicit-role table and
+  the common accessible-name rules, not the full specification.
+- As in Playwright's strict mode, a CSS selector that matches several elements
+  is refused; use a ref.
+- A `networkidle` wait in a persistent session, on an already loaded page,
+  means 500 ms with no request in flight that the command saw start and no
+  new resource-timing entry, because the live lifecycle event fired before
+  the command attached. A request that began earlier and still runs is
+  invisible until it ends.
+- Each command acts on the newest open page. CDP lists targets in no defined
+  order, so the session directory keeps the creation order in
+  `cdp-pages.json` (target ids only). Several pages opened while no command
+  runs have no known order.
+- `eval` runs with a user gesture, so it can open one popup per call. Its
+  results use the 2.x shapes: `ref: <Window>`, `ref: <Node>`, and
+  `[Circular]`.
+- `CDPPage.evaluate` runs in an isolated world; use
+  `browser_session.evaluate` for the page's own globals.
+- Main-world evaluation is visible to the page. Polling a check in the main
+  world while a Cloudflare challenge runs kept the challenge from clearing
+  after the checkbox click; the same check in an isolated world cleared it
+  (3.0 parity run). Keep `browser eval` for reads that need page globals.
 
 ## Conditions for more work
 
@@ -225,6 +255,5 @@ the same.
   headless runs and shows its captcha to headed ones. So stage 3 gains speed and
   control, not stealth. A residential IP or a GPU host is the next lever for
   detection.
-- Proxy credentials need `Fetch.authRequired`. That pauses every request, so
-  add it only when a user needs an authenticated proxy.
-- Consent dismissal needs click and locator primitives. They come with stage 3.
+- Proxy credentials pause every request through `Fetch`, so they cost a round
+  trip per request. Measure before adding more request interception.

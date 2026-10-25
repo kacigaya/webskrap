@@ -6,16 +6,18 @@ import contextlib
 import json
 import struct
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from conftest import set_page_content
 from mcp import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 from mcp.types import ImageContent
 from typer.testing import CliRunner
 
 from webskrap import browser_session, cli, mcp_server
+from webskrap.cdp import CDPPage, find_executable, launch
 from webskrap.errors import EXIT_CODES, ErrorCode, WebSkrapError
 
 
@@ -48,30 +50,39 @@ async def test_mcp_mouse_rejects_invalid_arguments_before_connecting(
     connect.assert_not_called()
 
 
+def _fake_page(send: Any = None) -> MagicMock:
+    page = MagicMock(spec=CDPPage)
+    page.evaluate = AsyncMock(
+        return_value={"width": 100, "height": 50, "scroll_x": 0, "scroll_y": 0}
+    )
+    page.send = AsyncMock(side_effect=send)
+    return page
+
+
 @pytest.mark.parametrize("point", [(100, 0), (0, 50), (-1, 0)])
 async def test_outside_coordinates_send_no_mouse_input(point) -> None:
-    mouse = SimpleNamespace(move=AsyncMock(), down=AsyncMock())
-    page = SimpleNamespace(
-        evaluate=AsyncMock(return_value={"width": 100, "height": 50}), mouse=mouse
-    )
+    page = _fake_page()
     with pytest.raises(WebSkrapError, match="outside the viewport"):
         await browser_session.mouse_action(page, "drag", 1, 2, end_x=point[0], end_y=point[1])
-    mouse.move.assert_not_called()
-    mouse.down.assert_not_called()
+    page.send.assert_not_called()
 
 
 async def test_failed_drag_releases_mouse_button() -> None:
-    mouse = SimpleNamespace(
-        move=AsyncMock(side_effect=[None, RuntimeError("disconnected")]),
-        down=AsyncMock(),
-        up=AsyncMock(),
-    )
-    page = SimpleNamespace(
-        evaluate=AsyncMock(return_value={"width": 100, "height": 50}), mouse=mouse
-    )
+    sent: list[dict[str, Any]] = []
+
+    async def send(method: str, params: dict[str, Any] | None = None, **_: Any) -> dict:
+        params = params or {}
+        if params.get("type") == "mouseMoved" and params.get("buttons"):
+            raise RuntimeError("disconnected")
+        sent.append(params)
+        return {}
+
+    page = _fake_page(send)
+    page.record.return_value = MagicMock(events=[])
     with pytest.raises(RuntimeError, match="disconnected"):
         await browser_session.mouse_action(page, "drag", 1, 2, end_x=3, end_y=4, button="right")
-    mouse.up.assert_awaited_once_with(button="right")
+    released = [params for params in sent if params.get("type") == "mouseReleased"]
+    assert len(released) == 1 and released[0]["button"] == "right"
 
 
 @pytest.mark.parametrize(
@@ -123,11 +134,12 @@ async def test_mcp_vision_protocol_and_persistent_interactions(
     monkeypatch.setenv("WEBSKRAP_OUTPUT_DIR", str(output_root))
     await browser_session.open_session(name)
 
-    async def prepare(page) -> None:
-        await page.set_viewport_size({"width": 640, "height": 480})
-        await page.set_content(PAGE)
+    async def prepare(page) -> browser_session.Viewport:
+        await set_page_content(page, PAGE, block_requests=False)
+        return await browser_session.viewport(page)
 
-    await browser_session.run_page_action(name, prepare)
+    size = await browser_session.run_page_action(name, prepare)
+    width, height = size["width"], size["height"]
     async with create_client_server_memory_streams() as (client_streams, server_streams):
         server = asyncio.create_task(
             mcp_server.mcp._lowlevel_server.run(
@@ -144,9 +156,9 @@ async def test_mcp_vision_protocol_and_persistent_interactions(
                 assert images[0].mime_type == "image/png"
                 png = base64.b64decode(images[0].data)
                 assert png.startswith(b"\x89PNG\r\n\x1a\n")
-                assert struct.unpack(">II", png[16:24]) == (640, 480)
-                assert result.structured_content["width"] == 640
-                assert result.structured_content["height"] == 480
+                assert struct.unpack(">II", png[16:24]) == (width, height)
+                assert result.structured_content["width"] == width
+                assert result.structured_content["height"] == height
                 assert result.structured_content["coordinate_system"] == "viewport-css-pixels"
                 assert not output_root.exists()
                 for tool, args in (
@@ -164,8 +176,12 @@ async def test_mcp_vision_protocol_and_persistent_interactions(
                     assert not result.is_error, result
 
                 async def verify(page):
-                    await page.wait_for_function("scrollY > 0")
-                    assert await page.locator("#input").input_value() == "héllo 世界"
+                    # The wheel scrolls asynchronously, after the command returns.
+                    for _ in range(50):
+                        if await page.evaluate("scrollY > 0"):
+                            break
+                        await asyncio.sleep(0.1)
+                    assert await _input_value(page) == "héllo 世界"
                     events = await browser_session.evaluate(page, "window.events")
                     assert all(event["trusted"] for event in events)
                     assert {"click", "dblclick", "input", "wheel"} <= {e["type"] for e in events}
@@ -175,7 +191,7 @@ async def test_mcp_vision_protocol_and_persistent_interactions(
                 result = await client.call_tool("browser_view", {"session": name})
                 assert result.structured_content["scroll_y"] > 0
                 error = await client.call_tool(
-                    "browser_mouse", {"session": name, "action": "click", "x": 640, "y": 0}
+                    "browser_mouse", {"session": name, "action": "click", "x": width, "y": 0}
                 )
                 assert error.is_error
                 assert "outside the viewport" in error.content[0].text
@@ -194,8 +210,7 @@ def test_cli_view_and_focused_input(persistent_session_env, tmp_path) -> None:
         await browser_session.open_session(name)
 
         async def content(page):
-            await page.set_viewport_size({"width": 640, "height": 480})
-            await page.set_content(PAGE)
+            await set_page_content(page, PAGE, block_requests=False)
 
         await browser_session.run_page_action(name, content)
 
@@ -218,32 +233,34 @@ def test_cli_view_and_focused_input(persistent_session_env, tmp_path) -> None:
             assert result.exit_code == 0, result.output
             assert json.loads(result.stdout)["title"] == "Vision"
 
-        async def value(page):
-            return await page.locator("#input").input_value()
-
-        assert asyncio.run(browser_session.run_page_action(name, value)) == "Enter 世界"
+        assert asyncio.run(browser_session.run_page_action(name, _input_value)) == "Enter 世界"
     finally:
         browser_session.close_session(name, delete_data=True)
 
 
 @pytest.mark.browser
 async def test_view_uses_css_pixels_on_a_high_dpi_page(sandbox_supported) -> None:
-    from patchright.async_api import async_playwright
+    browser = await launch(
+        find_executable("chromium"), args=[] if sandbox_supported else ["--no-sandbox"]
+    )
+    try:
+        page = await browser.new_page()
+        await page.enable_events()
+        await page.send(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": 320, "height": 240, "deviceScaleFactor": 2, "mobile": False},
+        )
+        await set_page_content(page, PAGE)
+        captured = await browser_session.view(page)
+        assert await page.evaluate("devicePixelRatio") == 2
+        assert (captured.width, captured.height) == (320, 240)
+        assert struct.unpack(">II", captured.image[16:24]) == (320, 240)
+        await browser_session.mouse_action(page, "click", 40, 40)
+        await browser_session.insert_text(page, "css pixels")
+        assert await _input_value(page) == "css pixels"
+    finally:
+        await browser.close()
 
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(chromium_sandbox=sandbox_supported)
-        try:
-            context = await browser.new_context(
-                viewport={"width": 320, "height": 240}, device_scale_factor=2
-            )
-            page = await context.new_page()
-            await page.set_content(PAGE)
-            captured = await browser_session.view(page)
-            assert await page.evaluate("devicePixelRatio") == 2
-            assert (captured.width, captured.height) == (320, 240)
-            assert struct.unpack(">II", captured.image[16:24]) == (320, 240)
-            await browser_session.mouse_action(page, "click", 40, 40)
-            await browser_session.insert_text(page, "css pixels")
-            assert await page.locator("#input").input_value() == "css pixels"
-        finally:
-            await browser.close()
+
+async def _input_value(page: CDPPage) -> str:
+    return await page.evaluate("document.querySelector('#input').value")

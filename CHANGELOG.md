@@ -9,6 +9,49 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+WebSkrap 3.0 drives Chromium only through its own CDP client. Read
+`docs/migration-3.0.md` before you upgrade.
+
+### Added
+
+- `webskrap install` downloads Chrome for Testing (Linux x64 and ARM64, macOS,
+  Windows) into the user cache folder. `--force` downloads it again.
+  `WEBSKRAP_BROWSERS_PATH` changes the folder.
+- Windows support. WebSkrap connects through a loopback debugging port and its
+  own WebSocket client there; Linux and macOS keep the pipe.
+- `SessionConfig.profile_mode`: `native` (default), `locale` or `full`. The
+  CLI takes `--profile-mode` and the MCP fetch tools take `profile_mode`.
+- Consent dismissal, proxy credentials, `storage_state`, resource policies and
+  profile emulation work on the CDP client. Proxy credentials go only to
+  authentication challenges from the proxy, never to a website.
+
+### Changed
+
+- `WebSkrapSession` owns a `CDPBrowser` (`session.browser`).
+  `session.new_page()` returns a `CDPPage`.
+- Selectors are CSS or snapshot refs everywhere.
+- The browser lookup prefers Chrome for Testing, then a browser that 2.x
+  downloaded with Playwright, then a distribution Chromium.
+- `scripts/driver_parity.py` compares the client path with the bare CDP core.
+- Headless launches declare a mouse with `--blink-settings`, as Playwright
+  did, so pages see hover and a fine pointer.
+- A consent click may take up to 4 s, and the work after a notice is found
+  up to 5 s. The humanized click was cut short on slow hosts.
+- `ProxyConfig.server` refuses `user:password@`. Set `username` and
+  `password` instead, so the password never reaches Chromium's command line.
+
+### Removed
+
+- The `playwright` and `patchright` dependencies.
+- `SessionConfig` fields `driver`, `browser`, `slow_mo_ms`,
+  `patchright_focus_control` and `patchright_context_profile`. Setting one
+  raises an error that names its replacement.
+- The `--driver` and `--patchright-context-profile` options, and the MCP
+  `driver` and `patchright_context_profile` arguments.
+- `webskrap.cdp_fetch`, `WebSkrapClient.start()`, `WebSkrapSession.context`
+  and the Playwright helpers in `webskrap.human`.
+- `scripts/compare_drivers.py`.
+
 ## [2.15.0] - 2026-10-24
 
 ### Added

@@ -21,6 +21,7 @@ import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -377,13 +378,142 @@ async def snapshot(page: CDPPage, *, depth: int | None = None) -> str:
     return text
 
 
-class _Element:
-    """One resolved element: a remote object in an isolated world."""
+@dataclass(frozen=True)
+class Frame:
+    """One frame of a page, ready for isolated-world scripts.
 
-    def __init__(self, page: CDPPage, object_id: str, description: str) -> None:
+    ``page`` evaluates in this frame: its session (the page's, or an
+    out-of-process iframe's) and the frame id. ``offset_x`` and ``offset_y``
+    place the frame's viewport in the top-level viewport, so element boxes
+    from inside it can be turned into mouse coordinates for ``top``.
+    """
+
+    page: CDPPage
+    top: CDPPage
+    url: str
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+
+
+async def frames(page: CDPPage) -> list[Frame]:
+    """Return the page's frames: the main frame first, then every iframe.
+
+    Same-site iframes come from ``Page.getFrameTree``. Cross-site iframes run
+    in other processes, so the page auto-attaches to them (as Playwright
+    always does); each gets its own flat session. Offsets come from the
+    ``<iframe>`` element's content box (``DOM.getFrameOwner`` and
+    ``DOM.getBoxModel``), which Chromium reports in top-level viewport
+    coordinates. Frames whose owner cannot be measured (detached, hidden)
+    are left out, since nothing in them can be clicked.
+    """
+    found: list[Frame] = []
+    tree = await page.send("Page.getFrameTree")
+    found.append(Frame(page, page, tree["frameTree"]["frame"].get("url", "")))
+    await _add_child_frames(page, page, tree["frameTree"], 0.0, 0.0, found)
+    targets = page.iframe_targets
+    if targets is None:
+        targets = await _start_auto_attach(page)
+    for event in list(targets.values()):
+        info = event.get("targetInfo", {})
+        if info.get("type") != "iframe":
+            continue
+        offset = await _owner_offset(page, info["targetId"])
+        if offset is None:
+            continue
+        frame_page = CDPPage(page.connection, event["sessionId"], info["targetId"])
+        frame_page.default_timeout_s = page.default_timeout_s
+        found.append(Frame(frame_page, page, info.get("url", ""), *offset))
+        with suppress(WebSkrapError):
+            subtree = await frame_page.send("Page.getFrameTree")
+            await _add_child_frames(frame_page, page, subtree["frameTree"], *offset, found)
+    return found
+
+
+async def _start_auto_attach(page: CDPPage) -> dict[str, dict[str, Any]]:
+    """Track ``page``'s out-of-process iframes from now on.
+
+    Chromium reports each iframe target once, when auto-attach starts or when
+    the iframe appears, so the registry outlives one :func:`frames` call: a
+    consent notice that renders into an existing iframe later is still found.
+    """
+    targets: dict[str, dict[str, Any]] = {}
+
+    def attached(params: dict[str, Any]) -> None:
+        info = params.get("targetInfo", {})
+        if info.get("type") == "iframe":
+            targets[info["targetId"]] = params
+
+    def detached(params: dict[str, Any]) -> None:
+        for target_id, event in list(targets.items()):
+            if event.get("sessionId") == params.get("sessionId"):
+                del targets[target_id]
+
+    page.connection.on("Target.attachedToTarget", attached, session_id=page.session_id)
+    page.connection.on("Target.detachedFromTarget", detached, session_id=page.session_id)
+    page.iframe_targets = targets
+    await page.send(
+        "Target.setAutoAttach",
+        {"autoAttach": True, "waitForDebuggerOnStart": False, "flatten": True},
+    )
+    # Existing iframe targets are reported right after the command.
+    await asyncio.sleep(0.05)
+    return targets
+
+
+async def _add_child_frames(
+    session_page: CDPPage,
+    top: CDPPage,
+    node: dict[str, Any],
+    base_x: float,
+    base_y: float,
+    found: list[Frame],
+) -> None:
+    """Add in-process child frames of ``node``; ``base`` is the session's own offset."""
+    for child in node.get("childFrames", []):
+        frame_id = child["frame"]["id"]
+        offset = await _owner_offset(session_page, frame_id)
+        if offset is None:
+            continue
+        frame_page = CDPPage(session_page.connection, session_page.session_id, frame_id)
+        frame_page.default_timeout_s = session_page.default_timeout_s
+        x, y = base_x + offset[0], base_y + offset[1]
+        found.append(Frame(frame_page, top, child["frame"].get("url", ""), x, y))
+        await _add_child_frames(session_page, top, child, base_x, base_y, found)
+
+
+async def _owner_offset(session_page: CDPPage, frame_id: str) -> tuple[float, float] | None:
+    """Return the content-box origin of the ``<iframe>`` hosting ``frame_id``."""
+    try:
+        owner = await session_page.send("DOM.getFrameOwner", {"frameId": frame_id})
+        box = await session_page.send("DOM.getBoxModel", {"backendNodeId": owner["backendNodeId"]})
+    except WebSkrapError:
+        return None
+    content = box["model"]["content"]
+    return float(content[0]), float(content[1])
+
+
+class _Element:
+    """One resolved element: a remote object in an isolated world.
+
+    ``input_page`` receives mouse events, and ``offset`` turns the element's
+    frame-relative box into its coordinates there; both differ from ``page``
+    only for elements inside iframes.
+    """
+
+    def __init__(
+        self,
+        page: CDPPage,
+        object_id: str,
+        description: str,
+        *,
+        input_page: CDPPage | None = None,
+        offset: tuple[float, float] = (0.0, 0.0),
+    ) -> None:
         self.page = page
         self.object_id = object_id
         self.description = description
+        self.input_page = input_page or page
+        self.offset = offset
 
     async def call(self, declaration: str, *args: Any) -> Any:
         result = await self.page.send(
@@ -465,7 +595,7 @@ async def _find_in(page: CDPPage, target: str, group: str, world: int) -> list[_
         },
     )
     if "exceptionDetails" in result:
-        msg = f"'{target}' is not a valid CSS selector (the cdp driver takes CSS or refs)"
+        msg = f"'{target}' is not a valid CSS selector (targets are CSS selectors or snapshot refs)"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     # Properties of a grouped object belong to the same group.
     properties = await page.send(
@@ -541,7 +671,9 @@ async def _scroll_into_view(element: _Element) -> None:
     The wheel goes where a fresh connection's mouse is, the viewport origin,
     as Patchright's ``mouse.wheel`` does after reattaching.
     """
-    page = element.page
+    page = element.input_page
+    # Over a frame, the wheel must sit inside it to scroll its document.
+    wheel_x, wheel_y = element.offset[0] + 1, element.offset[1] + 1
     previous_top: float | None = None
     for _ in range(MAX_WHEEL_BATCHES):
         box = await _box(element)
@@ -557,7 +689,7 @@ async def _scroll_into_view(element: _Element) -> None:
             step = notch if remaining > 0 else -notch
             await page.send(
                 "Input.dispatchMouseEvent",
-                {"type": "mouseWheel", "x": 0, "y": 0, "deltaX": 0, "deltaY": step},
+                {"type": "mouseWheel", "x": wheel_x, "y": wheel_y, "deltaX": 0, "deltaY": step},
             )
             remaining -= step
             await asyncio.sleep(uniform(16, 45) / 1000)
@@ -572,15 +704,16 @@ async def _human_pointer(element: _Element, *, click_count: int = 0) -> None:
     point, pause, teleport near the target, follow a Bezier path, pause, then
     hold the button 60 to 140 ms per click. ``click_count=0`` only hovers.
     """
-    page = element.page
+    page = element.input_page
     await _scroll_into_view(element)
     box = await _box(element)
-    x, y = click_point(
+    frame_x, frame_y = click_point(
         {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]}, None
     )
-    if not await element.call(_HIT_TEST_FUNCTION, x - box["x"], y - box["y"]):
+    if not await element.call(_HIT_TEST_FUNCTION, frame_x - box["x"], frame_y - box["y"]):
         msg = f"another element covers the click point of: {element.description}"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    x, y = frame_x + element.offset[0], frame_y + element.offset[1]
     await asyncio.sleep(uniform(80, 220) / 1000)
     start_x, start_y = x + uniform(-160, 160), y + uniform(-90, 90)
     await _move(page, start_x, start_y)
@@ -687,3 +820,88 @@ async def _act(
             }
             msg = f"{target} {reasons[outcome['error']]}"
             raise WebSkrapError(msg, code=ErrorCode.USAGE)
+
+
+@asynccontextmanager
+async def query_elements(
+    frame: Frame, script: str, arg: Any = None
+) -> AsyncIterator[list[_Element]]:
+    """Run ``script`` (a function returning an array of elements) in ``frame``.
+
+    Yields the elements, ready for :func:`is_visible` and :func:`human_click`;
+    their remote objects are released when the block ends. The script runs in
+    a fresh isolated world, so the page cannot see or patch it.
+    """
+    async with _object_group(frame.page) as group:
+        world = await frame.page.isolated_world()
+        result = await frame.page.send(
+            "Runtime.evaluate",
+            {
+                "expression": f"({script})({json.dumps(arg)})",
+                "contextId": world,
+                "returnByValue": False,
+                "objectGroup": group,
+            },
+        )
+        if "exceptionDetails" in result or "objectId" not in result.get("result", {}):
+            yield []
+            return
+        properties = await frame.page.send(
+            "Runtime.getProperties",
+            {"objectId": result["result"]["objectId"], "ownProperties": True},
+        )
+        yield [
+            _Element(
+                frame.page,
+                item["value"]["objectId"],
+                "element",
+                input_page=frame.top,
+                offset=(frame.offset_x, frame.offset_y),
+            )
+            for item in properties["result"]
+            if item["name"].isdigit() and "objectId" in item.get("value", {})
+        ]
+
+
+async def is_visible(element: _Element) -> bool:
+    """True when ``element`` has a non-empty box and is not ``visibility:hidden``."""
+    return await element.call(_STATE_FUNCTION) == "visible"
+
+
+async def human_click(element: _Element, *, description: str, timeout_s: float) -> None:
+    """Click ``element`` along the human cursor path within ``timeout_s``.
+
+    Raises:
+        WebSkrapError: ``usage`` when another element covers it, ``timeout``
+            when the gesture does not finish in time.
+    """
+    element.description = description
+    try:
+        await asyncio.wait_for(_human_pointer(element, click_count=1), timeout_s)
+    except TimeoutError as exc:
+        msg = f"timed out clicking {description}"
+        raise WebSkrapError(msg, code=ErrorCode.TIMEOUT) from exc
+
+
+async def instant_click(page: CDPPage, target: str, *, click_count: int = 1) -> None:
+    """Click the center of ``target`` at once, with no cursor path or hold.
+
+    The same strict, visible and enabled checks as :func:`element_action`
+    apply; only the gesture is mechanical. Prefer the human click on pages
+    that score input.
+    """
+    async with _object_group(page) as group:
+        element = await _actionable(page, target, group, page.default_timeout_s, enabled=True)
+        await element.call(_SCROLL_FUNCTION)
+        box = await _box(element)
+        x = box["x"] + box["width"] / 2 + element.offset[0]
+        y = box["y"] + box["height"] / 2 + element.offset[1]
+        await _move(element.input_page, x, y)
+        for count in range(1, click_count + 1):
+            press = {"x": x, "y": y, "button": "left", "clickCount": count}
+            await element.input_page.send(
+                "Input.dispatchMouseEvent", {"type": "mousePressed", "buttons": 1, **press}
+            )
+            await element.input_page.send(
+                "Input.dispatchMouseEvent", {"type": "mouseReleased", **press}
+            )

@@ -5,10 +5,12 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from webskrap import browser_session, client
+from webskrap.cdp import CDPPage
 from webskrap.client import WebSkrapError
 
 
@@ -66,3 +68,27 @@ def _forget_resolved_channels() -> None:
     # skip another test's first launch attempt.
     client._resolved_channels.clear()
     client._resolution_locks.clear()
+
+
+async def set_page_content(page: CDPPage, html: str, *, block_requests: bool = True) -> None:
+    """Replace ``page``'s document with ``html``, as Playwright's set_content did.
+
+    With ``block_requests``, every request the content would make fails, so no
+    third-party traffic leaves a test.
+    """
+    if block_requests:
+        tasks: set[asyncio.Task[Any]] = set()
+
+        def fail(params: dict[str, Any]) -> None:
+            task = asyncio.create_task(
+                page.send(
+                    "Fetch.failRequest",
+                    {"requestId": params["requestId"], "errorReason": "BlockedByClient"},
+                )
+            )
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+
+        page.connection.on("Fetch.requestPaused", fail, session_id=page.session_id)
+        await page.send("Fetch.enable", {"patterns": [{"urlPattern": "*"}]})
+    await page.send("Page.setDocumentContent", {"frameId": page.target_id, "html": html})

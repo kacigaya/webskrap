@@ -1,6 +1,6 @@
 ---
 title: Resource Routing for Faster Web Scraping
-description: Use WebSkrap resource policies to block heavy assets, trackers, images, and fonts for faster Playwright scraping.
+description: Use WebSkrap resource policies to block heavy assets, trackers, images, and fonts for faster browser scraping.
 ---
 
 # Resource policy
@@ -44,8 +44,8 @@ unstyled pages:
 config = SessionConfig(resource_policy=ResourcePolicy.DOCUMENTS)
 ```
 
-Resource policies are applied with Playwright routing for every request in the
-browser context. Scripts and XHR/fetch requests are not blocked by these presets.
+Resource policies block resource types through the CDP `Fetch` domain on every
+page of the session. Scripts and XHR/fetch requests are not blocked by these presets.
 
 ## CLI
 

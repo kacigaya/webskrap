@@ -29,6 +29,7 @@ import os
 import shutil
 import signal
 import struct
+import subprocess  # nosec B404  # noqa: S404 - fixed argv for Chromium, never a shell
 import sys
 import tempfile
 import time
@@ -36,7 +37,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import count
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from webskrap.errors import SANDBOX_FAILURE_MARKERS, ErrorCode, WebSkrapError
@@ -51,7 +52,10 @@ EventHandler = Callable[[dict[str, Any]], None]
 MAX_MESSAGE_BYTES = 256 * 1024 * 1024
 CLOSE_TIMEOUT_S = 5.0
 _LOG_TAIL_BYTES = 4096
-_POSIX_ONLY = "the CDP driver needs Linux or macOS (posix_spawn with pipe descriptors)"
+_POSIX_ONLY = (
+    "the debugging pipe needs Linux or macOS (posix_spawn with pipe descriptors); "
+    "use transport='port'"
+)
 # Runs a caller's script the way Playwright's evaluate does, in one round trip.
 # The parse check (new Function only compiles) decides between a single
 # expression, whose function value is called with the argument, and statements
@@ -368,6 +372,12 @@ class CDPConnection:
         if not isinstance(method, str):
             return
         params = message.get("params", {})
+        if method == "Target.detachedFromTarget":
+            # A detached session sends nothing more; drop its handlers, or a
+            # long-lived browser keeps every closed page's handlers alive.
+            gone = params.get("sessionId")
+            for key in [key for key in self._handlers if key[0] == gone]:
+                del self._handlers[key]
         for handler in list(self._handlers.get((message.get("sessionId"), method), [])):
             try:
                 handler(params)
@@ -458,6 +468,9 @@ class CDPPage:
         self.default_timeout_s = 30.0
         self._events_enabled = False
         self._shared_world: int | None = None
+        #: Out-of-process iframes auto-attached to this page, by target id;
+        #: see :func:`webskrap.cdp_dom.frames`. None until auto-attach is on.
+        self.iframe_targets: dict[str, dict[str, Any]] | None = None
 
     async def send(
         self, method: str, params: Mapping[str, Any] | None = None, **kwargs: Any
@@ -511,7 +524,7 @@ class CDPPage:
                         and params.get("type") == "Document"
                     ),
                     # The response usually arrives before navigate returns.
-                    timeout_s=min(timeout_s, 5.0),
+                    timeout_s=min(5.0, max(0.0, deadline - time.monotonic())),
                     what="the document response",
                 )
             except WebSkrapError as exc:
@@ -632,16 +645,19 @@ class CDPPage:
 
 @dataclass
 class CDPBrowser:
-    """A Chromium process launched with ``--remote-debugging-pipe``.
+    """A Chromium process WebSkrap launched, on a pipe or a loopback port.
 
     Closing it asks Chromium to exit, kills it after :data:`CLOSE_TIMEOUT_S`,
     reaps the process, and removes the temporary profile and log it created.
+    ``process`` is set for a port launch (:func:`launch` with
+    ``transport="port"``); a pipe launch is tracked by ``pid`` alone.
     """
 
     connection: CDPConnection
     pid: int
     log_path: Path
     temp_dir: Path
+    process: subprocess.Popen[bytes] | None = None
     _closed: bool = field(default=False, init=False)
 
     async def new_page(self) -> CDPPage:
@@ -660,8 +676,39 @@ class CDPBrowser:
         with contextlib.suppress(WebSkrapError):
             await self.connection.send("Browser.close", timeout_s=CLOSE_TIMEOUT_S)
         await self.connection.close()
-        await asyncio.to_thread(_reap, self.pid, CLOSE_TIMEOUT_S)
+        if self.process is not None:
+            await asyncio.to_thread(_stop_process, self.process, CLOSE_TIMEOUT_S)
+        else:
+            await asyncio.to_thread(_reap, self.pid, CLOSE_TIMEOUT_S)
         await asyncio.to_thread(shutil.rmtree, self.temp_dir, True)
+
+
+def _stop_process(process: subprocess.Popen[bytes], timeout_s: float) -> None:
+    """Wait for a port-launched browser to exit, then kill its process tree.
+
+    Chromium's renderers are child processes; killing only the browser
+    process would leave them holding the profile. Windows has no process
+    groups, so ``taskkill /T`` stops the tree there.
+    """
+    try:
+        process.wait(timeout=timeout_s)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    if sys.platform == "win32":
+        taskkill = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
+        # Fixed argv, no shell; the PID is this process's own child.
+        subprocess.run(  # nosec B603  # noqa: S603
+            [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=timeout_s)
 
 
 def _reap(pid: int, timeout_s: float) -> None:
@@ -735,13 +782,15 @@ async def launch(
     user_data_dir: Path | None = None,
     env: Mapping[str, str] | None = None,
     timeout_s: float = 30.0,
+    transport: Literal["pipe", "port"] | None = None,
 ) -> CDPBrowser:
-    """Start Chromium on a debugging pipe and wait until it answers.
+    """Start Chromium and wait until it answers over CDP.
 
-    The command line is deliberately short: the pipe, the profile, first-run
-    suppression, no testing field trials, ``args``, and ``--headless`` when
-    requested. Playwright's long default flag list is not copied, since each
-    extra flag is a difference from a real Chrome that a site might measure.
+    The command line is deliberately short: the debugging channel, the
+    profile, first-run suppression, no testing field trials, ``args``, and
+    ``--headless`` when requested. Playwright's long default flag list is not
+    copied, since each extra flag is a difference from a real Chrome that a
+    site might measure.
 
     Args:
         executable: Chromium or Chrome binary.
@@ -750,13 +799,17 @@ async def launch(
         user_data_dir: Persistent profile; a temporary one is used when None.
         env: Browser environment; defaults to this process's.
         timeout_s: How long to wait for the first reply.
+        transport: ``pipe`` (the debugging pipe; no port is opened) or
+            ``port`` (a loopback debugging port and the WebSocket client).
+            None picks ``port`` on Windows, where :func:`os.posix_spawn`
+            cannot map the pipe descriptors, and ``pipe`` elsewhere.
 
     Raises:
         WebSkrapError: ``browser_launch`` or ``sandbox`` when Chromium does not
             start or answer in time.
     """
-    if sys.platform == "win32":
-        raise WebSkrapError(_POSIX_ONLY, code=ErrorCode.BROWSER_LAUNCH)
+    if transport is None:
+        transport = "port" if sys.platform == "win32" else "pipe"
     executable = Path(executable)
     if not executable.is_file():
         msg = f"Chromium executable is not found at {executable}. Run: webskrap install"
@@ -766,9 +819,10 @@ async def launch(
     profile = temp_dir / "user-data" if user_data_dir is None else user_data_dir
     profile.mkdir(parents=True, exist_ok=True)
     log_path = temp_dir / "browser.log"
+    channel_flag = "--remote-debugging-pipe" if transport == "pipe" else "--remote-debugging-port=0"
     command = [
         str(executable),
-        "--remote-debugging-pipe",
+        channel_flag,
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
@@ -781,7 +835,30 @@ async def launch(
     if headless:
         command.append("--headless")
     command.append("about:blank")
+    environment = dict(env if env is not None else os.environ)
+    if transport == "port":
+        browser = await _launch_on_port(
+            command, environment, profile, log_path, temp_dir, timeout_s
+        )
+    else:
+        browser = await _launch_on_pipe(command, environment, log_path, temp_dir)
+    try:
+        await browser.connection.send("Browser.getVersion", timeout_s=timeout_s)
+    except BaseException as exc:
+        await browser.close()
+        if isinstance(exc, WebSkrapError) and exc.code is ErrorCode.TIMEOUT:
+            msg = f"browser did not answer over CDP within {timeout_s:.0f}s"
+            raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
+        raise
+    return browser
 
+
+async def _launch_on_pipe(
+    command: list[str], env: dict[str, str], log_path: Path, temp_dir: Path
+) -> CDPBrowser:
+    """Spawn Chromium with fds 3 and 4 mapped to a pipe pair (POSIX only)."""
+    if sys.platform == "win32":
+        raise WebSkrapError(_POSIX_ONLY, code=ErrorCode.BROWSER_LAUNCH)
     to_browser_read, to_browser_write = os.pipe()
     from_browser_read, from_browser_write = os.pipe()
     child_in = _high_fd(to_browser_read)
@@ -792,9 +869,9 @@ async def launch(
         # Fixed argv, no shell; dup2 clears close-on-exec on targets 0-4 only,
         # so the browser inherits nothing else from this process.
         pid = os.posix_spawn(
-            str(executable),
+            command[0],
             command,
-            dict(env if env is not None else os.environ),
+            env,
             file_actions=[
                 (os.POSIX_SPAWN_DUP2, devnull, 0),
                 (os.POSIX_SPAWN_DUP2, log_fd, 1),
@@ -832,33 +909,96 @@ async def launch(
     connection = CDPConnection(PipeTransport(reader, write_transport, read_transport))
     connection.on_disconnect = lambda: _exit_error(log_path)
     connection.start()
-    browser = CDPBrowser(connection, pid, log_path, temp_dir)
+    return CDPBrowser(connection, pid, log_path, temp_dir)
+
+
+async def _launch_on_port(
+    command: list[str],
+    env: dict[str, str],
+    profile: Path,
+    log_path: Path,
+    temp_dir: Path,
+    timeout_s: float,
+) -> CDPBrowser:
+    """Start Chromium on a loopback debugging port and attach over WebSocket.
+
+    Chromium picks a free port and writes it, with the browser target's
+    random path, to ``DevToolsActivePort`` in the profile. The port listens
+    on 127.0.0.1 only, and only for as long as the browser runs.
+    """
+    port_file = profile / "DevToolsActivePort"
+    port_file.unlink(missing_ok=True)
+    # Its own process group (Windows) or session (POSIX): a Ctrl+C in this
+    # console does not reach the browser, and close() can stop the whole tree.
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    with log_path.open("wb") as log:
+        # Fixed argv, no shell; the executable comes from find_executable or
+        # the caller, and every flag is a constant or a validated launch arg.
+        process = subprocess.Popen(  # nosec B603  # noqa: S603
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            env=env,
+            creationflags=flags,
+            start_new_session=sys.platform != "win32",
+        )
     try:
-        await connection.send("Browser.getVersion", timeout_s=timeout_s)
-    except BaseException as exc:
-        await browser.close()
-        if isinstance(exc, WebSkrapError) and exc.code is ErrorCode.TIMEOUT:
-            msg = f"browser did not answer on the CDP pipe within {timeout_s:.0f}s"
-            raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
+        deadline = time.monotonic() + timeout_s
+        while True:
+            if process.poll() is not None:
+                raise _exit_error(log_path)
+            try:
+                lines = port_file.read_text(encoding="utf-8").split()
+            except OSError:
+                lines = []
+            if len(lines) >= 2 and lines[0].isdigit():
+                break
+            if time.monotonic() >= deadline:
+                msg = f"browser did not report a DevTools port within {timeout_s:.0f}s"
+                raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
+            await asyncio.sleep(0.05)
+        transport = await WebSocketTransport.connect(
+            "127.0.0.1", int(lines[0]), lines[1], timeout_s=timeout_s
+        )
+    except BaseException:
+        await asyncio.to_thread(_stop_process, process, 0)
+        await asyncio.to_thread(shutil.rmtree, temp_dir, True)
         raise
-    return browser
+    connection = CDPConnection(transport)
+    connection.on_disconnect = lambda: _exit_error(log_path)
+    connection.start()
+    return CDPBrowser(connection, process.pid, log_path, temp_dir, process)
 
 
-#: Where Chrome and Edge install on Linux and macOS, per channel.
-_CHANNEL_PATHS: dict[str, tuple[str, ...]] = {
-    "chrome": (
-        "/opt/google/chrome/chrome",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    ),
-    "msedge": (
-        "/opt/microsoft/msedge/msedge",
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    ),
-}
+def _channel_paths(channel: str) -> list[Path]:
+    """Return where ``chrome`` or ``msedge`` installs on this platform."""
+    if sys.platform == "win32":
+        bases = [
+            os.environ.get(name) for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA")
+        ]
+        folder = ("Google", "Chrome") if channel == "chrome" else ("Microsoft", "Edge")
+        binary = "chrome.exe" if channel == "chrome" else "msedge.exe"
+        return [Path(base, *folder, "Application", binary) for base in bases if base]
+    if sys.platform == "darwin":
+        app = "Google Chrome" if channel == "chrome" else "Microsoft Edge"
+        return [Path(f"/Applications/{app}.app/Contents/MacOS/{app}")]
+    if channel == "chrome":
+        return [Path("/opt/google/chrome/chrome")]
+    return [Path("/opt/microsoft/msedge/msedge")]
+
+
+#: Distribution Chromium builds, used when nothing was downloaded.
+_SYSTEM_CHROMIUM = (
+    Path("/usr/bin/chromium"),
+    Path("/usr/bin/chromium-browser"),
+    Path("/snap/bin/chromium"),
+    Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+)
 
 
 def _playwright_browsers_dirs() -> list[Path]:
-    """Return where ``webskrap install`` put browsers, per Playwright's rules.
+    """Return where WebSkrap 2.x had Playwright put browsers, per Playwright's rules.
 
     ``PLAYWRIGHT_BROWSERS_PATH=0`` means each driver package keeps its own
     ``.local-browsers`` directory. ``find_spec`` locates the packages without
@@ -885,28 +1025,38 @@ def _revision(path: Path) -> int:
 
 
 def find_executable(channel: str | None) -> Path:
-    """Return the binary for ``channel`` without starting a Playwright driver.
+    """Return the browser binary for ``channel``.
 
     ``chrome`` and ``msedge`` are looked up at their standard install paths.
-    ``None`` and ``chromium`` use the newest Chromium that ``webskrap install``
-    downloaded into Playwright's browser cache, which Patchright shares.
+    ``None`` and ``chromium`` use, in order: the newest Chrome for Testing
+    that ``webskrap install`` downloaded, a Chromium that Playwright or
+    Patchright downloaded for WebSkrap 2.x, then a distribution Chromium.
 
     Raises:
         WebSkrapError: ``browser_launch`` when no binary exists; the message
             matches the launch-failure markers channel fallback retries on.
     """
-    if channel in _CHANNEL_PATHS:
-        for candidate in _CHANNEL_PATHS[channel]:
-            if Path(candidate).is_file():
-                return Path(candidate)
-        msg = f"Chromium distribution '{channel}' is not found at {_CHANNEL_PATHS[channel][0]}"
+    if channel in ("chrome", "msedge"):
+        candidates = _channel_paths(channel)
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        where = candidates[0] if candidates else channel
+        msg = f"Chromium distribution '{channel}' is not found at {where}"
         raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
     if channel not in (None, "chromium"):
         msg = f"channel '{channel}' must be one of: chrome, msedge, chromium"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    # Imported here: the installer is only needed for the downloaded browser.
+    from webskrap.install import browsers_dir, installed_executables
+
+    downloaded = installed_executables()
+    if downloaded:
+        return downloaded[0]
     roots = _playwright_browsers_dirs()
     patterns = (
         "chrome-linux*/chrome",
+        "chrome-win/chrome.exe",
         "chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
         "chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
     )
@@ -916,9 +1066,11 @@ def find_executable(channel: str | None) -> Path:
             for candidate in revision_dir.glob(pattern):
                 if candidate.is_file():
                     return candidate
-    searched = ", ".join(str(root) for root in roots) or "no Playwright package"
+    for candidate in _SYSTEM_CHROMIUM:
+        if candidate.is_file():
+            return candidate
     msg = (
-        f"Chromium is not installed. Executable doesn't exist under {searched}. "
+        f"Chromium is not installed. Executable doesn't exist under {browsers_dir()}. "
         "Run: webskrap install"
     )
     raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)

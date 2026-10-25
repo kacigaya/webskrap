@@ -1,4 +1,4 @@
-"""WebSkrap: async Playwright/Patchright scraping with coherent browser profiles.
+"""WebSkrap: async Chromium scraping over its own CDP client, with coherent profiles.
 
 Start with :class:`~webskrap.client.WebSkrapClient` for fetching and sessions,
 :class:`~webskrap.models.SessionConfig` for how the browser is launched, and

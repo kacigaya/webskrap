@@ -1,11 +1,11 @@
 ---
 title: WebSkrap Documentation
-description: Documentation for WebSkrap, a Python web scraping and browser automation toolkit built on Playwright, Patchright, persistent sessions, resource routing, and MCP.
+description: Documentation for WebSkrap, a Python web scraping and browser automation toolkit with its own Chrome DevTools Protocol client, persistent sessions, resource routing, and MCP.
 ---
 
 # WebSkrap
 
-Async-first Python scraping on Playwright that also works as a web tool for LLMs and agents. You get coherent browser profiles, persistent sessions, resource routing, and Patchright-powered stealth. The MCP server runs that same stealth path, so agents get live pages back as plain text instead of raw HTML. The CLI and the MCP server also drive persistent interactive sessions with Playwright CLI-style commands. Take an aria snapshot, click an element by its ref, fill a form, screenshot the result, all against a browser that keeps running between calls.
+Async-first Python scraping on its own Chrome DevTools Protocol client that also works as a web tool for LLMs and agents. You get coherent browser profiles, persistent sessions, resource routing, and stealth defaults, with no Playwright or Node.js. The MCP server runs that same stealth path, so agents get live pages back as plain text instead of raw HTML. The CLI and the MCP server also drive persistent interactive sessions with Playwright CLI-style commands. Take an aria snapshot, click an element by its ref, fill a form, screenshot the result, all against a browser that keeps running between calls.
 
 ## Install
 

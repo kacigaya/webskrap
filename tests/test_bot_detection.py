@@ -10,22 +10,21 @@ They are skipped by default (and in CI) because the services are slow and may
 change their markup or scoring at any time. They only exercise public detection
 demos meant for this purpose — no CAPTCHA solving or access-control bypass.
 
-They pass with the patchright stealth driver (``driver="patchright"``), which is
-a CDP-leak-free Playwright fork, run headed against the real Chrome channel
+They run on WebSkrap's own CDP client, headed against the real Chrome channel
 with a persistent Chrome profile:
 
-- patchright hides the CDP ``Runtime.enable`` leak (``isAutomatedWithCDP``);
+- the CDP client never enables ``Runtime`` or ``Console``, so the
+  ``Runtime.enable`` leak (``isAutomatedWithCDP``) never happens;
 - ``user_data_dir`` keeps Chrome profile state stable between live runs;
 - ``webrtc_ip_handling_policy`` blocks non-proxied UDP ICE candidates;
 - the real Chrome channel avoids FingerprintJS's anti-detect tampering signal
-  that flags patchright's bundled Chromium;
+  that can flag a bundled Chromium;
 - WebSkrap avoids JavaScript fingerprint spoofing and synthetic profile
   injection, so the browser's real fingerprint shows through instead of a
   spoofed one.
 
 Compare this strict headed suite with ``test_bot_detection_headless.py`` for the
-current headless baseline. Requires Google Chrome installed on the host and the
-Patchright browser download (``webskrap install``).
+current headless baseline. Requires Google Chrome installed on the host.
 """
 
 from __future__ import annotations
@@ -39,6 +38,7 @@ from pathlib import Path
 
 import pytest
 from live_stealth_helpers import (
+    LivePage,
     goto_or_skip,
     live_gpu,
     live_proxy,
@@ -55,11 +55,9 @@ LIVE_PROFILE_DIR = Path(
 )
 
 
-# patchright is a CDP-leak-free Playwright fork; it is the stealth mechanism.
 # Run headed against the real Chrome channel with a stable profile. Google
 # Chrome must be installed on the host.
 STEALTH = SessionConfig(
-    driver="patchright",
     channel=os.environ.get("WEBSKRAP_BROWSER_CHANNEL", "chrome"),
     headless=False,
     chromium_sandbox=sandbox_enabled(None),
@@ -78,15 +76,14 @@ def _require_live() -> None:
 
 @asynccontextmanager
 async def stealth_page():
-    # Yield a stealth page, skipping if Playwright/browser is unavailable.
+    # Yield a stealth page, skipping if the browser is unavailable.
     client = WebSkrapClient(default_config=STEALTH)
     try:
-        await client.start()
         session = await client.session("bot-detect", config=STEALTH, profile="desktop-chrome")
-        page = await session.context.new_page()
+        page = LivePage(session, await session.new_page())
     except Exception as exc:  # noqa: BLE001 - environment guard, re-raised as skip
         await client.close()
-        pytest.skip(f"Playwright browser unavailable: {exc}")
+        pytest.skip(f"browser unavailable: {exc}")
     try:
         yield page
     finally:
@@ -124,7 +121,7 @@ async def _json_body(page, url: str) -> dict:
     assert response and response.status < 400, (
         f"{url} returned {response.status if response else None}"
     )
-    return loads(await page.locator("body").inner_text(timeout=10_000))
+    return loads(await page.evaluate("() => document.body.innerText"))
 
 
 async def _dnsleaktest_rows(page) -> list[dict[str, str]]:
@@ -222,7 +219,7 @@ async def test_fingerprintjs_web_scraping_demo() -> None:
             timeout=60_000,
         )
         await page.wait_for_timeout(8_000)
-        await page.get_by_role("button", name="Search").click(timeout=8_000)
+        await page.click_button("Search", timeout=8_000)
         await page.wait_for_timeout(6_000)
         result = await page.evaluate(
             """() => {
@@ -364,7 +361,7 @@ async def test_dns_standard_test_resolvers_are_public_and_proxy_consistent() -> 
         await goto_or_skip(
             page, "https://dnsleaktest.com", wait_until="domcontentloaded", timeout=60_000
         )
-        await page.get_by_role("button", name="Standard test").click(timeout=10_000)
+        await page.click_button("Standard test", timeout=10_000)
         await page.wait_for_function(
             """() => /test complete/i.test(document.body.innerText) &&
                 document.querySelectorAll('table tr').length > 1""",

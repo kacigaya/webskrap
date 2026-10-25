@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from anyio import CancelScope, sleep, sleep_forever
-from playwright.async_api import BrowserContext
 
 from webskrap import SessionConfig, WebSkrapSession
 from webskrap import fetch_runtime as module
+from webskrap.cdp import CDPBrowser
 from webskrap.errors import WebSkrapError
 from webskrap.fetch_runtime import FetchRuntime
 from webskrap.profiles import get_profile
@@ -17,18 +17,17 @@ from webskrap.profiles import get_profile
 @pytest.fixture
 def runtime(monkeypatch: pytest.MonkeyPatch) -> FetchRuntime:
     runtime = FetchRuntime()
-    monkeypatch.setattr(runtime.client, "start", AsyncMock())
 
     async def create(name, config, profile):
-        context = MagicMock(spec=BrowserContext)
-        context.close = AsyncMock()
-        return WebSkrapSession(name=name, config=config, profile=profile, context=context)
+        browser = MagicMock(spec=CDPBrowser)
+        browser.close = AsyncMock()
+        return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
 
     monkeypatch.setattr(runtime.client, "_create_session", create)
     return runtime
 
 
-async def test_named_session_reuses_context_and_close_releases_it(runtime: FetchRuntime) -> None:
+async def test_named_session_reuses_browser_and_close_releases_it(runtime: FetchRuntime) -> None:
     async with runtime.use("crawl", SessionConfig(), get_profile(None)) as first:
         pass
     async with runtime.use("crawl", SessionConfig(), get_profile(None)) as second:

@@ -82,7 +82,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # Browser tests need a Chromium download, so they run on one interpreter.
+  # Browser tests need a Chrome for Testing download, so they run on one interpreter.
   # Every OS runs them: process control and profile locks differ per platform.
   browser:
     runs-on: ${{ matrix.os }}
@@ -96,12 +96,9 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.13"
-      # One command per step: Windows runs steps in PowerShell, which does not
-      # stop on the first failing line of a multi-line script.
-      - name: Install Playwright Chromium
-        run: uv run playwright install --with-deps chromium
-      - name: Install Patchright Chromium
-        run: uv run patchright install chromium
+      # Runner images ship Chrome, so its system libraries are already there.
+      - name: Install Chrome for Testing
+        run: uv run webskrap install
       - name: Test
         env:
           COVERAGE_FILE: .coverage.browser

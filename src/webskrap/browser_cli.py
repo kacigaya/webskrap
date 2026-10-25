@@ -38,7 +38,6 @@ from webskrap.cli_output import (
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.parsing import (
     parse_element_state,
-    parse_fetch_driver,
     parse_load_state,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
@@ -75,7 +74,7 @@ def _run(coroutine: Coroutine[Any, Any, T], output_format: OutputFormat) -> T:
     except (typer.Exit, typer.Abort, typer.BadParameter):
         raise
     except Exception as exc:
-        # Every failure, Playwright or otherwise (an unwritable screenshot
+        # Every failure, CDP or otherwise (an unwritable screenshot
         # path, a dead session), leaves through the shared envelope.
         fail(exc, output_format)
 
@@ -141,16 +140,6 @@ def open_command(
         bool,
         typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
     ] = False,
-    driver: Annotated[
-        str | None,
-        typer.Option(
-            "--driver",
-            help=(
-                "How later commands attach: patchright (default) or cdp, WebSkrap's own "
-                "experimental driver. Fixed for the session's lifetime."
-            ),
-        ),
-    ] = None,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -170,11 +159,6 @@ def open_command(
         parse_webrtc_ip_handling_policy,
         param_hint="--webrtc-ip-handling-policy",
     )
-    selected_driver = (
-        None
-        if driver is None
-        else parse_cli_value(driver, parse_fetch_driver, param_hint="--driver")
-    )
     payload = _run(
         browser_session.open_session(
             session,
@@ -185,7 +169,6 @@ def open_command(
             proxy_server=proxy,
             webrtc_ip_handling_policy=policy,
             fake_media_devices=fake_media_devices,
-            driver=selected_driver,
         ),
         output_format,
     )
@@ -361,7 +344,7 @@ def _register_element_command(name: str, help_text: str) -> None:
 
     @browser_app.command(name, help=help_text)
     def command(
-        target: Annotated[str, typer.Argument(help="Snapshot ref (e12) or Playwright selector.")],
+        target: Annotated[str, typer.Argument(help="Snapshot ref (e12) or CSS selector.")],
         value: Annotated[list[str] | None, typer.Argument(help="Value(s) for the action.")] = None,
         session: SessionOption = "default",
         timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
@@ -418,7 +401,7 @@ def wait_command(
     ] = None,
     selector: Annotated[
         str | None,
-        typer.Option("--selector", help="Wait on a snapshot ref (e12) or Playwright selector."),
+        typer.Option("--selector", help="Wait on a snapshot ref (e12) or CSS selector."),
     ] = None,
     state: Annotated[
         str,

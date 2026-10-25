@@ -1,15 +1,16 @@
 ---
-title: Stealth Browser Scraping with Patchright
-description: Use Patchright-powered browser sessions in WebSkrap for stealth-oriented Python web scraping without CAPTCHA or access-control bypassing.
+title: Stealth Browser Scraping with Python
+description: Use WebSkrap's own CDP client for stealth-oriented Python web scraping without CAPTCHA or access-control bypassing.
 ---
 
 # Stealth
 
-WebSkrap's stealth path is the Patchright driver.
-
-Patchright is a CDP-leak-free Playwright fork. WebSkrap does not inject
-JavaScript fingerprint patches; it relies on real browser behavior, persistent
-contexts, and coherent profile settings instead.
+WebSkrap drives Chromium through its own Chrome DevTools Protocol (CDP) client.
+It never enables the `Runtime` or `Console` domains, so the `Runtime.enable`
+leak that detectors look for never happens, and its page scripts run in
+isolated worlds. WebSkrap does not inject JavaScript fingerprint patches; it
+relies on real browser behavior, persistent profiles, and coherent profile
+settings instead.
 
 ## Establish a baseline
 
@@ -40,10 +41,10 @@ Detection uses known provider markers and headers, not a complete challenge
 catalog. It does not solve CAPTCHAs or distinguish fingerprint causes from
 network reputation.
 
-## Patchright
+## Browser channel
 
-Use Patchright for CDP-aware detection surfaces. `pip install webskrap` includes
-Patchright; `webskrap install` downloads its browser:
+Real Chrome is the strongest channel. `webskrap install` downloads Chrome for
+Testing for hosts without Chrome:
 
 ```bash
 pip install webskrap
@@ -54,23 +55,19 @@ webskrap install
 from webskrap import SessionConfig
 
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=False,
 )
 ```
 
-Patchright works best with real Chrome and a persistent context. If
-`user_data_dir` is omitted, WebSkrap creates a temporary persistent profile for
-Patchright sessions. Patchright contexts use the browser's real viewport and
-disable synthetic focus control (`no_viewport=True`, `focus_control=False`).
-The CLI omits `focus_control` for compatibility with Patchright versions that do
-not accept that option.
+If `user_data_dir` is omitted, WebSkrap creates a temporary profile per
+session and removes it when the session closes. Pages use the browser's real
+window size; no viewport is emulated by default.
 
-## Context profile mode
+## Profile mode
 
-Patchright defaults to the host browser's native locale, timezone, headers, and
-media preferences. This is the strict anti-bot mode because fewer context
+By default (`profile_mode="native"`), sessions use the host browser's native
+locale, timezone, headers, and media preferences. This is the strict anti-bot mode because fewer context
 overrides means fewer behavioral mismatches.
 
 Fingerprint-statistics pages such as AmiUnique also score how common each
@@ -83,20 +80,22 @@ metadata, but it does not make high-entropy fingerprints non-unique by itself:
 from webskrap import SessionConfig
 
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
     virtual_display=True,
-    patchright_context_profile=True,
+    profile_mode="locale",
     reduce_fingerprint_surface=True,
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )
 ```
 
-This applies `locale`, `timezone_id`, `navigator_languages`, `color_scheme`,
-`reduced_motion`, and any caller-provided `extra_http_headers`. It keeps
-`no_viewport=True`, so screen and window metrics still come from the browser or
-from `headless_screen`.
+`profile_mode="locale"` applies `locale`, `timezone_id`, `navigator_languages`, `color_scheme`,
+`reduced_motion`, and any caller-provided `extra_http_headers`. On Linux, the
+locale and timezone come from the browser's environment, so nothing is
+overridden over CDP. Screen and window metrics still come from the browser or
+from `headless_screen`. `profile_mode="full"` also emulates the viewport,
+screen, device scale, touch and user agent, as WebSkrap 2.x did; each override
+is a surface that a page can cross-check.
 
 On Linux the timezone and languages are set the way a real machine
 sets them, not overridden over CDP. The browser starts with `TZ` set to the
@@ -149,7 +148,7 @@ not work correctly, and a browser with neither is itself rare: fingerprinting
 audits report it as blocking. To hide the SwiftShader renderer without losing
 WebGL, use `gpu="mesa"` (see [WebGL renderer](#webgl-renderer)).
 
-## Headless patchright
+## Headless mode
 
 Headless mode is more detectable than headed mode. For best-effort headless
 stealth, prefer real Chrome and a stable profile:
@@ -160,7 +159,6 @@ from pathlib import Path
 from webskrap import SessionConfig
 
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
     user_data_dir=Path(".webskrap/headless-profile"),
@@ -190,20 +188,18 @@ screen is 1920x1080; set
 from webskrap import SessionConfig, Viewport
 
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
     headless_screen=Viewport(width=1366, height=768),
 )
 ```
 
-The other headless tell that survives patchright is headless mode itself:
-Chrome stamps `HeadlessChrome` into `navigator.userAgent` and the worker UA
-(including `SharedWorker`, which runs in its own process), and Playwright only
-adds switches that hide scrollbars and set desktop hover/pointer media types
-in headless mode. WebSkrap omits the scrollbar switch and Playwright's
-headless `--mute-audio` switch. The pointer setting stays: without it,
-headless Chromium reports no hover or fine pointer.
+The other headless tell is headless mode itself: Chrome stamps
+`HeadlessChrome` into `navigator.userAgent` and the worker UA (including
+`SharedWorker`, which runs in its own process). Headless Chromium also has no
+input devices, so it reports no hover and no fine pointer. WebSkrap declares a
+mouse with `--blink-settings` in headless mode. It does not hide scrollbars or
+mute audio.
 
 Set `fake_media_devices=True` in `SessionConfig`, or pass
 `--fake-media-devices` to `fetch`, `search`, or `browser open`, to use Chromium's synthetic
@@ -220,7 +216,6 @@ client hints, real scrollbars, and an X screen sized by `headless_screen`
 
 ```python
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
     headless_screen=Viewport(width=1366, height=768),
@@ -285,7 +280,6 @@ Keep the default `gpu="auto"` on a machine with a real GPU.
 
 ```python
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
     gpu="mesa",
@@ -303,13 +297,13 @@ Launch flags you pass yourself (`--use-gl`, `--use-angle`) take precedence.
 - Reuse persistent sessions when realistic continuity matters.
 - Keep locale, timezone, and languages coherent.
 - Prefer an installed browser channel such as `chrome` when testing headed behavior.
-- Treat headless stealth as best-effort; headed Patchright, or `virtual_display`
+- Treat headless stealth as best-effort; headed Chrome, or `virtual_display`
   on Linux, remains the strict mode.
 - Avoid randomizing every request; incoherent changes can look less realistic.
 
 ## Recipes
 
-Headed Chrome for the strictest Patchright path:
+Headed Chrome for the strictest path:
 
 ```python
 from pathlib import Path
@@ -317,10 +311,9 @@ from pathlib import Path
 from webskrap import SessionConfig
 
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=False,
-    user_data_dir=Path(".webskrap/patchright-profile"),
+    user_data_dir=Path(".webskrap/headed-profile"),
 )
 ```
 
@@ -332,7 +325,6 @@ from pathlib import Path
 from webskrap import SessionConfig, Viewport
 
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
     user_data_dir=Path(".webskrap/headless-profile"),
@@ -345,10 +337,9 @@ Fingerprint-statistics and WebRTC leak-test mode:
 
 ```python
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
-    patchright_context_profile=True,
+    profile_mode="locale",
     reduce_fingerprint_surface=True,
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )

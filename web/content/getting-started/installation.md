@@ -1,6 +1,6 @@
 ---
 title: Install WebSkrap for Python Web Scraping
-description: Install WebSkrap, Playwright browsers, Patchright support, and the CLI for Python web scraping and browser automation.
+description: Install WebSkrap, its Chrome for Testing browser, and the CLI for Python web scraping and browser automation.
 ---
 
 # Installation
@@ -11,7 +11,9 @@ Install WebSkrap from PyPI:
 pip install webskrap
 ```
 
-Download the browser binaries used by Playwright and Patchright:
+Download Chrome for Testing, the Chromium build that Google publishes for
+automation. It goes in your user cache folder; set `WEBSKRAP_BROWSERS_PATH` to
+use another folder:
 
 ```bash
 webskrap install
@@ -28,8 +30,8 @@ webskrap profiles
 
 `pip install webskrap` includes the Python dependencies for:
 
-- Playwright browser automation.
-- Patchright stealth sessions.
+- WebSkrap's own Chrome DevTools Protocol client. It needs no Playwright,
+  Patchright or Node.js.
 - The `webskrap-mcp` server.
 
 No extras are needed; everything above ships with the base install.

@@ -70,7 +70,7 @@ export default async function DocPage(props: DocPageProps) {
     headline: doc.title,
     description: doc.description ?? DEFAULT_DESCRIPTION,
     url: canonicalUrl(path),
-    about: ["Python web scraping", "web crawling", "browser automation", "Playwright"],
+    about: ["Python web scraping", "web crawling", "browser automation", "Chrome DevTools Protocol"],
     author: {
       "@type": "Person",
       name: "Gaya KACI",

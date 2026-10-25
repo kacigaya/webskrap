@@ -1,6 +1,6 @@
 ---
 title: Python Web Scraping Quickstart
-description: Start scraping web pages with WebSkrap, Playwright, async Python, screenshots, persistent browser state, and clean fetch results.
+description: Start scraping web pages with WebSkrap, real Chromium, async Python, screenshots, persistent browser state, and clean fetch results.
 ---
 
 # Quickstart

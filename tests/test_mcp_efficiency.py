@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from conftest import set_page_content
 
 from webskrap import browser_session, mcp_server
-from webskrap.client import _collect_links
+from webskrap.cdp import find_executable, launch
+from webskrap.client import LINKS_SCRIPT
 from webskrap.models import FetchResult, text_window
 
 
@@ -40,28 +42,34 @@ async def test_browser_text_routes_through_session(monkeypatch: pytest.MonkeyPat
 
 @pytest.fixture
 async def page(sandbox_supported: bool):
-    from patchright.async_api import async_playwright
+    browser = await launch(
+        find_executable("chromium"), args=[] if sandbox_supported else ["--no-sandbox"]
+    )
+    try:
+        page = await browser.new_page()
+        await page.enable_events()
+        yield page
+    finally:
+        await browser.close()
 
-    async with async_playwright() as driver:
-        browser = await driver.chromium.launch(chromium_sandbox=sandbox_supported)
-        try:
-            yield await browser.new_page()
-        finally:
-            await browser.close()
+
+async def _body_text(page) -> str:
+    return await page.evaluate("document.body.innerText")
 
 
 @pytest.mark.browser
 @pytest.mark.parametrize("limit,offset", [(8000, 0), (4, 2), (0, 3), (-2, -3), (8, 100)])
 async def test_visible_text_window_matches_python(page, limit: int, offset: int) -> None:
-    await page.set_content(
+    await set_page_content(
+        page,
         "<title>Reading</title><body><div>Visible 😀 text 𐐀</div>"
-        '<span style="display:none">Hidden text</span><script>/* script text */</script></body>'
+        '<span style="display:none">Hidden text</span><script>/* script text */</script></body>',
     )
-    full = await page.locator("body").inner_text()
+    full = await _body_text(page)
     expected = text_window(full, limit, offset)
     result = await browser_session.read_text(page, max_chars=limit, offset=offset)
     assert result == {
-        "url": page.url,
+        "url": "about:blank",
         "title": "Reading",
         "text": expected.text,
         "text_length": expected.length,
@@ -73,9 +81,9 @@ async def test_visible_text_window_matches_python(page, limit: int, offset: int)
 
 @pytest.mark.browser
 async def test_text_pages_reassemble_large_unicode_body(page) -> None:
-    await page.set_content("<body></body>")
-    await page.locator("body").evaluate("body => { body.textContent = 'abc😀'.repeat(6000); }")
-    full = await page.locator("body").inner_text()
+    await set_page_content(page, "<body></body>")
+    await page.evaluate("() => { document.body.textContent = 'abc😀'.repeat(6000); }")
+    full = await _body_text(page)
     chunks = []
     offset = 0
     while True:
@@ -93,31 +101,30 @@ async def test_text_pages_reassemble_large_unicode_body(page) -> None:
 @pytest.mark.browser
 @pytest.mark.parametrize("limit", [0, 2, -1])
 async def test_link_cap_skips_unused_label_extraction(page, limit: int) -> None:
-    await page.set_content("<body></body>")
-    await page.evaluate(
-        """() => {
-      for (let index = 0; index < 100; index++) {
+    await set_page_content(page, "<body></body>")
+    # Each evaluate gets a fresh isolated world, so the counters and the link
+    # script run in one call.
+    collected = await page.evaluate(
+        f"""(max) => {{
+      for (let index = 0; index < 100; index++) {{
         const anchor = document.createElement('a');
-        anchor.href = `https://example.test/${index % 50}`;
+        anchor.href = `https://example.test/${{index % 50}}`;
         document.body.append(anchor);
-      }
-    }""",
-        isolated_context=False,
-    )
-    # Install the counters in the same isolated world used by link collection.
-    await page.evaluate("""() => {
-      globalThis.labelReads = 0;
-      for (const anchor of document.querySelectorAll('a')) {
-        Object.defineProperty(anchor, 'innerText', {get() {
-          globalThis.labelReads++;
+      }}
+      let labelReads = 0;
+      for (const anchor of document.querySelectorAll('a')) {{
+        Object.defineProperty(anchor, 'innerText', {{get() {{
+          labelReads++;
           return 'Visible label';
-        }});
-      }
-    }""")
-    links, total = await _collect_links(page, limit)
-    assert total == 50
-    assert len(links) == max(0, limit)
-    assert await page.evaluate("globalThis.labelReads") == max(0, limit)
+        }}}});
+      }}
+      return {{...({LINKS_SCRIPT})(max), labelReads}};
+    }}""",
+        limit,
+    )
+    assert collected["total"] == 50
+    assert len(collected["links"]) == max(0, limit)
+    assert collected["labelReads"] == max(0, limit)
 
 
 @pytest.mark.browser
@@ -126,7 +133,9 @@ async def test_browser_text_reads_persistent_session(persistent_session_env) -> 
     try:
 
         async def prepare(page):
-            await page.set_content("<title>Session</title><body>abcdefghij</body>")
+            await set_page_content(
+                page, "<title>Session</title><body>abcdefghij</body>", block_requests=False
+            )
 
         await browser_session.run_page_action("text-reading", prepare)
         result = await mcp_server.browser_text("text-reading", max_chars=4, offset=2)
@@ -143,7 +152,7 @@ async def test_shallow_snapshot_can_expand_to_full_tree(page) -> None:
     html = "<button>Deep action</button>"
     for depth in range(10):
         html = f'<div role="group" aria-label="Level {depth}">{html}</div>'
-    await page.set_content(html)
+    await set_page_content(page, html)
     shallow = await browser_session.snapshot(page, depth=6)
     full = await browser_session.snapshot(page, depth=None)
     assert len(shallow["snapshot"]) < len(full["snapshot"])

@@ -1,4 +1,4 @@
-"""Headless live bot-detection tests for WebSkrap's patchright driver.
+"""Headless live bot-detection tests for WebSkrap's CDP client.
 
 These are opt-in live tests:
 
@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 from live_stealth_helpers import (
+    LivePage,
     goto_or_skip,
     live_gpu,
     live_proxy,
@@ -39,7 +40,6 @@ LIVE_HEADLESS_PROFILE_DIR = Path(
 
 
 STEALTH_HEADLESS = SessionConfig(
-    driver="patchright",
     channel=os.environ.get("WEBSKRAP_BROWSER_CHANNEL", "chrome"),
     headless=True,
     chromium_sandbox=sandbox_enabled(None),
@@ -82,16 +82,15 @@ def _require_live() -> None:
 async def stealth_headless_page():
     client = WebSkrapClient(default_config=STEALTH_HEADLESS)
     try:
-        await client.start()
         session = await client.session(
             "bot-detect-headless",
             config=STEALTH_HEADLESS,
             profile="desktop-chrome",
         )
-        page = await session.context.new_page()
+        page = LivePage(session, await session.new_page())
     except Exception as exc:  # noqa: BLE001 - environment guard, re-raised as skip
         await client.close()
-        pytest.skip(f"Playwright browser unavailable: {exc}")
+        pytest.skip(f"browser unavailable: {exc}")
     try:
         yield page
     finally:
@@ -191,7 +190,7 @@ async def test_fingerprintjs_web_scraping_demo_headless() -> None:
             timeout=60_000,
         )
         await page.wait_for_timeout(8_000)
-        await page.get_by_role("button", name="Search").click(timeout=8_000)
+        await page.click_button("Search", timeout=8_000)
         await page.wait_for_timeout(6_000)
         result = await page.evaluate(
             """() => {

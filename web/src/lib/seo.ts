@@ -3,21 +3,21 @@ export const SITE_NAME = "WebSkrap";
 export const SOCIAL_IMAGE_URL = `${SITE_URL}/webskrap-og.png`;
 export const DEFAULT_TITLE = "WebSkrap: Python Web Scraping and Browser Automation";
 export const DEFAULT_DESCRIPTION =
-  "WebSkrap is a Python web scraping and web crawling toolkit built on Playwright and Patchright. Scrape JavaScript pages, automate browsers, use persistent sessions, and expose scraping tools to LLM agents through MCP.";
+  "WebSkrap is a Python web scraping and web crawling toolkit with its own Chrome DevTools Protocol client. Scrape JavaScript pages, automate browsers, use persistent sessions, and expose scraping tools to LLM agents through MCP.";
 
 export const SEO_KEYWORDS = [
   "web scraping",
   "web crawling",
   "Python web scraping",
   "Python web crawler",
-  "Playwright scraping",
+  "Chrome DevTools Protocol scraping",
   "browser automation",
   "headless browser scraping",
   "scrape JavaScript pages",
   "AI web scraping",
   "LLM web scraping",
   "MCP scraping server",
-  "Patchright",
+  "Playwright alternative",
   "WebSkrap",
 ];
 

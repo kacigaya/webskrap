@@ -1,32 +1,17 @@
-"""Human-shaped input: cursor paths, clicks, typing and scrolling.
+"""Human-shaped input timing: cursor paths and click points.
 
-Playwright's own input is easy to tell from a person's: ``click`` teleports
-the cursor and presses the button for a couple of milliseconds, ``fill`` sets a
-value with no key events at all, and ``scroll_into_view_if_needed`` scrolls
-without a single wheel event. Behavioral detectors score exactly those
-signals. The helpers here drive the real mouse and keyboard instead, with
-timings drawn from human ranges, and take a locator so they work inside
-frames and on both the Playwright and the Patchright driver.
+Mechanical input is easy to tell from a person's: a cursor that teleports, a
+button held for two milliseconds, a page that scrolls without a wheel event.
+Behavioral detectors score exactly those signals. The helpers here produce
+the human-range values; :mod:`webskrap.cdp_dom` sends them as trusted
+``Input.dispatch*`` events.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from secrets import SystemRandom
-from typing import Any
-
-from patchright.async_api import Locator as PatchrightLocator
-from patchright.async_api import Page as PatchrightPage
-from playwright.async_api import FloatRect
-from playwright.async_api import Locator as PlaywrightLocator
-from playwright.async_api import Page as PlaywrightPage
-
-from webskrap.errors import ErrorCode, WebSkrapError
-
-#: A page from either driver; both expose the same input API.
-AnyPage = PlaywrightPage | PatchrightPage
-#: A locator from either driver.
-AnyLocator = PlaywrightLocator | PatchrightLocator
+from typing import TypedDict
 
 # Cursor jitter below is pixel offsets and sleep durations, never a token,
 # identifier, or security decision, so `random` would be adequate. It draws
@@ -36,175 +21,23 @@ AnyLocator = PlaywrightLocator | PatchrightLocator
 uniform = SystemRandom().uniform
 
 
-async def click(
-    page: AnyPage,
-    locator: AnyLocator,
-    *,
-    description: str,
-    **click_options: Any,
-) -> None:
-    """Click ``locator`` along a curved, variable-speed cursor path.
+class Box(TypedDict):
+    """An element's box in CSS pixels."""
 
-    ``page`` owns the mouse; ``locator`` may live in any of its frames, since
-    bounding boxes are reported in the top-level viewport's coordinates.
-    ``description`` names the target in errors.
-
-    Args:
-        page: Page whose mouse and keyboard drive the click.
-        locator: Element to click.
-        description: Human-readable target, used in error messages.
-        **click_options: ``position``, ``timeout``, ``strict``, ``trial``,
-            ``modifiers``, ``button``, ``click_count`` and ``delay`` (how long
-            the button stays down, in ms; a human-range value when omitted).
-
-    Raises:
-        WebSkrapError: If ``strict`` was requested and the locator matches
-            more than one element, the element has no visible bounding box,
-            or another element covers the click point (checked silently with
-            ``elementFromPoint``, never with a trial click, which the page
-            would see as a mousemove and a click).
-    """
-    timeout = click_options.get("timeout")
-    await locator.wait_for(state="visible", timeout=timeout)
-    await scroll_into_view(page, locator, timeout=timeout)
-
-    if click_options.get("strict") is True and await locator.count() != 1:
-        msg = f"strict mode expected one element for selector: {description}"
-        raise WebSkrapError(msg, code=ErrorCode.USAGE)
-
-    box = await locator.bounding_box(timeout=timeout)
-    if box is None:
-        msg = f"could not find a visible bounding box for selector: {description}"
-        raise WebSkrapError(msg, code=ErrorCode.USAGE)
-
-    x, y = click_point(box, click_options.get("position"))
-    if not await _receives_point(locator, x - box["x"], y - box["y"]):
-        msg = f"another element covers the click point of: {description}"
-        raise WebSkrapError(msg, code=ErrorCode.USAGE)
-    if click_options.get("trial"):
-        return
-
-    await page.wait_for_timeout(uniform(80, 220))
-
-    start_x = x + uniform(-160, 160)
-    start_y = y + uniform(-90, 90)
-    await page.mouse.move(start_x, start_y, steps=1)
-    end_x = x + uniform(-8, 8)
-    end_y = y + uniform(-6, 6)
-    distance = ((end_x - start_x) ** 2 + (end_y - start_y) ** 2) ** 0.5
-    steps = max(12, min(48, int(distance / 6)))
-    for px, py in bezier_path((start_x, start_y), (end_x, end_y), steps):
-        await page.mouse.move(px, py, steps=1)
-        await page.wait_for_timeout(uniform(2, 9))
-    await page.wait_for_timeout(uniform(40, 140))
-
-    mouse_options = mouse_click_options(click_options)
-    # Playwright holds the button for about 2 ms; people hold it for roughly
-    # 60-140 ms, and click duration is one of the cheapest bot features.
-    mouse_options.setdefault("delay", uniform(60, 140))
-    modifiers = click_options.get("modifiers") or []
-    for modifier in modifiers:
-        await page.keyboard.down(modifier)
-    try:
-        await page.mouse.click(x, y, **mouse_options)
-    finally:
-        for modifier in reversed(modifiers):
-            await page.keyboard.up(modifier)
-
-
-async def type_text(
-    page: AnyPage,
-    locator: AnyLocator,
-    text: str,
-    *,
-    description: str,
-    timeout: float | None = None,
-) -> None:
-    """Click into ``locator`` and type ``text`` one key at a time, like a person.
-
-    Playwright's ``fill`` sets the value with no key events, and
-    ``press_sequentially`` types at a constant rate; keystroke timing is
-    scored on both the hold time of each key and the gap between keys. Each
-    character is held for 30-90 ms, keys are 40-160 ms apart, and roughly one
-    key in twelve is followed by a longer 250-600 ms pause. Text is appended
-    to whatever the field holds, as with ``press_sequentially``.
-
-    Raises:
-        WebSkrapError: If the field has no visible bounding box.
-    """
-    await click(page, locator, description=description, timeout=timeout)
-    for character in text:
-        await page.keyboard.type(character, delay=uniform(30, 90))
-        pause = uniform(250, 600) if uniform(0, 1) < 1 / 12 else uniform(40, 160)
-        await page.wait_for_timeout(pause)
+    x: float
+    y: float
+    width: float
+    height: float
 
 
 #: Viewport margin, in CSS pixels, an element must clear to count as in view.
 VIEW_MARGIN = 40
-#: Wheel batches before giving up and letting Playwright scroll.
+#: Wheel batches before giving up and jumping with scrollIntoView.
 MAX_WHEEL_BATCHES = 12
 
 
-async def scroll_into_view(
-    page: AnyPage,
-    locator: AnyLocator,
-    *,
-    timeout: float | None = None,
-) -> None:
-    """Bring ``locator`` into view with mouse-wheel notches, not a jump.
-
-    Playwright's ``scroll_into_view_if_needed`` scrolls without a single
-    ``wheel`` event, so a page that listens sees the content move on its own.
-    This wheels in notch-sized steps with short pauses, measuring again after
-    each batch since layouts shift while scrolling. If the wheel makes no
-    progress (the element sits in an inner container the cursor is not over,
-    or the page does not scroll), Playwright's scroll finishes the job.
-    """
-    viewport = await page.evaluate("() => [window.innerWidth, window.innerHeight]")
-    height = float(viewport[1])
-    previous_top: float | None = None
-    for _ in range(MAX_WHEEL_BATCHES):
-        box = await locator.bounding_box(timeout=timeout)
-        if box is None:
-            break
-        top, bottom = box["y"], box["y"] + box["height"]
-        if top >= VIEW_MARGIN and bottom <= height - VIEW_MARGIN:
-            return
-        if previous_top is not None and abs(top - previous_top) < 1:
-            break  # the wheel moved nothing
-        previous_top = top
-        # Aim the element somewhere in the upper half, not at an exact edge.
-        remaining = top - height * uniform(0.25, 0.45)
-        while abs(remaining) > 20:
-            notch = min(abs(remaining), uniform(80, 120))
-            step = notch if remaining > 0 else -notch
-            await page.mouse.wheel(0, step)
-            remaining -= step
-            await page.wait_for_timeout(uniform(16, 45))
-        await page.wait_for_timeout(uniform(60, 160))
-    await locator.scroll_into_view_if_needed(timeout=timeout)
-
-
-# Hit test at the click point, in the element's own frame and shadow root.
-# `getBoundingClientRect` is frame-relative, so the offset measured from the
-# top-level box carries over. Evaluating dispatches no events, unlike
-# Playwright's trial click, which scrolls and sends a mousemove and a click.
-_HIT_TEST = """(el, [dx, dy]) => {
-    const rect = el.getBoundingClientRect();
-    const root = el.getRootNode();
-    const scope = typeof root.elementFromPoint === 'function' ? root : document;
-    const hit = scope.elementFromPoint(rect.left + dx, rect.top + dy);
-    return !!hit && (hit === el || el.contains(hit));
-}"""
-
-
-async def _receives_point(locator: AnyLocator, dx: float, dy: float) -> bool:
-    """True when ``locator``'s element is what a click ``dx, dy`` into its box hits."""
-    return bool(await locator.evaluate(_HIT_TEST, [dx, dy]))
-
-
 def click_point(
-    box: FloatRect,
+    box: Box,
     position: Mapping[str, float] | None,
 ) -> tuple[float, float]:
     """Return where to click in ``box``: ``position`` if given, else near its center."""
@@ -253,15 +86,3 @@ def bezier_path(
         points.append((bx + uniform(-1.2, 1.2) * taper, by + uniform(-1.2, 1.2) * taper))
     points[-1] = (x3, y3)
     return points
-
-
-def mouse_click_options(click_options: dict[str, Any]) -> dict[str, Any]:
-    """Return the subset of ``click_options`` that ``page.mouse.click`` accepts."""
-    mouse_options: dict[str, Any] = {}
-    if "button" in click_options:
-        mouse_options["button"] = click_options["button"]
-    if "click_count" in click_options:
-        mouse_options["click_count"] = click_options["click_count"]
-    if "delay" in click_options:
-        mouse_options["delay"] = click_options["delay"]
-    return mouse_options

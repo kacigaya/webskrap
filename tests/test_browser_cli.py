@@ -59,12 +59,6 @@ def test_browser_commands_are_registered() -> None:
         assert command in result.output
 
 
-def test_target_selector_maps_refs_and_passes_selectors_through() -> None:
-    assert browser_session.target_selector("e12") == "aria-ref=e12"
-    assert browser_session.target_selector("text=Login") == "text=Login"
-    assert browser_session.target_selector("e12x") == "e12x"
-
-
 @pytest.mark.parametrize("session", [".", "..", "../evil"])
 def test_invalid_session_name_is_rejected(tmp_path: Path, session: str) -> None:
     result = runner.invoke(
@@ -395,7 +389,7 @@ def test_wait_fails_when_the_condition_never_holds(persistent_session_env: Path)
         )
 
         assert result.exit_code == EXIT_CODES[ErrorCode.TIMEOUT]
-        assert "Timeout" in result.output
+        assert "timed out after 500ms" in result.output
     finally:
         runner.invoke(cli.app, ["browser", "close"], env=env)
 

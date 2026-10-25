@@ -582,22 +582,6 @@ def test_launch_fake_media_devices_is_opt_in(
     assert "--use-fake-device-for-media-stream" in commands[0]
 
 
-async def test_evaluate_runs_in_the_page_world() -> None:
-    # Patchright evaluates in an isolated world by default, which hides page
-    # globals from `browser eval`.
-    calls: list[tuple[str, dict[str, Any]]] = []
-
-    class _Page:
-        async def evaluate(self, expression: str, **kwargs: Any) -> str:
-            calls.append((expression, kwargs))
-            return "ok"
-
-    result = await browser_session.evaluate(_Page(), "window.app")  # type: ignore[arg-type]
-
-    assert result == "ok"
-    assert calls == [("window.app", {"isolated_context": False})]
-
-
 def test_launch_routes_through_the_proxy_and_blocks_webrtc_leaks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -784,67 +768,6 @@ def test_open_rejects_a_credentialed_proxy_before_launching(
         asyncio.run(browser_session.open_session("net", proxy_server="http://u:p@proxy.test:8080"))
 
     assert launches == []
-
-
-class _ActionLocator:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-
-    async def click(self, *args: Any, **kwargs: Any) -> None:
-        self.calls.append(("click", args, kwargs))
-
-    async def fill(self, *args: Any, **kwargs: Any) -> None:
-        self.calls.append(("fill", args, kwargs))
-
-
-def _action_page(locator: _ActionLocator) -> Any:
-    class _PageStub:
-        def locator(self, _selector: str) -> _ActionLocator:
-            return locator
-
-    return _PageStub()
-
-
-@pytest.mark.parametrize(("action", "extra"), [("click", {}), ("dblclick", {"click_count": 2})])
-def test_click_actions_use_the_human_path(
-    monkeypatch: pytest.MonkeyPatch, action: str, extra: dict[str, int]
-) -> None:
-    human_clicks: list[dict[str, Any]] = []
-
-    async def fake_human_click(_page: Any, _locator: Any, **options: Any) -> None:
-        human_clicks.append(options)
-
-    monkeypatch.setattr("webskrap.human.click", fake_human_click)
-    locator = _ActionLocator()
-
-    asyncio.run(browser_session.element_action(_action_page(locator), action, "#go", []))
-
-    # No Playwright click at all, not even a trial one: the page would see it.
-    assert locator.calls == []
-    assert human_clicks == [{"description": "#go", **extra}]
-
-
-def test_fill_still_sets_the_value_directly(monkeypatch: pytest.MonkeyPatch) -> None:
-    locator = _ActionLocator()
-
-    asyncio.run(browser_session.element_action(_action_page(locator), "fill", "#q", ["hi"]))
-
-    assert locator.calls == [("fill", ("hi",), {})]
-
-
-def test_type_action_uses_human_typing(monkeypatch: pytest.MonkeyPatch) -> None:
-    typed: list[tuple[str, dict[str, Any]]] = []
-
-    async def fake_type_text(_page: Any, _locator: Any, text: str, **options: Any) -> None:
-        typed.append((text, options))
-
-    monkeypatch.setattr("webskrap.human.type_text", fake_type_text)
-    locator = _ActionLocator()
-
-    asyncio.run(browser_session.element_action(_action_page(locator), "type", "#q", ["hello"]))
-
-    assert typed == [("hello", {"description": "#q"})]
-    assert locator.calls == []  # no press_sequentially
 
 
 def test_windows_session_running_rejects_recycled_pid(monkeypatch: pytest.MonkeyPatch) -> None:

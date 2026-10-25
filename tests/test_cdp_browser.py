@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
-import sys
+import asyncio
 import tempfile
 import threading
 from collections.abc import Iterator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 import pytest
 from test_browser_integration import _Handler
 
-from webskrap import ResourcePolicy, SessionConfig
+from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
 from webskrap.cdp import find_executable, launch
-from webskrap.cdp_fetch import fetch
 from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.models import FetchResult
 
-pytestmark = [
-    pytest.mark.browser,
-    pytest.mark.skipif(sys.platform == "win32", reason="the CDP driver needs posix_spawn"),
-]
+pytestmark = pytest.mark.browser
 
 # Logs an Error whose `stack` getter records access. A driver that enabled the
 # Runtime or Console domain serializes logged errors and trips it.
@@ -34,6 +32,13 @@ setTimeout(() => {
     touched, webdriver: navigator.webdriver,
   });
 }, 200);
+</script></body></html>"""
+
+# Records the registration outcome in the DOM, where an isolated world reads it.
+SW_PAGE = b"""<html><body><script>
+navigator.serviceWorker.register('/sw.js').then(
+  () => { document.body.dataset.sw = 'registered'; },
+  () => { document.body.dataset.sw = 'refused'; });
 </script></body></html>"""
 
 IMAGE_PAGE = b'<html><title>Images</title><body><img src="/pixel.png">text</body></html>'
@@ -56,7 +61,13 @@ class _CDPHandler(_Handler):
     image_requests = 0
 
     def do_GET(self) -> None:
-        pages = {"/console-probe": CONSOLE_PROBE_PAGE, "/image-page": IMAGE_PAGE}
+        pages = {"/console-probe": CONSOLE_PROBE_PAGE, "/image-page": IMAGE_PAGE, "/sw": SW_PAGE}
+        if self.path == "/sw.js":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.end_headers()
+            self.wfile.write(b"self.addEventListener('fetch', () => {});")
+            return
         if self.path == "/csp":
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -96,6 +107,11 @@ def server() -> Iterator[str]:
 @pytest.fixture()
 def config(sandbox_supported: bool) -> SessionConfig:
     return SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
+
+
+async def fetch(url: str, *, config: SessionConfig, **kwargs: Any) -> FetchResult:
+    async with WebSkrapClient(default_config=config) as client:
+        return await client.fetch(url, **kwargs)
 
 
 async def test_fetch_reads_status_text_html_links_and_cookies(
@@ -170,7 +186,7 @@ async def test_navigation_errors_and_cleanup(
     assert list(tmp_path.iterdir()) == []
 
 
-async def test_evaluate_matches_playwright_forms_under_a_strict_csp(
+async def test_evaluate_accepts_playwright_forms_under_a_strict_csp(
     server: str, sandbox_supported: bool
 ) -> None:
     browser = await launch(
@@ -186,3 +202,39 @@ async def test_evaluate_matches_playwright_forms_under_a_strict_csp(
             assert await page.evaluate(script, arg) == expected, script
     finally:
         await browser.close()
+
+
+async def test_port_transport_attaches_over_websocket(server: str, sandbox_supported: bool) -> None:
+    # Windows always launches this way; forcing it here tests that path on
+    # every platform.
+    browser = await launch(
+        find_executable("chromium"),
+        args=[] if sandbox_supported else ["--no-sandbox"],
+        transport="port",
+    )
+    try:
+        assert browser.process is not None
+        page = await browser.new_page()
+        response = await page.goto(server, wait_until="load", timeout_s=20)
+        assert response["status"] == 200
+        assert await page.evaluate("document.title") == "Hello"
+    finally:
+        await browser.close()
+    assert browser.process.poll() is not None  # the browser process exited
+
+
+@pytest.mark.parametrize(("policy", "outcome"), [("allow", "registered"), ("block", "refused")])
+async def test_blocked_service_workers_cannot_register(
+    server: str, config: SessionConfig, policy: str, outcome: str
+) -> None:
+    async with WebSkrapClient(
+        default_config=config.model_copy(update={"service_workers": policy})
+    ) as client:
+        session = await client.session("workers")
+        page = await session.new_page()
+        await page.goto(f"{server}/sw", wait_until="load", timeout_s=20)
+        for _ in range(50):
+            if state := await page.evaluate("document.body.dataset.sw"):
+                break
+            await asyncio.sleep(0.1)
+        assert state == outcome

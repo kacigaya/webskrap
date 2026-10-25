@@ -1,4 +1,4 @@
-"""Unit tests for WebSkrap's own CDP driver core and fetch flag assembly."""
+"""Unit tests for WebSkrap's own CDP driver core and launch flag assembly."""
 
 from __future__ import annotations
 
@@ -9,9 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from typer.testing import CliRunner
 
-from webskrap import cli
+from webskrap import cdp as cdp_module
 from webskrap.cdp import (
     _EVALUATE_SCRIPT,
     CDPConnection,
@@ -21,9 +20,8 @@ from webskrap.cdp import (
     PipeTransport,
     find_executable,
 )
-from webskrap.cdp_fetch import launch_args
 from webskrap.errors import ErrorCode, WebSkrapError, is_launch_failure
-from webskrap.models import FetchResult, ProxyConfig, SessionConfig
+from webskrap.models import ProxyConfig, SessionConfig
 from webskrap.profiles import get_profile
 
 
@@ -185,6 +183,16 @@ def _fake_chromium(root: Path, revision: int) -> Path:
     return binary
 
 
+@pytest.fixture
+def no_installed_browsers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hide Chrome for Testing installs and distribution Chromium from lookups."""
+    empty = tmp_path / "webskrap-browsers"
+    empty.mkdir()
+    monkeypatch.setenv("WEBSKRAP_BROWSERS_PATH", str(empty))
+    monkeypatch.setattr(cdp_module, "_SYSTEM_CHROMIUM", ())
+
+
+@pytest.mark.usefixtures("no_installed_browsers")
 def test_find_executable_picks_the_newest_downloaded_chromium(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,6 +204,7 @@ def test_find_executable_picks_the_newest_downloaded_chromium(
     assert find_executable("chromium") == newest
 
 
+@pytest.mark.usefixtures("no_installed_browsers")
 def test_find_executable_reads_package_local_browsers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,6 +220,7 @@ def test_find_executable_reads_package_local_browsers(
     assert find_executable("chromium") == binary
 
 
+@pytest.mark.usefixtures("no_installed_browsers")
 def test_find_executable_errors_trigger_channel_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -225,13 +235,13 @@ def test_find_executable_errors_trigger_channel_fallback(
     assert unknown.value.code is ErrorCode.USAGE
 
 
-def test_launch_args_share_patchright_flags_and_hide_webdriver() -> None:
+def test_browser_args_hide_webdriver_and_carry_proxy_flags() -> None:
     config = SessionConfig(
         chromium_sandbox=False,
         proxy=ProxyConfig(server="http://proxy.test:8080", bypass="localhost"),
         ignore_https_errors=True,
     )
-    args, env = launch_args(config, get_profile(None))
+    args = config.browser_args(get_profile(None))
 
     assert args[0] == "--disable-blink-features=AutomationControlled"
     assert "--no-sandbox" in args
@@ -240,60 +250,7 @@ def test_launch_args_share_patchright_flags_and_hide_webdriver() -> None:
     assert "--proxy-bypass-list=localhost" in args
     assert "--ignore-certificate-errors" in args
     assert not any(a.startswith("--remote-debugging") for a in args)
-    assert env == {}
-
-
-@pytest.mark.parametrize(
-    "config",
-    [
-        SessionConfig(decline_cookies=True),
-        SessionConfig(mask_headless_user_agent=True),
-        SessionConfig(java_script_enabled=False),
-        SessionConfig(storage_state={"cookies": []}),
-        SessionConfig(patchright_context_profile=True),
-        SessionConfig(proxy=ProxyConfig(server="http://p.test:1", username="u", password="p")),
-    ],
-)
-def test_launch_args_reject_unsupported_options(config: SessionConfig) -> None:
-    with pytest.raises(WebSkrapError) as error:
-        launch_args(config, get_profile(None))
-    assert error.value.code is ErrorCode.USAGE
-
-
-def test_cli_driver_cdp_routes_to_the_cdp_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-
-    async def fake_fetch(url: str, **kwargs: Any) -> FetchResult:
-        calls.append({"url": url, **kwargs})
-        return FetchResult(
-            url=url,
-            final_url=url,
-            status=200,
-            ok=True,
-            headers={},
-            text="body",
-            title="T",
-            cookies=[],
-            timings={"elapsed_ms": 1.0},
-        )
-
-    monkeypatch.setattr(cli, "cdp_fetch", fake_fetch)
-    result = CliRunner().invoke(
-        cli.app, ["fetch", "https://example.test", "--driver", "cdp", "--channel", "chromium"]
-    )
-
-    assert result.exit_code == 0, result.output
-    assert calls[0]["url"] == "https://example.test"
-    # The CLI's default-on consent dismissal is dropped, not rejected.
-    assert calls[0]["config"].decline_cookies is False
-    assert calls[0]["config"].channel == "chromium"
-
-    # An explicit request is kept, so the CDP driver refuses it as usage.
-    explicit = CliRunner().invoke(
-        cli.app, ["fetch", "https://example.test", "--driver", "cdp", "--decline-cookies"]
-    )
-    assert explicit.exit_code == 0, explicit.output
-    assert calls[1]["config"].decline_cookies is True
+    assert config.browser_env(get_profile(None)) is None
 
 
 async def test_a_failing_event_handler_does_not_stop_replies() -> None:
@@ -318,36 +275,39 @@ def test_the_core_imports_without_fcntl() -> None:
     assert "fcntl" not in vars(cdp_module)
 
 
-def test_cli_search_driver_cdp_routes_to_the_cdp_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    from webskrap.models import SearchEngine, SearchResult
+def test_find_executable_prefers_chrome_for_testing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from webskrap.install import _COMPLETE_MARKER, executable_in, platform_key
 
-    calls: list[dict[str, Any]] = []
+    key = platform_key()
+    for version in ("150.0.1.2", "156.0.8078.47"):
+        folder = tmp_path / f"chrome-{version}-{key}"
+        binary = executable_in(folder, key)
+        binary.parent.mkdir(parents=True)
+        binary.write_text("")
+        (folder / _COMPLETE_MARKER).write_text(version)
+    # An interrupted install has no completion marker and must be skipped.
+    partial = executable_in(tmp_path / f"chrome-999.0.0.0-{key}", key)
+    partial.parent.mkdir(parents=True)
+    partial.write_text("")
+    monkeypatch.setenv("WEBSKRAP_BROWSERS_PATH", str(tmp_path))
 
-    async def fake_search(query: str, **kwargs: Any) -> SearchResult:
-        calls.append({"query": query, **kwargs})
-        return SearchResult(
-            query=query,
-            engine=SearchEngine.BING,
-            url="https://www.bing.com/search?q=x",
-            final_url="https://www.bing.com/search?q=x",
-            status=200,
-            ok=True,
-            hits=[],
-            hits_total=0,
-            timings={"elapsed_ms": 1.0},
-        )
-
-    monkeypatch.setattr(cli, "cdp_search", fake_search)
-    result = CliRunner().invoke(cli.app, ["search", "x", "--driver", "cdp", "--format", "json"])
-
-    assert result.exit_code == 0, result.output
-    assert calls[0]["query"] == "x"
-    assert calls[0]["config"].decline_cookies is False
+    assert find_executable(None) == executable_in(tmp_path / f"chrome-156.0.8078.47-{key}", key)
 
 
-async def test_fetch_rejects_an_unknown_ready_state() -> None:
-    from webskrap.cdp_fetch import fetch
+async def test_a_detached_session_loses_its_handlers() -> None:
+    connection, reader, _writer = _connection()
+    seen: list[str] = []
+    connection.on("Fetch.requestPaused", lambda _p: seen.append("page"), session_id="S1")
+    connection.on("Fetch.requestPaused", lambda _p: seen.append("other"), session_id="S2")
+    _feed(reader, {"method": "Target.detachedFromTarget", "params": {"sessionId": "S1"}})
+    for session in ("S1", "S2"):
+        _feed(reader, {"method": "Fetch.requestPaused", "sessionId": session, "params": {}})
+    connection.start()
+    for _ in range(20):
+        await asyncio.sleep(0)
 
-    with pytest.raises(WebSkrapError) as error:
-        await fetch("https://example.com", ready_selector="body", ready_state="hidden")  # type: ignore[arg-type]
-    assert error.value.code is ErrorCode.USAGE
+    assert seen == ["other"]
+    assert all(key[0] != "S1" for key in connection._handlers)
+    await connection.close()

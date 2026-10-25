@@ -61,7 +61,7 @@ behavior:
 WEBSKRAP_LIVE=1 pytest -q -m live
 ```
 
-They require network access, Patchright, an installed browser, and public demo
+They require network access, an installed Google Chrome, and public demo
 sites that can change independently from WebSkrap.
 
 Generate the headed and headless stealth report:
