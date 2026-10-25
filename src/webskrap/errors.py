@@ -217,12 +217,15 @@ def is_launch_failure(exc: BaseException) -> bool:
 
 # Matches embedded credentials (scheme://user:pass@host) so error text handed
 # to models and terminals never carries them.
-# The last @ ends userinfo; /, ? and # end the authority.
-_USERINFO_PATTERN = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s?#]+@")
+# Treat ? and # before @ as credentials too: rejected URLs may be malformed.
+_USERINFO_PATTERN = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s]+@")
 
 
 def scrub_userinfo(text: str) -> str:
     """Replace URL credentials in ``text`` with ``***``.
+
+    A query or fragment containing ``@`` before the first path slash is
+    redacted too, because it can also be a malformed credential string.
 
     Args:
         text: Message that may embed a ``user:pass@`` authority.

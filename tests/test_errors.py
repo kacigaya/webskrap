@@ -160,13 +160,23 @@ def test_arity_rejection_is_tagged_at_the_raise_site() -> None:
         ),
         pytest.param(
             "https://example.com?email=user@example.org",
-            "https://example.com?email=user@example.org",
+            "https://***@example.org",
             id="at-in-query-without-path",
         ),
         pytest.param(
             "https://example.com#user@example.org",
-            "https://example.com#user@example.org",
+            "https://***@example.org",
             id="at-in-fragment",
+        ),
+        pytest.param(
+            "https://user:before?after@example.com/",
+            "https://***@example.com/",
+            id="malformed-password-with-question",
+        ),
+        pytest.param(
+            "https://user:before#after@example.com/",
+            "https://***@example.com/",
+            id="malformed-password-with-hash",
         ),
         pytest.param("no credentials here", "no credentials here", id="unchanged"),
     ],
@@ -187,16 +197,24 @@ def test_error_payload_scrubs_credentials() -> None:
     assert "s3cret" not in payload["error"]
 
 
-def test_rejected_url_error_hides_the_whole_password() -> None:
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user:before@after@example.com/",
+        "ftp://user:before?after@example.com/",
+        "ftp://user:before#after@example.com/",
+    ],
+)
+def test_rejected_url_error_hides_the_whole_password(url: str) -> None:
     from webskrap.urls import validate_url
 
     with pytest.raises(WebSkrapError) as caught:
-        validate_url("https://user:before@after@example.com/")
+        validate_url(url)
 
     payload = error_payload(caught.value)
     assert "before" not in payload["error"]
     assert "after" not in payload["error"]
-    assert "https://***@example.com/" in payload["error"]
+    assert "://***@example.com/" in payload["error"]
 
 
 def test_blocked_launch_argument_classifies_as_usage() -> None:

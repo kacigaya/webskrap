@@ -9,6 +9,11 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Security
+
+- Hide complete URL credentials in errors, including multiple `@` characters
+  and malformed inputs with `?` or `#` before `@`.
+
 ## [3.0.0] - 2026-10-25
 
 WebSkrap 3.0 drives Chromium only through its own CDP client. Read
