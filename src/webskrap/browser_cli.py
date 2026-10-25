@@ -17,7 +17,6 @@ from typing import Annotated, Any, TypeVar
 from uuid import uuid4
 
 import typer
-from patchright.async_api import Page
 from rich.console import Console
 from rich.table import Table
 
@@ -26,6 +25,7 @@ from webskrap.browser_session import (
     DEFAULT_ACTION_TIMEOUT_MS,
     DEFAULT_NAVIGATION_TIMEOUT_MS,
     ELEMENT_ACTIONS,
+    SessionPage,
 )
 from webskrap.cli_output import (
     OutputFormat,
@@ -74,14 +74,14 @@ def _run(coroutine: Coroutine[Any, Any, T], output_format: OutputFormat) -> T:
     except (typer.Exit, typer.Abort, typer.BadParameter):
         raise
     except Exception as exc:
-        # Every failure, Playwright or otherwise (an unwritable screenshot
+        # Every failure, CDP or otherwise (an unwritable screenshot
         # path, a dead session), leaves through the shared envelope.
         fail(exc, output_format)
 
 
 def _run_page_command(
     session: str,
-    action: Callable[[Page], Awaitable[T]],
+    action: Callable[[SessionPage], Awaitable[T]],
     output_format: OutputFormat,
     *,
     timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
@@ -285,9 +285,8 @@ def _navigation_command(name: str, help_text: str, method: str) -> None:
     ) -> None:
         output_format = parse_output_format(format)
 
-        async def action(page: Page) -> dict[str, Any]:
-            await getattr(page, method)()
-            return await browser_session.page_state(page)
+        async def action(page: SessionPage) -> dict[str, Any]:
+            return await browser_session.history(page, method)
 
         _emit_state(
             _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
@@ -345,7 +344,7 @@ def _register_element_command(name: str, help_text: str) -> None:
 
     @browser_app.command(name, help=help_text)
     def command(
-        target: Annotated[str, typer.Argument(help="Snapshot ref (e12) or Playwright selector.")],
+        target: Annotated[str, typer.Argument(help="Snapshot ref (e12) or CSS selector.")],
         value: Annotated[list[str] | None, typer.Argument(help="Value(s) for the action.")] = None,
         session: SessionOption = "default",
         timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
@@ -359,7 +358,7 @@ def _register_element_command(name: str, help_text: str) -> None:
         except WebSkrapError as exc:
             fail(exc, output_format)
 
-        async def action(page: Page) -> dict[str, Any]:
+        async def action(page: SessionPage) -> dict[str, Any]:
             await browser_session.element_action(page, name, target, values)
             return await browser_session.page_state(page)
 
@@ -383,9 +382,8 @@ def press_command(
     """Press a key on the page."""
     output_format = parse_output_format(format)
 
-    async def action(page: Page) -> dict[str, Any]:
-        await page.keyboard.press(key)
-        return await browser_session.page_state(page)
+    async def action(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.press(page, key)
 
     _emit_state(
         _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
@@ -403,7 +401,7 @@ def wait_command(
     ] = None,
     selector: Annotated[
         str | None,
-        typer.Option("--selector", help="Wait on a snapshot ref (e12) or Playwright selector."),
+        typer.Option("--selector", help="Wait on a snapshot ref (e12) or CSS selector."),
     ] = None,
     state: Annotated[
         str,
@@ -460,10 +458,9 @@ def screenshot_command(
     output_format = parse_output_format(format)
     target = path or Path(f"webskrap-{uuid4().hex}.png")
 
-    async def action(page: Page) -> dict[str, Any]:
+    async def action(page: SessionPage) -> dict[str, Any]:
         target.parent.mkdir(parents=True, exist_ok=True)
-        await page.screenshot(path=str(target), full_page=full_page)
-        return {**await browser_session.page_state(page), "path": str(target)}
+        return await browser_session.screenshot(page, target, full_page=full_page)
 
     result = _run_page_command(session, action, output_format)
     if output_format == "json":
@@ -482,7 +479,7 @@ def view_command(
     output_format = parse_output_format(format)
     target = path or Path(f"webskrap-view-{uuid4().hex}.png")
 
-    async def action(page: Page) -> dict[str, str | int | float]:
+    async def action(page: SessionPage) -> dict[str, str | int | float]:
         captured = await browser_session.view(page)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(captured.image)
@@ -579,7 +576,7 @@ def eval_command(
     """Evaluate JavaScript on the current page and print the JSON result."""
     output_format = parse_output_format(format)
 
-    async def action(page: Page) -> Any:
+    async def action(page: SessionPage) -> Any:
         return await browser_session.evaluate(page, expression)
 
     payload = browser_session.shape_eval_result(

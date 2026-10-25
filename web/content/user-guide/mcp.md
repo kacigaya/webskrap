@@ -10,8 +10,9 @@ server. MCP clients such as Claude Desktop, Claude Code, and Codex can call it t
 drive a real browser directly. It runs over stdio and exposes fetch tools for
 one-shot scraping plus `browser_*` tools for persistent interactive sessions.
 
-Both `fetch` and `stealth_fetch` run the same CDP-leak-free Patchright stealth
-path the CLI uses (headless Chrome), so JS-heavy and
+Both `fetch` and `stealth_fetch` run the same stealth path the CLI uses
+(headless Chrome on WebSkrap's own CDP client, which never enables the
+`Runtime` domain), so JS-heavy and
 anti-bot pages that block naive scrapers still load. They return clean visible
 page text by default, with no HTML tags, scripts, or CSS noise, so the model
 spends tokens on content instead of markup (typically 5-10x fewer tokens than
@@ -47,11 +48,11 @@ python -m webskrap.mcp_server
 
 | Tool | Purpose |
 | --- | --- |
-| `fetch` | Fetch a URL with the Patchright stealth driver (waits for `networkidle`). |
-| `stealth_fetch` | Same stealth driver with finer fingerprint/WebRTC/UA controls. |
+| `fetch` | Fetch a URL on the stealth path (waits for `networkidle`). |
+| `stealth_fetch` | Same stealth path with finer fingerprint/WebRTC/UA controls. |
 | `fetch_session_close` | Close an idle warm fetch session; persistent profile files survive. |
 | `search` | Find URLs for a query on Bing (default) or DuckDuckGo, with the `stealth_fetch` stealth controls. |
-| `doctor` | Check that Patchright and Chromium can launch. |
+| `doctor` | Check that Chromium can launch. |
 | `browser_open` | Start (or reuse) a persistent headless browser session. |
 | `browser_goto` | Navigate the session's current page. |
 | `browser_text` | Visible body text, windowed in the browser without an accessibility tree. |
@@ -82,12 +83,12 @@ leave the notice in place.
 | Argument | Default | Notes |
 | --- | --- | --- |
 | `url` | required | URL to load. |
-| `profile` | `desktop-chrome` | Profile label; native Patchright defaults remain authoritative. |
+| `profile` | `desktop-chrome` | Profile label; the browser's native identity is kept unless `profile_mode` asks for more. |
 | `channel` | `chrome` | Browser channel; use `chromium` on Linux ARM64. |
 | `wait_until` | `networkidle` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
 | `resource_policy` | `all` | `all`, `lite`, or `documents`. |
 | `timeout_ms` | `60000` | Timeout applied separately to navigation and readiness. |
-| `ready_selector` | `null` | Playwright selector that must become visible after consent dismissal. |
+| `ready_selector` | `null` | CSS selector or snapshot ref that must become visible after consent dismissal. |
 | `max_chars` | `8000` | Maximum returned text characters. |
 | `text_only` | `true` | Return clean visible text; set `false` for raw HTML. |
 | `decline_cookies` | `true` | Click a cookie consent notice's reject button after load. |
@@ -107,14 +108,14 @@ Example arguments:
 
 `stealth_fetch` accepts the same URL/profile/timeout/output-size/session controls,
 `resource_policy` (default `all`) and `wait_until` (default `domcontentloaded`),
-plus Patchright options:
+plus stealth options:
 
 ```json
 {
   "url": "https://example.com",
   "channel": "chrome",
   "headless": false,
-  "patchright_context_profile": false,
+  "profile_mode": "native",
   "reduce_fingerprint_surface": false,
   "mask_headless_user_agent": false,
   "virtual_display": false,
@@ -177,7 +178,7 @@ The `browser_*` tools drive the same persistent sessions as
 [`webskrap browser`](/docs/user-guide/cli#interactive-browser-sessions) in the
 CLI: `browser_open` launches a detached headless Chromium that keeps running
 between tool calls (and between MCP server restarts), and every other tool
-reconnects to it over CDP through Patchright, with the same automation and
+reconnects to it over CDP, with the same automation and
 virtual-screen launch flags as `stealth_fetch`. Sessions are named (`session`, default `default`)
 and store their profile under `~/.webskrap/browser/<name>/`
 (root overridable with `WEBSKRAP_BROWSER_DIR`), so cookies and logins persist.
@@ -195,7 +196,7 @@ A typical flow:
 1. `browser_open` with an optional `url`.
 2. `browser_snapshot`, where each element carries a ref like `[ref=e15]`.
 3. `browser_interact` with `action: "click"` and `target: "e15"` (or any
-   Playwright selector). `fill` and `type` take one entry in `values`;
+   CSS selector). `fill` and `type` take one entry in `values`;
    `select` takes one or more. `click`, `dblclick` and `type` use human mouse
    and keystroke timing, so they take noticeably longer than `fill`; see
    [Humanizer](/docs/user-guide/humanizer).
@@ -309,9 +310,9 @@ args = []
 
 ## Stealth
 
-`stealth_fetch` uses the Patchright driver and accepts the same controls as the
+`stealth_fetch` accepts the same controls as the
 [Stealth](/docs/user-guide/stealth) guide, including
-`channel`, `headless`, `user_data_dir`, `patchright_context_profile`,
+`channel`, `headless`, `user_data_dir`, `profile_mode`,
 `reduce_fingerprint_surface`, `mask_headless_user_agent`, `virtual_display`,
 `gpu`, and `webrtc_ip_handling_policy`. On Linux with Xvfb, prefer `virtual_display`
 over `mask_headless_user_agent`: it runs Chrome headed on a private display
@@ -327,7 +328,7 @@ native browser controls you need:
   "headless": true,
   "user_data_dir": "headless-profile",
   "virtual_display": true,
-  "patchright_context_profile": true,
+  "profile_mode": "locale",
   "webrtc_ip_handling_policy": "disable_non_proxied_udp"
 }
 ```

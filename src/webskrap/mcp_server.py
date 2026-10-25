@@ -18,9 +18,8 @@ from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
 
-from patchright.async_api import Page
-
 from webskrap import browser_session
+from webskrap.browser_session import SessionPage
 from webskrap.client import WebSkrapClient, WebSkrapError, with_channel_fallback
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
@@ -39,6 +38,7 @@ from webskrap.parsing import (
     parse_element_state,
     parse_engine,
     parse_load_state,
+    parse_profile_mode,
     parse_resource_policy,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
@@ -88,7 +88,7 @@ def _hints(
     )
 
 
-INSTRUCTIONS = """WebSkrap uses real Chromium with Patchright stealth.
+INSTRUCTIONS = """WebSkrap drives real Chromium over its own CDP client (no Playwright).
 
 Choose a tool
 - One known page: stealth_fetch. Prefer it over fetch; fetch has fewer controls.
@@ -217,9 +217,10 @@ async def fetch(
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Fetch a URL with the Patchright stealth driver and return page data.
+    """Fetch a URL in headless Chromium and return page data.
 
-    Uses the same CDP-leak-free headless-Chrome stealth path as the CLI, so
+    Uses the same stealth path as the CLI (no Runtime.enable, isolated-world
+    scripts), so
     JS-heavy and anti-bot pages that block naive scrapers still load. Waits for
     networkidle by default so single-page apps have hydrated before reading.
     Returns clean visible page text by default (LLM-friendly, no HTML tags); set
@@ -229,7 +230,7 @@ async def fetch(
 
     Args:
         url: The URL to load.
-        profile: Profile label; native Patchright defaults remain authoritative.
+        profile: Profile label; the browser keeps its native identity here.
         channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
             ARM64 has no build), Edge and then bundled Chromium are tried.
         wait_until: commit, domcontentloaded, load, or networkidle.
@@ -246,8 +247,8 @@ async def fetch(
         max_links: How many links to return; links_total counts them all.
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
-        ready_selector: Optional Playwright selector that must be visible before
-            extraction. Uses timeout_ms after consent dismissal.
+        ready_selector: Optional CSS selector or snapshot ref that must be visible
+            before extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -255,7 +256,6 @@ async def fetch(
     with _tool_errors():
         url = await validate_mcp_url(url)
         config = SessionConfig(
-            driver="patchright",
             channel=channel,
             headless=True,
             chromium_sandbox=browser_session.sandbox_enabled(None),
@@ -286,7 +286,7 @@ async def stealth_fetch(
     channel: str = "chrome",
     headless: bool = True,
     user_data_dir: str | None = None,
-    patchright_context_profile: bool = False,
+    profile_mode: str = "native",
     reduce_fingerprint_surface: bool = False,
     mask_headless_user_agent: bool = False,
     virtual_display: bool = False,
@@ -307,22 +307,23 @@ async def stealth_fetch(
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
-    """Fetch a URL with the Patchright stealth driver (CDP-leak-free).
+    """Fetch a URL in Chromium with every stealth control exposed.
 
     Returns clean visible page text by default (LLM-friendly, no HTML tags).
-    Set text_only=False to get the raw HTML instead. Requires Patchright's
-    browser download: webskrap install. Prefer headless=False with
-    channel="chrome" for the strictest anti-bot path.
+    Set text_only=False to get the raw HTML instead. Needs a browser: run
+    webskrap install for Chrome for Testing. Prefer virtual_display=True, or
+    headless=False with channel="chrome", for the strictest anti-bot path.
 
     Args:
         url: The URL to load.
-        profile: Bundled profile applied when patchright_context_profile is set.
+        profile: Bundled profile; profile_mode decides how much pages see.
         channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
             ARM64 has no build), Edge and then bundled Chromium are tried.
         headless: Run headless. Headed is more robust against detection.
         user_data_dir: Persistent browser profile directory, relative to the
             MCP profile root.
-        patchright_context_profile: Apply locale/timezone/media profile metadata.
+        profile_mode: native (default; the browser's own identity), locale
+            (locale, timezone, media, headers) or full (also viewport and UA).
         reduce_fingerprint_surface: Disable WebGL and canvas readback via flags.
         mask_headless_user_agent: Rewrite the HeadlessChrome UA token to Chrome.
             Empties high-entropy client hints; prefer virtual_display.
@@ -346,8 +347,8 @@ async def stealth_fetch(
             load, so the banner does not bury the page text.
         wait_until: commit, domcontentloaded (default), load, or networkidle.
         resource_policy: all, lite (block images/fonts/media), or documents.
-        ready_selector: Optional Playwright selector that must be visible before
-            extraction. Uses timeout_ms after consent dismissal.
+        ready_selector: Optional CSS selector or snapshot ref that must be visible
+            before extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -355,13 +356,12 @@ async def stealth_fetch(
     with _tool_errors():
         url = await validate_mcp_url(url)
         config = SessionConfig(
-            driver="patchright",
             channel=channel,
             headless=headless,
             chromium_sandbox=browser_session.sandbox_enabled(None),
             user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
             navigation_timeout_ms=timeout_ms,
-            patchright_context_profile=patchright_context_profile,
+            profile_mode=parse_profile_mode(profile_mode),
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
@@ -413,7 +413,7 @@ async def search(
     channel: str = "chrome",
     headless: bool = True,
     user_data_dir: str | None = None,
-    patchright_context_profile: bool = False,
+    profile_mode: str = "native",
     reduce_fingerprint_surface: bool = False,
     mask_headless_user_agent: bool = False,
     virtual_display: bool = False,
@@ -425,7 +425,7 @@ async def search(
 ) -> dict[str, Any]:
     """Search the web and return the organic hits as title, url and snippet.
 
-    Loads the engine's own results page with the stealth driver, so the same
+    Loads the engine's own results page in Chromium, so the same
     channel, profile and persistent-profile controls as stealth_fetch apply.
     Returns destinations with the engine's click-tracking unwrapped; follow up
     with stealth_fetch on the ones worth reading. Google is not offered. A
@@ -437,13 +437,14 @@ async def search(
         query: Words to search for.
         engine: bing (default) or ddg (DuckDuckGo).
         max_results: How many hits to return; hits_total counts them all.
-        profile: Bundled profile applied when patchright_context_profile is set.
+        profile: Bundled profile; profile_mode decides how much pages see.
         channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
             ARM64 has no build), Edge and then bundled Chromium are tried.
         headless: Run headless. Headed is more robust against detection.
         user_data_dir: Persistent browser profile directory, relative to the
             MCP profile root.
-        patchright_context_profile: Apply locale/timezone/media profile metadata.
+        profile_mode: native (default; the browser's own identity), locale
+            (locale, timezone, media, headers) or full (also viewport and UA).
         reduce_fingerprint_surface: Disable WebGL and canvas readback via flags.
         mask_headless_user_agent: Rewrite the HeadlessChrome UA token to Chrome.
             Empties high-entropy client hints; prefer virtual_display.
@@ -462,13 +463,12 @@ async def search(
     """
     with _tool_errors():
         config = SessionConfig(
-            driver="patchright",
             channel=channel,
             headless=headless,
             chromium_sandbox=browser_session.sandbox_enabled(None),
             user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
             navigation_timeout_ms=timeout_ms,
-            patchright_context_profile=patchright_context_profile,
+            profile_mode=parse_profile_mode(profile_mode),
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
@@ -522,7 +522,7 @@ class _AnnotatedError(WebSkrapError, ToolError):
 def _tool_errors() -> Iterator[None]:
     """Re-raise whatever fails inside as a one-line, code-tagged message.
 
-    Playwright errors arrive with a call log dozens of lines long, and none of
+    Browser errors can arrive with a log dozens of lines long, and none of
     those lines says what to do next. What reaches the caller is the first line
     plus the classification and its hint.
     """
@@ -536,7 +536,7 @@ def _tool_errors() -> Iterator[None]:
 
 async def _browser_action(
     session: str,
-    action: Callable[[Page], Awaitable[T]],
+    action: Callable[[SessionPage], Awaitable[T]],
     timeout_ms: float,
 ) -> T:
     """Run a page action, reporting failures as code-tagged one-liners."""
@@ -693,7 +693,7 @@ async def browser_interact(
 
     Args:
         action: click, dblclick, hover, check, uncheck, fill, type, or select.
-        target: Snapshot ref (e.g. "e15") or any Playwright selector.
+        target: Snapshot ref (e.g. "e15") or a CSS selector.
         values: Value arguments: none for click/dblclick/hover/check/uncheck,
             exactly one for fill/type, one or more for select.
         session: Browser session name.
@@ -703,7 +703,7 @@ async def browser_interact(
     with _tool_errors():
         browser_session.element_arguments(action, resolved_values)
 
-    async def run(page: Page) -> dict[str, Any]:
+    async def run(page: SessionPage) -> dict[str, Any]:
         await browser_session.element_action(page, action, target, resolved_values)
         return await browser_session.page_state(page)
 
@@ -726,9 +726,8 @@ async def browser_press(
         timeout_ms: Action timeout in milliseconds.
     """
 
-    async def run(page: Page) -> dict[str, Any]:
-        await page.keyboard.press(key)
-        return await browser_session.page_state(page)
+    async def run(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.press(page, key)
 
     return await _browser_action(session, run, timeout_ms)
 
@@ -752,7 +751,7 @@ async def browser_wait_for(
         text: Wait until this text is visible on the page.
         text_gone: Wait until this text is gone. Text that was never there
             satisfies the wait immediately.
-        selector: Wait until this snapshot ref (e.g. "e15") or Playwright
+        selector: Wait until this snapshot ref (e.g. "e15") or CSS
             selector reaches selector_state.
         selector_state: attached, detached, visible, or hidden. Used with
             selector.
@@ -804,9 +803,8 @@ async def browser_screenshot(
     with _tool_errors():
         target = resolve_output_path(path)
 
-    async def run(page: Page) -> dict[str, Any]:
-        await page.screenshot(path=str(target), full_page=full_page)
-        return {**await browser_session.page_state(page), "path": str(target)}
+    async def run(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.screenshot(page, target, full_page=full_page)
 
     return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
 

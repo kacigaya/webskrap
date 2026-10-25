@@ -14,7 +14,7 @@ what a reviewable pull request looks like.
 ```bash
 git clone https://github.com/kacigaya/webskrap && cd webskrap
 uv sync --extra dev
-uv run webskrap install    # downloads Playwright and Patchright Chromium
+uv run webskrap install    # downloads Chrome for Testing
 uv run webskrap doctor     # confirms a browser actually launches
 ```
 

@@ -1,10 +1,10 @@
-"""Async scraping client: Playwright/Patchright sessions, fetches, and clicks.
+"""Async scraping client: Chromium sessions, fetches, searches and clicks.
 
-:class:`WebSkrapClient` owns the browser driver and hands out
-:class:`WebSkrapSession` objects; a session owns one browser context and the
-pages opened from it. Both are async context managers, and both raise
-:class:`WebSkrapError` for WebSkrap-level failures while letting Playwright's
-own errors (timeouts, navigation failures) propagate unchanged.
+:class:`WebSkrapClient` hands out :class:`WebSkrapSession` objects; a session
+owns one Chromium driven over WebSkrap's own CDP client (:mod:`webskrap.cdp`)
+and the pages opened in it. Both are async context managers, and both raise
+:class:`WebSkrapError` for every failure, with an :class:`ErrorCode` that
+says what to do next.
 """
 
 from __future__ import annotations
@@ -12,9 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
 import sys
-import tempfile
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -23,9 +21,9 @@ from typing import Any, TypeVar
 from uuid import uuid4
 
 from anyio import CancelScope
-from playwright.async_api import Browser, BrowserContext, Page
 
-from webskrap import human as humanize
+from webskrap import cdp_dom, cdp_setup
+from webskrap.cdp import CDPBrowser, CDPError, CDPPage, find_executable, launch
 from webskrap.challenges import raise_for_challenge
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
@@ -34,7 +32,6 @@ from webskrap.errors import (
     RECOVERY_HINTS,
     ErrorCode,
     WebSkrapError,
-    classify,
     is_launch_failure,
     is_sandbox_failure,
 )
@@ -43,7 +40,6 @@ from webskrap.models import (
     FetchResult,
     GpuBackend,
     Link,
-    ResourcePolicy,
     SearchEngine,
     SearchResult,
     SessionConfig,
@@ -61,7 +57,7 @@ T = TypeVar("T")
 # returns the first ``max`` of them plus the unique total. Deduplicating in the
 # page keeps a nav bar repeated in a footer from filling the whole budget, and
 # `a.href` (not getAttribute) resolves relative paths against the final URL.
-_LINKS_SCRIPT = """(max) => {
+LINKS_SCRIPT = """(max) => {
   const seen = new Set();
   const links = [];
   for (const anchor of document.querySelectorAll('a[href]')) {
@@ -80,83 +76,68 @@ _LINKS_SCRIPT = """(max) => {
   return { links, total: seen.size };
 }"""
 
-
-def _async_playwright(driver: str):
-    """Return the async_playwright factory for the chosen driver.
-
-    ``patchright`` is a drop-in, API-compatible fork of Playwright that hides the
-    CDP ``Runtime.enable`` leak used by CDP-aware bot detectors. The package ships
-    with WebSkrap, but its browser still needs downloading (``webskrap install``).
-    """
-    if driver == "patchright":
-        try:
-            from patchright.async_api import async_playwright
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            msg = "driver='patchright' requires patchright. Run: pip install webskrap"
-            raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH) from exc
-        return async_playwright()
-    from playwright.async_api import async_playwright
-
-    return async_playwright()
+# Matches Playwright's page.content(): doctype plus the serialized document.
+_CONTENT_SCRIPT = """() => {
+  let html = '';
+  if (document.doctype) html = new XMLSerializer().serializeToString(document.doctype);
+  if (document.documentElement) html += document.documentElement.outerHTML;
+  return html;
+}"""
+_STATE_SCRIPT = (
+    "({ url: location.href, title: document.title, "
+    "text: document.body ? document.body.innerText : '' })"
+)
+_POLL_S = 0.1
 
 
 async def browser_doctor(
-    driver: str = "patchright",
     channels: tuple[str | None, ...] = ("chrome", "msedge", "chromium"),
     *,
     chromium_sandbox: bool = True,
 ) -> dict[str, object]:
-    """Report the first Chromium channel that launches with ``driver``.
+    """Report the first Chromium channel that launches headless.
 
-    Also reports the bundled Chromium binary the driver would use, since a
-    caller diagnosing a failed launch otherwise has to guess where the browser
-    was looked for. ``chromium_sandbox`` should match what fetches will use,
-    or a host that cannot sandbox reports ready while every fetch fails.
+    Also reports the binary it found, since a caller diagnosing a failed
+    launch otherwise has to guess where the browser was looked for.
+    ``chromium_sandbox`` should match what fetches will use, or a host that
+    cannot sandbox reports ready while every fetch fails.
     """
     failure: Exception | None = None
     executable_path: str | None = None
+    args = [] if chromium_sandbox else ["--no-sandbox"]
     for channel in channels:
-        playwright = None
-        browser = None
-        launched = False
         try:
-            playwright = await _async_playwright(driver).start()
-            executable_path = playwright.chromium.executable_path
-            browser = await playwright.chromium.launch(
-                channel=channel, headless=True, chromium_sandbox=chromium_sandbox
-            )
-            launched = True
-        except Exception as exc:  # noqa: BLE001 - report launch/import failures
+            executable = find_executable(channel)
+            executable_path = str(executable)
+            browser = await launch(executable, args=args, headless=True)
+        except Exception as exc:  # noqa: BLE001 - report launch failures
             failure = exc
+            if is_sandbox_failure(exc):
+                break
+            continue
+        try:
+            version = (await browser.connection.send("Browser.getVersion")).get("product")
         finally:
-            if browser is not None:
-                with suppress(Exception):
-                    await browser.close()
-            if playwright is not None:
-                with suppress(Exception):
-                    await playwright.stop()
-        if launched:
-            channel_name = channel or "chromium"
-            return {
-                "ok": True,
-                "message": f"{driver.title()} headless {channel_name} is ready.",
-                "driver": driver,
-                "channel": channel_name,
-                "browser_identity": {
-                    "chrome": "Chrome",
-                    "msedge": "Edge",
-                    "chromium": "Chromium",
-                }.get(channel_name, channel_name),
-                "executable_path": executable_path,
-            }
-        if failure is not None and is_sandbox_failure(failure):
-            break
+            await browser.close()
+        channel_name = channel or "chromium"
+        return {
+            "ok": True,
+            "message": f"Headless {channel_name} is ready ({version}).",
+            "channel": channel_name,
+            "browser_identity": {
+                "chrome": "Chrome",
+                "msedge": "Edge",
+                "chromium": "Chromium",
+            }.get(channel_name, channel_name),
+            "browser_version": version,
+            "executable_path": executable_path,
+        }
     return {
         "ok": False,
-        "message": f"{driver.title()} Chromium did not launch: {failure}",
-        "driver": driver,
+        "message": f"Chromium did not launch: {failure}",
         "channel": None,
         "browser_identity": None,
+        "browser_version": None,
         "executable_path": executable_path,
         "hint": RECOVERY_HINTS[
             ErrorCode.SANDBOX
@@ -250,49 +231,43 @@ async def _run_channels(
 
 
 class WebSkrapSession:
-    """One browser context plus the helpers that drive pages in it.
+    """One Chromium and the helpers that drive pages in it.
 
-    Created by :meth:`WebSkrapClient.session`, not directly. The session owns
-    its context (and, for non-persistent runs, the browser behind it), so
-    :meth:`close` is what releases those; ``async with`` does it for you. Every
+    Created by :meth:`WebSkrapClient.session`, not directly. Every page of a
+    session shares its cookies and storage. The session owns its browser, so
+    :meth:`close` is what releases it; ``async with`` does it for you. Every
     method raises :class:`WebSkrapError` once the session is closed.
 
     Attributes:
         name: Session name, unique within the owning client.
-        context: The underlying Playwright ``BrowserContext``.
+        browser: The :class:`~webskrap.cdp.CDPBrowser` behind the session.
         config: The :class:`~webskrap.models.SessionConfig` it was built from.
         profile: The :class:`~webskrap.models.BrowserProfile` applied to it.
-        browser: The owning ``Browser``, or None for a persistent context.
     """
 
     def __init__(
         self,
         *,
         name: str,
-        context: BrowserContext,
+        browser: CDPBrowser,
         config: SessionConfig,
         profile: BrowserProfile,
-        browser: Browser | None = None,
-        temp_user_data_dir: str | None = None,
         display: VirtualDisplay | None = None,
     ) -> None:
-        """Adopt an already-open context; :meth:`WebSkrapClient.session` calls this.
+        """Adopt a launched browser; :meth:`WebSkrapClient.session` calls this.
 
-        The session takes ownership: closing it closes the context, the browser
-        when one was passed, any temporary profile directory, and the virtual
-        display the browser runs on.
+        The session takes ownership: closing it closes the browser (and its
+        temporary profile) and the virtual display it runs on.
         """
         self.name = name
-        self.context = context
+        self.browser = browser
         self.config = config
         self.profile = profile
-        self.browser = browser
-        self._temp_user_data_dir = temp_user_data_dir
         self._display = display
         self._closed = False
 
     async def __aenter__(self) -> WebSkrapSession:
-        """Enter the session unchanged; its context is already open."""
+        """Enter the session unchanged; its browser is already running."""
         return self
 
     async def __aexit__(
@@ -303,6 +278,29 @@ class WebSkrapSession:
     ) -> None:
         """Close the session, so a failing block still releases the browser."""
         await self.close()
+
+    async def new_page(self) -> CDPPage:
+        """Open a page with the session's profile and policies applied.
+
+        Close it with :meth:`close_page` when done; the browser closes any page
+        left open when the session closes.
+        """
+        self._ensure_open()
+        page = await self.browser.new_page()
+        try:
+            await cdp_setup.prepare_page(page, self.config, self.profile)
+        except BaseException:
+            with CancelScope(shield=True):
+                await self.close_page(page)
+            raise
+        return page
+
+    async def close_page(self, page: CDPPage) -> None:
+        """Close a page from :meth:`new_page`. Idempotent."""
+        with suppress(WebSkrapError):
+            await self.browser.connection.send(
+                "Target.closeTarget", {"targetId": page.target_id}, timeout_s=5
+            )
 
     async def fetch(
         self,
@@ -320,13 +318,13 @@ class WebSkrapSession:
         """Open ``url`` in a new page, read it, and close the page.
 
         The page is always closed, so nothing survives the call except the
-        returned data and any cookies the context picked up. When
+        returned data and any cookies the session picked up. When
         ``SessionConfig.decline_cookies`` is set, a consent notice is dismissed
         after navigation and before the text is read.
 
         Args:
             url: The URL to load.
-            wait_until: Playwright load state to wait for.
+            wait_until: Load state to wait for.
             screenshot: True for a generated filename, or a path to write a
                 full-page PNG to. The path is used as given, so pass a
                 destination you control.
@@ -338,8 +336,9 @@ class WebSkrapSession:
             max_links: How many links to keep. ``FetchResult.links_total``
                 reports how many there were before the cap.
             decline_cookies: Per-call consent override; None uses the config.
-            ready_selector: Optional Playwright selector that must become visible
-                after consent dismissal. Uses the navigation timeout separately.
+            ready_selector: Optional CSS selector or snapshot ref that must
+                become visible after consent dismissal. Uses the navigation
+                timeout separately.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
@@ -347,66 +346,48 @@ class WebSkrapSession:
 
         Raises:
             WebSkrapError: If the session is closed, the readiness selector is
-                blank (``usage``), or a known challenge is detected (``blocked``).
+                blank or invalid (``usage``), a known challenge is detected
+                (``blocked``), the network fails (``navigation``), or a wait
+                runs out (``timeout``).
         """
         self._ensure_open()
         url = validate_url(url)
         if ready_selector is not None and not ready_selector.strip():
             raise WebSkrapError("ready_selector cannot be blank", code=ErrorCode.USAGE)
         started = time.perf_counter()
-        page = await self.context.new_page()
+        timeout_s = (timeout_ms or self.config.navigation_timeout_ms) / 1000
+        page = await self.new_page()
         try:
-            response = await page.goto(
-                url,
-                wait_until=wait_until,
-                timeout=timeout_ms or self.config.navigation_timeout_ms,
-            )
-            headers = dict(response.headers) if response else {}
+            response = await page.goto(url, wait_until=wait_until, timeout_s=timeout_s)
+            headers = {
+                str(key).lower(): str(value) for key, value in response.get("headers", {}).items()
+            }
             await raise_for_challenge(page, headers)
             declined = await self._decline_after_navigation(
                 page, wait_until, decline_cookies=decline_cookies
             )
             if ready_selector is not None:
-                try:
-                    await page.locator(ready_selector).wait_for(
-                        state="visible", timeout=timeout_ms or self.config.navigation_timeout_ms
-                    )
-                except Exception as exc:
-                    # A challenge can replace the page while readiness is pending.
-                    # Both drivers' timeout classes use the shared error taxonomy.
-                    if classify(exc) is ErrorCode.TIMEOUT:
-                        try:
-                            await raise_for_challenge(page, headers)
-                        except Exception as probe_error:
-                            if (
-                                isinstance(probe_error, WebSkrapError)
-                                and probe_error.code is ErrorCode.BLOCKED
-                            ):
-                                raise
-                            # Navigation may destroy the execution context. Keep
-                            # the original timeout when the diagnostic cannot run.
-                    raise
+                await _wait_visible(page, ready_selector, timeout_s=timeout_s, headers=headers)
             await raise_for_challenge(page, headers)
-            title = await page.title()
-            text = await page.locator("body").inner_text() if text_only else await page.content()
+            state = await page.evaluate(_STATE_SCRIPT)
+            text = state["text"] if text_only else await page.evaluate(_CONTENT_SCRIPT)
             links, links_total = await _collect_links(
                 page,
                 max_links if include_links and self.config.java_script_enabled else None,
             )
             screenshot_path = await _maybe_screenshot(page, screenshot)
-            cookies = [dict(cookie) for cookie in await self.context.cookies()]
-            elapsed_ms = (time.perf_counter() - started) * 1000
-            status = response.status if response else None
+            cookies = await self.cookies()
+            status = _status(response)
             return FetchResult(
                 url=url,
-                final_url=page.url,
+                final_url=state["url"],
                 status=status,
                 ok=status is not None and 200 <= status < 400,
                 headers=headers,
                 text=text,
-                title=title,
+                title=state["title"],
                 cookies=cookies,
-                timings={"elapsed_ms": elapsed_ms},
+                timings={"elapsed_ms": (time.perf_counter() - started) * 1000},
                 screenshot_path=screenshot_path,
                 cookie_notice_declined=declined,
                 links=links,
@@ -414,7 +395,7 @@ class WebSkrapSession:
             )
         finally:
             with CancelScope(shield=True):
-                await page.close()
+                await self.close_page(page)
 
     async def search(
         self,
@@ -426,10 +407,10 @@ class WebSkrapSession:
     ) -> SearchResult:
         """Load ``engine``'s results page for ``query`` and return its hits.
 
-        The page is loaded like a :meth:`fetch` -- same context, so the
-        session's proxy, consent dismissal and persistent profile apply
-        unchanged -- and parsed by :mod:`webskrap.search`. Nothing is retried:
-        an engine that serves a challenge page is reported, not argued with.
+        The page is loaded like a :meth:`fetch` -- same session, so its proxy,
+        consent dismissal and persistent profile apply unchanged -- and parsed
+        by :mod:`webskrap.search`. Nothing is retried: an engine that serves a
+        challenge page is reported, not argued with.
 
         Args:
             query: Words to search for; surrounding whitespace is ignored.
@@ -449,25 +430,24 @@ class WebSkrapSession:
         self._ensure_open()
         url = search_url(engine, query)
         started = time.perf_counter()
-        timeout = timeout_ms or self.config.navigation_timeout_ms
-        page = await self.context.new_page()
+        timeout_s = (timeout_ms or self.config.navigation_timeout_ms) / 1000
+        page = await self.new_page()
         try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            response = await page.goto(url, wait_until="domcontentloaded", timeout_s=timeout_s)
             # Bing answers a cookie-less session with a head-only interstitial
             # whose script navigates to the real page, and reading at
             # DOMContentLoaded can catch it. Every results, no-results or
             # challenge page renders something in the body, so wait for that;
             # the wait survives the interstitial's navigation.
-            await page.wait_for_selector("body > *", state="attached", timeout=timeout)
+            await _wait_attached(page, "body > *", timeout_s=timeout_s)
             declined = await self._decline_after_navigation(page, "domcontentloaded")
-            html = await page.content()
-            final_url = page.url
+            html = await page.evaluate(_CONTENT_SCRIPT)
+            final_url = (await page.evaluate(_STATE_SCRIPT))["url"]
         finally:
             with CancelScope(shield=True):
-                await page.close()
+                await self.close_page(page)
         hits = parse_results(engine, html)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        status = response.status if response else None
+        status = _status(response)
         return SearchResult(
             query=query,
             engine=engine,
@@ -477,12 +457,30 @@ class WebSkrapSession:
             ok=status is not None and 200 <= status < 400,
             hits=hits[: max(0, max_results)],
             hits_total=len(hits),
-            timings={"elapsed_ms": elapsed_ms},
+            timings={"elapsed_ms": (time.perf_counter() - started) * 1000},
             cookie_notice_declined=declined,
         )
 
+    async def cookies(self) -> list[dict[str, Any]]:
+        """Return every cookie in the session, in Playwright's cookie shape."""
+        self._ensure_open()
+        result = await self.browser.connection.send("Storage.getCookies")
+        return [
+            {
+                "name": cookie["name"],
+                "value": cookie["value"],
+                "domain": cookie["domain"],
+                "path": cookie["path"],
+                "expires": -1 if cookie.get("session") else cookie.get("expires", -1),
+                "httpOnly": cookie.get("httpOnly", False),
+                "secure": cookie.get("secure", False),
+                "sameSite": cookie.get("sameSite", "Lax"),
+            }
+            for cookie in result.get("cookies", [])
+        ]
+
     async def _decline_after_navigation(
-        self, page: Page, wait_until: WaitUntil, *, decline_cookies: bool | None = None
+        self, page: CDPPage, wait_until: WaitUntil, *, decline_cookies: bool | None = None
     ) -> str | None:
         """Dismiss a consent notice once ``page`` has navigated, if configured."""
         enabled = self.config.decline_cookies if decline_cookies is None else decline_cookies
@@ -494,7 +492,9 @@ class WebSkrapSession:
             budget = min(budget, SETTLED_PAGE_TIMEOUT_MS)
         return await self.decline_cookies(page, timeout_ms=budget)
 
-    async def decline_cookies(self, page: Page, *, timeout_ms: float | None = None) -> str | None:
+    async def decline_cookies(
+        self, page: CDPPage, *, timeout_ms: float | None = None
+    ) -> str | None:
         """Click a cookie consent notice's reject control on ``page``.
 
         Called automatically by :meth:`fetch` unless
@@ -508,87 +508,74 @@ class WebSkrapSession:
 
     async def human_click(
         self,
-        page: Page,
+        page: CDPPage,
         selector: str,
         *,
         human: bool = True,
-        **click_options: Any,
+        click_count: int = 1,
+        timeout: float | None = None,
     ) -> None:
-        """Click ``selector`` along a curved, variable-speed cursor path.
+        """Click ``selector`` (CSS or snapshot ref) along a human cursor path.
 
-        Playwright's own click teleports the cursor and moves in evenly spaced
-        steps, which behavioral detectors read as automation. This drives the
-        real mouse along an eased Bezier curve with jitter and pauses instead.
-        It is slower than ``page.click`` by design; use ``human=False`` to fall
-        straight through to Playwright when the timing does not matter.
+        The cursor moves on an eased Bezier curve with jitter and pauses, the
+        button is held as long as a person holds it, and a covered element is
+        refused. ``human=False`` clicks at the element's center at once.
 
         Args:
-            page: Page to click on; must belong to this session's context.
-            selector: Playwright selector for the target element.
-            human: Use the humanized path. False delegates to ``page.click``.
-            **click_options: Playwright click options. ``position``, ``timeout``,
-                ``strict``, ``trial``, ``modifiers``, ``button``, ``click_count``
-                and ``delay`` are honored; other options apply only when
-                ``human=False``.
+            page: Page from :meth:`new_page`.
+            selector: CSS selector or snapshot ref (``e12``) of one element.
+            human: Use the humanized path.
+            click_count: 1 for a click, 2 for a double-click.
+            timeout: Milliseconds to wait for the element; the page default
+                when None.
 
         Raises:
-            WebSkrapError: If the session is closed, ``strict`` was requested
-                and the selector is ambiguous, or the element has no visible
-                bounding box.
+            WebSkrapError: If the session is closed, the selector matches more
+                than one element or the element is covered (``usage``), or it
+                does not become visible and enabled in time (``timeout``).
         """
         self._ensure_open()
-        if not human:
-            await page.click(selector, **click_options)
-            return
-        await humanize.click(page, page.locator(selector), description=selector, **click_options)
+        if click_count not in (1, 2):
+            raise WebSkrapError("click_count must be 1 or 2", code=ErrorCode.USAGE)
+        with _PageTimeout(page, timeout):
+            if human:
+                action = "dblclick" if click_count == 2 else "click"
+                await cdp_dom.element_action(page, action, selector, [])
+            else:
+                await cdp_dom.instant_click(page, selector, click_count=click_count)
 
-    async def human_type(self, page: Page, selector: str, text: str, **options: Any) -> None:
+    async def human_type(
+        self, page: CDPPage, selector: str, text: str, *, timeout: float | None = None
+    ) -> None:
         """Click into ``selector`` and type ``text`` with human keystroke timing.
 
-        The counterpart of :meth:`human_click` for keyboard input; see
-        :func:`webskrap.human.type_text`. ``timeout`` is honored.
+        Keys are held 30 to 90 ms and spaced 40 to 160 ms, with an occasional
+        longer pause. ``timeout`` is in milliseconds, as for :meth:`human_click`.
 
         Raises:
-            WebSkrapError: If the session is closed or the field has no
-                visible bounding box.
+            WebSkrapError: If the session is closed or the field cannot be
+                reached; see :meth:`human_click`.
         """
         self._ensure_open()
-        await humanize.type_text(
-            page,
-            page.locator(selector),
-            text,
-            description=selector,
-            timeout=options.get("timeout"),
-        )
+        with _PageTimeout(page, timeout):
+            await cdp_dom.element_action(page, "type", selector, [text])
 
     async def close(self) -> None:
-        """Close the context, its browser, temp profile and virtual display.
+        """Close the browser, its temporary profile, and the virtual display.
 
         Idempotent; safe to call after a failed fetch.
         """
         if self._closed:
             return
+        self._closed = True
         # MCP cancellation is level-triggered; cleanup must survive every checkpoint.
         with CancelScope(shield=True):
             try:
-                await self.context.close()
+                await self.browser.close()
             finally:
-                try:
-                    if self.browser is not None:
-                        await self.browser.close()
-                finally:
-                    if self._temp_user_data_dir is not None:
-                        try:
-                            await asyncio.to_thread(shutil.rmtree, self._temp_user_data_dir)
-                        except OSError:
-                            logger.debug(
-                                "could not remove temp profile %s", self._temp_user_data_dir
-                            )
-                        self._temp_user_data_dir = None
-                    if self._display is not None:
-                        await self._display.stop()
-                        self._display = None
-                    self._closed = True
+                if self._display is not None:
+                    await self._display.stop()
+                    self._display = None
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -596,13 +583,32 @@ class WebSkrapSession:
             raise WebSkrapError(msg)
 
 
+class _PageTimeout:
+    """Temporarily set ``page.default_timeout_s`` from a millisecond value."""
+
+    def __init__(self, page: CDPPage, timeout_ms: float | None) -> None:
+        self.page = page
+        self.timeout_ms = timeout_ms
+        self.previous = page.default_timeout_s
+
+    def __enter__(self) -> None:
+        if self.timeout_ms is not None:
+            self.page.default_timeout_s = self.timeout_ms / 1000
+
+    def __exit__(self, *_: object) -> None:
+        self.page.default_timeout_s = self.previous
+
+
+def _status(response: dict[str, Any]) -> int | None:
+    status = response.get("status")
+    return int(status) if isinstance(status, int | float) else None
+
+
 class WebSkrapClient:
-    """Owns a browser driver and the sessions started from it.
+    """Hands out sessions and closes them all on exit.
 
     Use it as an async context manager; :meth:`close` shuts down every session
-    it created and then the driver, so a leaked browser process cannot outlive
-    the block. One client speaks to one driver: mixing ``playwright`` and
-    ``patchright`` sessions requires two clients.
+    it created, so a leaked browser process cannot outlive the block.
 
     Args:
         default_config: Config used when a call passes none.
@@ -622,25 +628,22 @@ class WebSkrapClient:
     ) -> None:
         """Configure the client without starting anything.
 
-        The browser driver launches lazily on the first :meth:`fetch` or
-        :meth:`session` call, so constructing a client is cheap and cannot fail
-        just because no browser is installed yet.
+        A browser launches on the first :meth:`fetch` or :meth:`session` call,
+        so constructing a client is cheap and cannot fail just because no
+        browser is installed yet.
         """
         self.default_config = default_config or SessionConfig()
         self.profiles = dict(profiles or {})
-        self._playwright: Any | None = None
-        self._driver: str | None = None
-        self._start_lock = asyncio.Lock()
         self._close_lock = asyncio.Lock()
         self._closing = False
         self._generation = 0
         self._session_tasks: dict[str, asyncio.Task[WebSkrapSession]] = {}
         self._sessions: dict[str, WebSkrapSession] = {}
-        self._ua_cache: dict[tuple[str, str | None, bool], str] = {}
+        self._ua_cache: dict[tuple[str, bool], str] = {}
         self._ua_lock = asyncio.Lock()
 
     async def __aenter__(self) -> WebSkrapClient:
-        """Enter the client; the driver still starts on first use, not here."""
+        """Enter the client; browsers still start on first use, not here."""
         return self
 
     async def __aexit__(
@@ -649,53 +652,11 @@ class WebSkrapClient:
         _exc: object,
         _traceback: object,
     ) -> None:
-        """Close every session this client opened, then stop the driver."""
+        """Close every session this client opened."""
         await self.close()
 
-    async def start(
-        self,
-        driver: str | None = None,
-        *,
-        _generation: int | None = None,
-    ) -> None:
-        """Start the browser driver if it is not running yet.
-
-        Called for you by :meth:`session` and :meth:`fetch`. Concurrent callers
-        share one driver, and starting twice is a no-op.
-
-        Args:
-            driver: ``playwright`` or ``patchright``; defaults to the config's.
-            _generation: Internal close-race guard.
-
-        Raises:
-            WebSkrapError: If the client is closing, or a different driver is
-                already running.
-        """
-        selected_driver = driver or self.default_config.driver
-        async with self._start_lock:
-            if self._closing or (_generation is not None and _generation != self._generation):
-                msg = "client is closing"
-                raise WebSkrapError(msg)
-            if self._playwright is not None:
-                if selected_driver != self._driver:
-                    msg = (
-                        f"client already started with driver='{self._driver}'; "
-                        f"cannot use driver='{selected_driver}'"
-                    )
-                    raise WebSkrapError(msg)
-                return
-            manager = _async_playwright(selected_driver)
-            playwright = await manager.start()
-            if self._closing or (_generation is not None and _generation != self._generation):
-                with suppress(Exception):
-                    await playwright.stop()
-                msg = "client closed while the browser driver was starting"
-                raise WebSkrapError(msg)
-            self._playwright = playwright
-            self._driver = selected_driver
-
     async def close(self) -> None:
-        """Close every session, then stop the driver.
+        """Close every session.
 
         Waits for sessions that are still starting so none escape shutdown. If
         several sessions fail to close, the first failure is raised after the
@@ -720,14 +681,7 @@ class WebSkrapClient:
                 )
                 self._sessions.clear()
                 self._session_tasks.clear()
-                async with self._start_lock:
-                    try:
-                        if self._playwright is not None:
-                            await self._playwright.stop()
-                    finally:
-                        self._playwright = None
-                        self._driver = None
-                        self._ua_cache.clear()
+                self._ua_cache.clear()
             finally:
                 self._closing = False
         if error := next((result for result in results if isinstance(result, BaseException)), None):
@@ -758,7 +712,7 @@ class WebSkrapClient:
             profile: Profile name, :class:`~webskrap.models.BrowserProfile`, or
                 None for the default.
             config: Session config; defaults to ``default_config``.
-            wait_until: Playwright load state to wait for.
+            wait_until: Load state to wait for.
             screenshot: True or a path to write a full-page PNG.
             timeout_ms: Navigation timeout override.
             text_only: Return visible body text instead of page HTML.
@@ -868,7 +822,6 @@ class WebSkrapClient:
 
         generation = self._generation
         resolved_config = config or self.default_config
-        await self.start(resolved_config.driver, _generation=generation)
         task = self._session_tasks.get(name)
         if task is None:
             resolved_profile = self._resolve_profile(profile)
@@ -916,7 +869,7 @@ class WebSkrapClient:
             try:
                 session = await asyncio.shield(task)
             except Exception:
-                # Failed launches leave no context to release.
+                # Failed launches leave no browser to release.
                 return False
         else:
             session = self._sessions.get(name)
@@ -933,133 +886,98 @@ class WebSkrapClient:
         config: SessionConfig,
         profile: BrowserProfile,
     ) -> WebSkrapSession:
-        if self._playwright is None:
-            msg = "client is not started"
-            raise WebSkrapError(msg)
-
-        browser_type = getattr(self._playwright, config.browser)
-        context_options = config.context_options(profile)
         try:
-            launch_options = config.launch_options(profile)
+            args = config.browser_args(profile)
+            env = config.browser_env(profile)
         except ValueError as exc:
             raise WebSkrapError(str(exc), code=ErrorCode.USAGE) from exc
-
+        # A persistent profile already carries its own state.
+        state = None
+        if config.storage_state is not None and config.user_data_dir is None:
+            state = cdp_setup.load_storage_state(config.storage_state)
+        executable = find_executable(config.channel)
         if (
             config.mask_headless_user_agent
-            and config.headless
-            and not config.virtual_display
-            and config.browser == "chromium"
-            and not any(a.startswith("--user-agent") for a in config.launch_args)
+            and config.launch_headless
+            and not any(a.startswith("--user-agent") for a in args)
         ):
-            clean_ua = await self._headless_clean_user_agent(browser_type, config)
+            clean_ua = await self._headless_clean_user_agent(executable, config)
             if clean_ua:
-                # Apply the clean UA via the launch flag only. It covers the
-                # page, every worker (including SharedWorker, a separate process)
-                # and request headers process-wide. A per-context user_agent
-                # override is intentionally avoided: it makes patchright inject a
-                # CDP UA override into every frame/worker, which stalls
-                # reCAPTCHA's worker init under some event loops.
-                args = list(launch_options.get("args", []))
-                if not any(a.startswith("--user-agent") for a in args):
-                    args.append(f"--user-agent={clean_ua}")
-                launch_options["args"] = args
+                # Applied via the launch flag only. It covers the page, every
+                # worker (including SharedWorker, a separate process) and
+                # request headers process-wide; a per-page CDP override does
+                # not reach workers.
+                args.append(f"--user-agent={clean_ua}")
 
-        # patchright's stealth is only fully effective in a persistent context, so
-        # fall back to a throwaway temp profile when the caller did not supply one.
-        temp_user_data_dir: str | None = None
-        user_data_dir = config.user_data_dir
-        if user_data_dir is None and config.driver == "patchright":
-            temp_user_data_dir = tempfile.mkdtemp(prefix="webskrap-patchright-")
-            user_data_dir = Path(temp_user_data_dir)
-
-        browser = None
-        context = None
         display = None
+        browser = None
         try:
-            if config.gpu is GpuBackend.MESA and config.browser == "chromium":
-                _require_lavapipe()
+            if config.gpu is GpuBackend.MESA:
+                require_lavapipe()
             if config.uses_virtual_display():
                 screen = config.virtual_screen()
                 display = await VirtualDisplay.start(screen.width, screen.height)
-                # Playwright replaces the browser environment when env is set.
-                launch_options["env"] = {**launch_options.get("env", os.environ), **display.env}
-            if user_data_dir is not None:
-                user_data_dir.mkdir(parents=True, exist_ok=True)
-                context = await browser_type.launch_persistent_context(
-                    str(user_data_dir),
-                    **launch_options,
-                    **context_options,
-                )
-            else:
-                browser = await browser_type.launch(**launch_options)
-                context = await browser.new_context(**context_options)
-
-            context.set_default_timeout(config.default_timeout_ms)
-            context.set_default_navigation_timeout(config.navigation_timeout_ms)
-
-            if config.resource_policy != ResourcePolicy.ALL:
-                await context.route("**/*", _resource_route_handler(config.resource_policy))
+                env = {**(env or os.environ), **display.env}
+            if config.user_data_dir is not None:
+                config.user_data_dir.mkdir(parents=True, exist_ok=True)
+            browser = await launch(
+                executable,
+                args=args,
+                headless=config.launch_headless,
+                user_data_dir=config.user_data_dir,
+                env=env,
+                timeout_s=config.timeout_ms / 1000,
+            )
+            browser.connection.default_timeout_s = config.default_timeout_ms / 1000
+            if state is not None:
+                await cdp_setup.apply_storage_state(browser, state)
         except BaseException:
-            if context is not None:
-                with suppress(Exception):
-                    await context.close()
-            if browser is not None:
-                with suppress(Exception):
-                    await browser.close()
-            if display is not None:
-                await display.stop()
-            if temp_user_data_dir is not None:
-                try:
-                    await asyncio.to_thread(shutil.rmtree, temp_user_data_dir)
-                except OSError:
-                    logger.debug("could not remove temp profile %s", temp_user_data_dir)
+            with CancelScope(shield=True):
+                if browser is not None:
+                    with suppress(Exception):
+                        await browser.close()
+                if display is not None:
+                    await display.stop()
             raise
         return WebSkrapSession(
-            name=name,
-            context=context,
-            config=config,
-            profile=profile,
-            browser=browser,
-            temp_user_data_dir=temp_user_data_dir,
-            display=display,
+            name=name, browser=browser, config=config, profile=profile, display=display
         )
 
     async def _headless_clean_user_agent(
-        self, browser_type: Any, config: SessionConfig
+        self, executable: Path, config: SessionConfig
     ) -> str | None:
-        # Concurrent sessions share one successful probe per executable/channel.
+        # Concurrent sessions share one successful probe per executable.
         # Failures are not cached, so installing a browser can recover in place.
-        key = (config.browser, config.channel, config.chromium_sandbox)
+        key = (str(executable), config.chromium_sandbox)
         async with self._ua_lock:
             if key in self._ua_cache:
                 return self._ua_cache[key]
-            ua = await self._probe_headless_user_agent(browser_type, config)
+            ua = await _probe_headless_user_agent(executable, config)
             if ua is not None:
                 self._ua_cache[key] = ua
             return ua
 
-    async def _probe_headless_user_agent(
-        self, browser_type: Any, config: SessionConfig
-    ) -> str | None:
-        # Probe the real headless UA in a throwaway browser, then rewrite the
-        # "HeadlessChrome" token to "Chrome". Returns None if the probe fails or
-        # the UA has no headless tell, leaving the native UA untouched.
-        launch_options = config.launch_options()
-        launch_options.pop("args", None)
-        try:
-            browser = await browser_type.launch(**launch_options)
-        except Exception:  # noqa: BLE001 - probe is best-effort
-            return None
-        try:
-            page = await browser.new_page()
-            ua = await page.evaluate("() => navigator.userAgent")
-        except Exception:  # noqa: BLE001 - probe is best-effort
-            return None
-        finally:
-            await browser.close()
-        if not isinstance(ua, str) or "HeadlessChrome" not in ua:
-            return None
-        return ua.replace("HeadlessChrome", "Chrome")
+
+async def _probe_headless_user_agent(executable: Path, config: SessionConfig) -> str | None:
+    """Read the real headless UA and rewrite its ``HeadlessChrome`` token.
+
+    Returns None if the probe fails or the UA has no headless tell, leaving
+    the native UA untouched.
+    """
+    args = [] if config.chromium_sandbox else ["--no-sandbox"]
+    try:
+        browser = await launch(executable, args=args, headless=True)
+    except Exception:  # noqa: BLE001 - probe is best-effort
+        return None
+    try:
+        ua = (await browser.connection.send("Browser.getVersion")).get("userAgent")
+    except Exception:  # noqa: BLE001 - probe is best-effort
+        return None
+    finally:
+        await browser.close()
+    if not isinstance(ua, str) or "HeadlessChrome" not in ua:
+        return None
+    return ua.replace("HeadlessChrome", "Chrome")
 
 
 #: Where the Vulkan loader looks for driver manifests on Linux.
@@ -1082,9 +1000,12 @@ def lavapipe_available() -> bool:
     )
 
 
-def _require_lavapipe() -> None:
-    # Without the driver Chromium does not fall back: WebGL just disappears,
-    # which is not what a caller asking for Mesa wanted.
+def require_lavapipe() -> None:
+    """Raise ``browser_launch`` unless Mesa's lavapipe driver is installed.
+
+    Without the driver Chromium does not fall back: WebGL just disappears,
+    which is not what a caller asking for Mesa wanted.
+    """
     if not lavapipe_available():
         msg = (
             "gpu='mesa' needs Linux with Mesa's lavapipe Vulkan driver. "
@@ -1093,38 +1014,53 @@ def _require_lavapipe() -> None:
         raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
 
-def _resource_route_handler(policy: ResourcePolicy):
-    blocked = {
-        ResourcePolicy.LITE: {"image", "font", "media"},
-        ResourcePolicy.DOCUMENTS: {"image", "font", "media", "stylesheet"},
-    }[policy]
+async def _wait_visible(
+    page: CDPPage, target: str, *, timeout_s: float, headers: dict[str, str]
+) -> None:
+    """Wait for ``target`` (CSS or ref) to be visible; check for a challenge on timeout."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        with suppress(CDPError):  # a navigation destroyed the world mid-call
+            if await cdp_dom.element_state(page, target) == "visible":
+                return
+        if time.monotonic() >= deadline:
+            # A challenge can replace the page while readiness is pending.
+            await raise_for_challenge(page, headers)
+            msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {target} to be visible"
+            raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
+        await asyncio.sleep(_POLL_S)
 
-    async def handle(route) -> None:
-        if route.request.resource_type in blocked:
-            await route.abort()
-        else:
-            await route.continue_()
 
-    return handle
+async def _wait_attached(page: CDPPage, selector: str, *, timeout_s: float) -> None:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        with suppress(CDPError):  # a navigation destroyed the world mid-call
+            if await cdp_dom.element_state(page, selector) != "detached":
+                return
+        if time.monotonic() >= deadline:
+            msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {selector}"
+            raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
+        await asyncio.sleep(_POLL_S)
 
 
-async def _maybe_screenshot(page: Page, screenshot: bool | str | Path) -> Path | None:
+async def _maybe_screenshot(page: CDPPage, screenshot: bool | str | Path) -> Path | None:
     if not screenshot:
         return None
     path = Path(f"webskrap-{uuid4().hex}.png") if screenshot is True else Path(screenshot)
     path.parent.mkdir(parents=True, exist_ok=True)
-    await page.screenshot(path=str(path), full_page=True)
+    image = await page.screenshot(full_page=True)
+    await asyncio.to_thread(path.write_bytes, image)
     return path
 
 
-async def _collect_links(page: Page, max_links: int | None) -> tuple[list[Link], int]:
+async def _collect_links(page: CDPPage, max_links: int | None) -> tuple[list[Link], int]:
     """Return ``page``'s outbound links and how many there were before the cap.
 
     ``max_links`` of None means the caller did not ask for links, or JavaScript
-    is disabled for this session and the script could not run; both return an
-    empty list and a zero total rather than failing the fetch.
+    is disabled for this session; both return an empty list and a zero total
+    rather than failing the fetch.
     """
     if max_links is None:
         return [], 0
-    collected = await page.evaluate(_LINKS_SCRIPT, max_links)
+    collected = await page.evaluate(LINKS_SCRIPT, max_links)
     return [Link(**link) for link in collected["links"]], int(collected["total"])

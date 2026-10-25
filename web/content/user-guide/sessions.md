@@ -1,6 +1,6 @@
 ---
 title: Persistent Browser Sessions for Web Scraping
-description: Reuse cookies, local storage, browser profiles, and Playwright contexts across Python web scraping sessions.
+description: Reuse cookies, local storage, and browser profiles across Python web scraping sessions.
 ---
 
 # Sessions
@@ -62,14 +62,15 @@ Set `user_data_dir` to keep cookies, local storage, and browser profile state be
 config = SessionConfig(user_data_dir=Path(".webskrap/profile"))
 ```
 
-Use `storage_state` for a Playwright-style cookie/local-storage snapshot when
+Use `storage_state` for a cookie and local-storage snapshot (Playwright's
+format) when
 you do not need a full persistent browser profile:
 
 ```python
 config = SessionConfig(storage_state="state.json")
 ```
 
-`storage_state` is applied only for non-persistent contexts. If
+`storage_state` is applied only for sessions without a persistent profile. If
 `user_data_dir` is set, the persistent profile directory owns browser state.
 
 Both hold real credentials: cookies, local storage, and any logged-in session
@@ -93,13 +94,12 @@ async def main() -> None:
     config = SessionConfig(
         headless=False,
         user_data_dir=Path(".webskrap/debug"),
-        slow_mo_ms=50,
     )
 
     async with WebSkrapClient() as client:
         session = await client.session("debug", config=config)
-        page = await session.context.new_page()
-        await page.goto("https://example.com", wait_until="domcontentloaded")
+        page = await session.new_page()
+        await page.goto("https://example.com", wait_until="domcontentloaded", timeout_s=30)
         input("Press Enter to close browser...")
 
 
@@ -109,17 +109,17 @@ asyncio.run(main())
 ## Human-like clicks
 
 Sessions expose `human_click` for interactions that should behave more like a manual click
-than a direct Playwright `page.click`.
+than a mechanical click at the element's center.
 
 ```python
 async with WebSkrapClient() as client:
     session = await client.session("default")
-    page = await session.context.new_page()
-    await page.goto("https://example.com", wait_until="domcontentloaded")
+    page = await session.new_page()
+    await page.goto("https://example.com", wait_until="domcontentloaded", timeout_s=30)
     await session.human_click(page, "label[for='radio1']")
 ```
 
-Pass `human=False` to use the same helper while delegating directly to Playwright.
+Pass `human=False` to click the element's center at once, with the same checks.
 
 ```python
 await session.human_click(page, "label[for='radio1']", human=False, timeout=5_000)

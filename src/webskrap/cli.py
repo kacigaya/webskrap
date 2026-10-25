@@ -10,11 +10,9 @@ non-zero exit code.
 from __future__ import annotations
 
 import asyncio
-import subprocess  # nosec B404  # noqa: S404 - fixed argv for browser installs, no shell
-import sys
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, Protocol, TypedDict, TypeVar
+from typing import Annotated, Any, NoReturn, Protocol, TypeVar
 
 import typer
 from rich.console import Console
@@ -40,6 +38,7 @@ from webskrap.errors import (
     is_launch_failure,
     is_sandbox_failure,
 )
+from webskrap.install import install as install_browser
 from webskrap.models import (
     FetchResult,
     GpuBackend,
@@ -51,6 +50,7 @@ from webskrap.models import (
     shape_search_result,
 )
 from webskrap.parsing import (
+    parse_profile_mode,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
@@ -63,38 +63,31 @@ console = Console()
 T = TypeVar("T")
 
 
-class InstallResult(TypedDict):
-    """Outcome of one browser-install step."""
-
-    ok: bool
-    command: list[str]
-    message: str
-
-
-INSTALL_COMMANDS = (
-    (sys.executable, "-m", "playwright", "install", "chromium"),
-    (sys.executable, "-m", "patchright", "install", "chromium"),
-)
-
-
 @app.command("install")
 def install_command(
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Download again even when this version is installed."),
+    ] = False,
     format: Annotated[
         str,
         typer.Option("--format", help="Output format: human or json."),
     ] = "human",
 ) -> None:
-    """Download the Chromium builds Playwright and Patchright need."""
+    """Download Chrome for Testing, the browser WebSkrap drives by default."""
     output_format = parse_output_format(format)
-    results = [_run_install_command(command) for command in INSTALL_COMMANDS]
-    ok = all(result["ok"] for result in results)
-    payload = {"ok": ok, "steps": results}
+    try:
+        result = install_browser(force=force)
+    except WebSkrapError as exc:
+        fail(exc, output_format)
     if output_format == "json":
-        print_json(payload)
-    else:
-        _print_install_result(results)
-    if not ok:
-        raise typer.Exit(code=1)
+        print_json({"ok": True, **result})
+        return
+    state = "Installed" if result["installed"] else "Already installed:"
+    console.print(
+        f"[green]{state} Chrome for Testing {result['version']}[/green] ({result['platform']})"
+    )
+    console.print(f"[bold]Executable:[/bold] {result['executable']}", soft_wrap=True)
 
 
 @app.command("profiles")
@@ -174,7 +167,7 @@ def doctor_command(
         typer.Option("--format", help="Output format: human or json."),
     ] = "human",
 ) -> None:
-    """Check that Patchright and Chromium are installed and can launch."""
+    """Check that Chromium is installed and can launch."""
     output_format = parse_output_format(format)
     result = asyncio.run(_doctor())
     if output_format == "json":
@@ -197,12 +190,14 @@ def fetch_command(
         typer.Option(
             "--profile",
             "-p",
-            help="Bundled profile metadata (requires --patchright-context-profile).",
+            help="Bundled profile; --profile-mode decides how much of it pages see.",
         ),
     ] = "desktop-chrome",
     channel: Annotated[
         str | None,
-        typer.Option("--channel", help="Browser channel for headless Patchright stealth."),
+        typer.Option(
+            "--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."
+        ),
     ] = "chrome",
     user_data_dir: Annotated[
         Path | None,
@@ -258,7 +253,7 @@ def fetch_command(
     ] = "domcontentloaded",
     ready_selector: Annotated[
         str | None,
-        typer.Option("--ready-selector", help="Wait for this Playwright selector to be visible."),
+        typer.Option("--ready-selector", help="Wait for this CSS selector or ref to be visible."),
     ] = None,
     timeout_ms: Annotated[
         float,
@@ -283,13 +278,16 @@ def fetch_command(
             help="How long to wait for a cookie consent notice to appear.",
         ),
     ] = 2_000,
-    patchright_context_profile: Annotated[
-        bool,
+    profile_mode: Annotated[
+        str,
         typer.Option(
-            "--patchright-context-profile",
-            help="Apply locale/timezone/media profile metadata in Patchright contexts.",
+            "--profile-mode",
+            help=(
+                "How much of --profile pages see: native (none, the default), locale "
+                "(locale, timezone, media, headers) or full (also viewport and user agent)."
+            ),
         ),
-    ] = False,
+    ] = "native",
     reduce_fingerprint_surface: Annotated[
         bool,
         typer.Option(
@@ -353,7 +351,7 @@ def fetch_command(
         ),
     ] = None,
 ) -> None:
-    """Fetch a URL with the Patchright stealth driver and report the result."""
+    """Fetch a URL in headless Chromium and report the result."""
     asyncio.run(
         _fetch(
             url=url,
@@ -376,7 +374,7 @@ def fetch_command(
             resource_policy=resource_policy,
             decline_cookies=decline_cookies,
             decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-            patchright_context_profile=patchright_context_profile,
+            profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
@@ -411,7 +409,7 @@ async def _fetch(
     resource_policy: ResourcePolicy,
     decline_cookies: bool,
     decline_cookies_timeout_ms: float,
-    patchright_context_profile: bool,
+    profile_mode: str,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     virtual_display: bool,
@@ -424,7 +422,6 @@ async def _fetch(
     parsed_output_format = parse_output_format(output_format)
     selected_profile = get_profile(profile)
     config = SessionConfig(
-        driver="patchright",
         headless=True,
         channel=channel,
         chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
@@ -433,7 +430,7 @@ async def _fetch(
         resource_policy=resource_policy,
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-        patchright_context_profile=patchright_context_profile,
+        profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
@@ -512,12 +509,14 @@ def search_command(
         typer.Option(
             "--profile",
             "-p",
-            help="Bundled profile metadata (requires --patchright-context-profile).",
+            help="Bundled profile; --profile-mode decides how much of it pages see.",
         ),
     ] = "desktop-chrome",
     channel: Annotated[
         str | None,
-        typer.Option("--channel", help="Browser channel for headless Patchright stealth."),
+        typer.Option(
+            "--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."
+        ),
     ] = "chrome",
     user_data_dir: Annotated[
         Path | None,
@@ -550,13 +549,16 @@ def search_command(
             help="How long to wait for a cookie consent notice to appear.",
         ),
     ] = 2_000,
-    patchright_context_profile: Annotated[
-        bool,
+    profile_mode: Annotated[
+        str,
         typer.Option(
-            "--patchright-context-profile",
-            help="Apply locale/timezone/media profile metadata in Patchright contexts.",
+            "--profile-mode",
+            help=(
+                "How much of --profile pages see: native (none, the default), locale "
+                "(locale, timezone, media, headers) or full (also viewport and user agent)."
+            ),
         ),
-    ] = False,
+    ] = "native",
     reduce_fingerprint_surface: Annotated[
         bool,
         typer.Option(
@@ -640,7 +642,7 @@ def search_command(
             resource_policy=resource_policy,
             decline_cookies=decline_cookies,
             decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-            patchright_context_profile=patchright_context_profile,
+            profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
@@ -666,7 +668,7 @@ async def _search(
     resource_policy: ResourcePolicy,
     decline_cookies: bool,
     decline_cookies_timeout_ms: float,
-    patchright_context_profile: bool,
+    profile_mode: str,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
     virtual_display: bool,
@@ -678,7 +680,6 @@ async def _search(
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
     config = SessionConfig(
-        driver="patchright",
         headless=True,
         channel=channel,
         chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
@@ -687,7 +688,7 @@ async def _search(
         resource_policy=resource_policy,
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-        patchright_context_profile=patchright_context_profile,
+        profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
@@ -738,8 +739,8 @@ async def _search(
 def _fail_launch(exc: Exception, output_format: OutputFormat) -> NoReturn:
     """Report an unlaunchable browser the way `doctor` does, not as a traceback."""
     if is_sandbox_failure(exc):
-        # Playwright's first line only says the browser closed; the cause is
-        # in the browser log below it.
+        # The first line only says the browser closed; the cause is in the
+        # browser log below it.
         message = "Browser did not launch: Chromium's OS sandbox could not start"
         fail(WebSkrapError(message, code=ErrorCode.SANDBOX), output_format)
     message = f"Browser did not launch: {first_line(exc)}"
@@ -784,44 +785,12 @@ async def _fetch_with_channel_fallback(
     )
 
 
-def _run_install_command(command: tuple[str, ...]) -> InstallResult:
-    try:
-        # argv is one of the INSTALL_COMMANDS constants, built from
-        # sys.executable. No shell, and no caller-supplied argument.
-        completed = subprocess.run(  # nosec B603  # noqa: S603
-            command, capture_output=True, text=True, check=False
-        )
-    except OSError as exc:
-        return {
-            "ok": False,
-            "command": list(command),
-            "message": str(exc),
-        }
-    output = (completed.stdout or completed.stderr).strip()
-    return {
-        "ok": completed.returncode == 0,
-        "command": list(command),
-        "message": output,
-    }
-
-
-def _print_install_result(results: list[InstallResult]) -> None:
-    for result in results:
-        command = " ".join(str(part) for part in result["command"])
-        if result["ok"]:
-            console.print(f"[green]OK:[/green] {command}")
-        else:
-            console.print(f"[red]FAILED:[/red] {command}")
-        if result["message"]:
-            console.print(str(result["message"]))
-
-
 def _print_doctor_result(result: dict[str, Any]) -> None:
     message = str(result["message"])
     if result["ok"]:
         console.print(f"[green]{message}[/green]")
     else:
-        console.print("[yellow]Patchright is unavailable.[/yellow]")
+        console.print("[yellow]Chromium is unavailable.[/yellow]")
         console.print(message)
         if hint := result.get("hint"):
             console.print(str(hint))

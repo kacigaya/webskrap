@@ -25,8 +25,8 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The Python API defaults to Playwright. Opt into Patchright through
-`SessionConfig`:
+WebSkrap 3 drives Chromium through its own CDP client. There is no driver to
+choose. Pick the browser with `channel` (`chrome`, `msedge`, `chromium`):
 
 ```python
 from pathlib import Path
@@ -34,17 +34,42 @@ from pathlib import Path
 from webskrap import SessionConfig
 
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
     user_data_dir=Path(".webskrap/headless-profile"),
 )
 ```
 
+`channel=None` or `"chromium"` uses the Chrome for Testing build from
+`webskrap install`.
+
+## Pages you drive yourself
+
+`session.new_page()` returns a `webskrap.cdp.CDPPage` with the session's
+profile and policies applied. Close it with `session.close_page(page)`.
+
+```python
+async with WebSkrapClient() as client:
+    session = await client.session("manual")
+    page = await session.new_page()
+    response = await page.goto("https://example.com", wait_until="load", timeout_s=30)
+    title = await page.evaluate("document.title")
+    await session.human_click(page, "a")
+    await session.close_page(page)
+```
+
+- `page.goto()` returns the CDP `Response` object, for example `status` and
+  `headers`.
+- `page.evaluate()` runs in an isolated world. It shares the DOM with the page
+  but not the page's JavaScript globals.
+- `session.human_click()` and `session.human_type()` take a CSS selector or a
+  snapshot ref.
+- `page.send(method, params)` sends any other CDP command to the page.
+
 ## Consent and links
 
 `client.fetch()` and `session.fetch()` accept `ready_selector`, an optional
-Playwright selector that must become visible after consent dismissal and before
+CSS selector or snapshot ref that must become visible after consent dismissal and before
 extraction. Its wait uses `timeout_ms` or `navigation_timeout_ms` separately from
 navigation. A missing selector raises a timeout. A blank selector is a usage error.
 
@@ -92,11 +117,10 @@ A bot challenge raises `WebSkrapError` with code `blocked`; nothing is retried.
 
 ## Detection-sensitive pages
 
-Headed Patchright is the strongest available mode for strict detection
-surfaces:
+Headed Chrome is the strongest available mode for strict detection surfaces:
 
 ```python
-config = SessionConfig(driver="patchright", channel="chrome", headless=False)
+config = SessionConfig(channel="chrome", headless=False)
 ```
 
 For fingerprint-statistics or WebRTC leak-test pages, prefer native browser
@@ -104,12 +128,19 @@ controls over JavaScript patches:
 
 ```python
 config = SessionConfig(
-    driver="patchright",
     channel="chrome",
     headless=True,
-    patchright_context_profile=True,
+    profile_mode="locale",
     reduce_fingerprint_surface=True,
     virtual_display=True,
     webrtc_ip_handling_policy="disable_non_proxied_udp",
 )
 ```
+
+`profile_mode` sets how much of the `BrowserProfile` pages see:
+
+- `"native"` (default): nothing. The browser shows its own identity.
+- `"locale"`: locale, timezone, color scheme, reduced motion and extra headers.
+  On Linux, locale and timezone come from the browser environment.
+- `"full"`: also viewport, screen, device scale, touch and user agent, as
+  WebSkrap 2.x did. Each override is a surface that a page can cross-check.

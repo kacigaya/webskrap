@@ -1,9 +1,9 @@
 """Pydantic models describing what to launch, how to browse, and what came back.
 
 :class:`BrowserProfile` is the identity presented to a site (viewport, locale,
-headers); :class:`SessionConfig` is the machinery behind it (driver, browser,
-proxy, stealth switches, timeouts). Both translate themselves into Playwright
-launch and context options, which is where their per-field comments matter.
+headers); :class:`SessionConfig` is the machinery behind it (channel, proxy,
+stealth switches, timeouts). Both translate themselves into Chromium flags and
+CDP commands, which is where their per-field comments matter.
 """
 
 from __future__ import annotations
@@ -33,6 +33,8 @@ WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 LoadState = Literal["domcontentloaded", "load", "networkidle"]
 #: Element state :func:`~webskrap.browser_session.wait_for` can wait on.
 ElementState = Literal["attached", "detached", "visible", "hidden"]
+#: How much of a BrowserProfile pages see; see :attr:`SessionConfig.profile_mode`.
+ProfileMode = Literal["native", "locale", "full"]
 
 
 class ResourcePolicy(StrEnum):
@@ -74,16 +76,13 @@ class Viewport(BaseModel):
     width: int = Field(gt=0)
     height: int = Field(gt=0)
 
-    def to_playwright(self) -> dict[str, int]:
-        """Return the ``{"width", "height"}`` mapping Playwright expects."""
-        return {"width": self.width, "height": self.height}
-
 
 class ProxyConfig(BaseModel):
     """Proxy settings for a session.
 
-    ``username``/``password`` are held in memory and handed to Playwright at
-    context creation. They are never written to disk by WebSkrap, and the
+    ``username``/``password`` are held in memory and answered to the proxy's
+    authentication challenge over CDP. They are never written to disk by
+    WebSkrap, never passed on the command line, and the
     ``repr``/``str`` of this model redact them, so avoid logging even the
     redacted form alongside the server URL where possible.
     """
@@ -99,24 +98,18 @@ class ProxyConfig(BaseModel):
         """Require a scheme Chromium accepts, so failures surface at config time.
 
         Raises:
-            ValueError: If the server has no http/https/socks4/socks5 scheme.
+            ValueError: If the server has no http/https/socks4/socks5 scheme,
+                or embeds ``user:password@``. That would put the password on
+                Chromium's command line, which other local users can read.
         """
         allowed_prefixes = ("http://", "https://", "socks4://", "socks5://")
         if not value.startswith(allowed_prefixes):
             msg = "proxy server must start with http://, https://, socks4://, or socks5://"
             raise ValueError(msg)
+        if "@" in value.split("://", 1)[1].split("/", 1)[0]:
+            msg = "proxy server must not embed user:password@; set username and password"
+            raise ValueError(msg)
         return value
-
-    def to_playwright(self) -> dict[str, str]:
-        """Return Playwright proxy options, omitting unset fields."""
-        payload = {"server": self.server}
-        if self.bypass:
-            payload["bypass"] = self.bypass
-        if self.username:
-            payload["username"] = self.username
-        if self.password:
-            payload["password"] = self.password
-        return payload
 
     def __repr__(self) -> str:
         """Return a repr with credentials redacted."""
@@ -142,11 +135,10 @@ class ProxyConfig(BaseModel):
 class BrowserProfile(BaseModel):
     """The identity a session presents: viewport, locale, timezone, headers.
 
-    Bundled profiles come from :mod:`webskrap.profiles`. Under the
-    ``patchright`` driver most of this is ignored on purpose — the point of
-    that driver is the browser's real fingerprint — unless
-    :attr:`SessionConfig.patchright_context_profile` opts back in to the parts
-    Chrome can own natively.
+    Bundled profiles come from :mod:`webskrap.profiles`. By default most of
+    this is ignored on purpose, so the browser presents its real fingerprint;
+    :attr:`SessionConfig.profile_mode` opts in to the locale parts or to all
+    of it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -223,24 +215,6 @@ class BrowserProfile(BaseModel):
         headers.update(self.extra_http_headers)
         return headers
 
-    def to_context_options(self) -> dict[str, Any]:
-        """Return this profile as Playwright ``new_context`` options."""
-        options: dict[str, Any] = {
-            "viewport": self.viewport.to_playwright(),
-            "screen": self.screen.to_playwright(),
-            "locale": self.locale,
-            "timezone_id": self.timezone_id,
-            "device_scale_factor": self.device_scale_factor,
-            "is_mobile": self.is_mobile,
-            "has_touch": self.has_touch,
-            "color_scheme": self.color_scheme,
-            "reduced_motion": self.reduced_motion,
-            "extra_http_headers": self.headers(),
-        }
-        if self.user_agent:
-            options["user_agent"] = self.user_agent
-        return options
-
 
 #: Launch-flag prefixes a caller may not pass via ``launch_args``. These weaken
 #: renderer isolation, load outside code, or open a remote-debugging socket.
@@ -278,19 +252,27 @@ SHAPED_RESPONSE_HEADERS: frozenset[str] = frozenset(
 )
 
 
-class SessionConfig(BaseModel):
-    """How a session's browser is launched and how its context behaves.
+#: SessionConfig fields removed in 3.0, with what replaces each one.
+REMOVED_CONFIG_FIELDS: dict[str, str] = {
+    "driver": "WebSkrap 3 always drives Chromium over its own CDP client",
+    "browser": "WebSkrap 3 drives Chromium only",
+    "slow_mo_ms": "add your own delays between actions",
+    "patchright_focus_control": "it was a Patchright option",
+    "patchright_context_profile": "use profile_mode='locale'",
+}
 
-    Defaults are deliberately plain: standard Playwright, headless Chromium, no
-    proxy, everything loaded, and every stealth feature off. The stealth
-    switches are documented at their fields, since each has a cost as well as a
-    benefit.
+
+class SessionConfig(BaseModel):
+    """How a session's browser is launched and how its pages behave.
+
+    Defaults are deliberately plain: headless Chromium with its native
+    identity, no proxy, everything loaded, and every stealth feature off. The
+    stealth switches are documented at their fields, since each has a cost as
+    well as a benefit.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
-    driver: Literal["playwright", "patchright"] = "playwright"
-    browser: Literal["chromium", "firefox", "webkit"] = "chromium"
     channel: str | None = None
     headless: bool = True
     # Keep Chromium's OS sandbox for one-shot fetches, matching persistent
@@ -308,7 +290,6 @@ class SessionConfig(BaseModel):
     timeout_ms: float = Field(default=30_000, gt=0)
     navigation_timeout_ms: float = Field(default=30_000, gt=0)
     default_timeout_ms: float = Field(default=30_000, gt=0)
-    slow_mo_ms: float | None = Field(default=None, ge=0)
     launch_args: list[str] = Field(default_factory=list)
     # Simulated screen for headless chromium. Headless Chrome has no physical
     # display, so screen/window metrics (screen.width, outerWidth, ...) leak as
@@ -364,16 +345,16 @@ class SessionConfig(BaseModel):
     # Chromium's default otherwise; pass "default" to keep Chromium's default
     # behind a proxy.
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None
-    # Patchright is strongest when it exposes the browser's native surfaces, so
-    # profile settings are ignored by default. This opt-in applies only browser
-    # context metadata that Chrome can own natively (locale, timezone, color
-    # scheme, reduced motion, and caller-provided extra headers) while still
-    # avoiding viewport, user-agent, and JavaScript fingerprint patches.
-    patchright_context_profile: bool = False
-    # Patchright-specific focus behavior control. Defaults to None so the option
-    # is omitted entirely; Patchright builds that lack focus_control reject it.
-    # Set True/False only when targeting a build that accepts the option.
-    patchright_focus_control: bool | None = None
+    # How much of the BrowserProfile pages see. "native" (the default)
+    # applies nothing: the browser presents its own identity, which is what
+    # detectors find hardest to fault. "locale" applies what Chrome can own
+    # natively: locale, timezone, color scheme, reduced motion and the
+    # profile's extra headers; on Linux the locale and timezone are set
+    # through the browser's environment, elsewhere through CDP emulation.
+    # "full" also emulates the viewport, screen, device scale, touch and the
+    # profile's user agent, as WebSkrap 2.x did with the Playwright driver;
+    # every override is a surface a page can cross-check.
+    profile_mode: ProfileMode = "native"
     # Click the reject control of a cookie consent notice after navigation, so
     # scraped text is not buried under a banner and no optional cookies are
     # accepted. Only applies to pages fetched through WebSkrapSession.fetch;
@@ -384,6 +365,22 @@ class SessionConfig(BaseModel):
     # misses most of them. This is the per-fetch cost on pages without a
     # notice; set 0 for a single immediate check.
     decline_cookies_timeout_ms: float = Field(default=2_000, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_fields(cls, data: Any) -> Any:
+        """Name what replaced a 2.x field, rather than a generic extra-field error.
+
+        Raises:
+            ValueError: If ``data`` sets a field listed in
+                :data:`REMOVED_CONFIG_FIELDS`.
+        """
+        if isinstance(data, dict):
+            for name, replacement in REMOVED_CONFIG_FIELDS.items():
+                if name in data:
+                    msg = f"SessionConfig.{name} was removed in WebSkrap 3.0: {replacement}"
+                    raise ValueError(msg)
+        return data
 
     @field_validator("launch_args")
     @classmethod
@@ -408,57 +405,27 @@ class SessionConfig(BaseModel):
                     raise ValueError(msg)
         return value
 
-    def launch_options(self, profile: BrowserProfile | None = None) -> dict[str, Any]:
-        """Return Playwright launch options, including assembled browser flags.
+    @property
+    def launch_headless(self) -> bool:
+        """True when Chromium runs in headless mode (not on a virtual display)."""
+        return self.headless and not self.virtual_display
+
+    def browser_args(self, profile: BrowserProfile | None = None) -> list[str]:
+        """Return the Chromium flags for this config, without the CDP channel.
 
         Caller-supplied ``launch_args`` win: a flag already present there is
         not added again by the automation, screen, WebRTC, fingerprint or
-        language helpers. Chromium keeps its OS sandbox unless
-        ``chromium_sandbox`` is False, in which case ``--no-sandbox`` is
-        appended. Given a ``profile`` that :meth:`uses_native_profile`, its
-        timezone and languages are applied here, through the browser's
-        environment and ``--accept-lang``, rather than in the context.
-
-        Raises:
-            ValueError: If a natively applied profile names an unknown
-                timezone; Chromium would report ``Etc/Unknown`` instead.
+        language helpers. ``--no-sandbox`` is added only when
+        ``chromium_sandbox`` is False. Given a ``profile`` that
+        :meth:`uses_native_profile`, its languages come from
+        ``--accept-lang``. Proxy and certificate flags are included.
         """
-        options: dict[str, Any] = {
-            # A virtual display runs the browser headed on an invisible screen.
-            "headless": self.headless and not self.virtual_display,
-            "timeout": self.timeout_ms,
-        }
-        if self.browser == "chromium":
-            # Playwright and Patchright append --no-sandbox themselves unless
-            # this is explicitly True, so leaving it out silently unsandboxed
-            # every one-shot launch.
-            options["chromium_sandbox"] = self.chromium_sandbox
-            if options["headless"]:
-                # Keep Playwright's pointer media setting: without it headless
-                # Chromium reports no hover or fine pointer on a desktop.
-                options["ignore_default_args"] = [
-                    "--hide-scrollbars",
-                    "--mute-audio",
-                ]
-        channel = self.channel
-        if channel is None and self.browser == "chromium" and options["headless"]:
-            # With no channel, Playwright runs headless Chromium on the old
-            # headless shell, which differs from Chrome in ways pages read:
-            # "HeadlessChrome" in Sec-CH-UA even with the user agent masked, no
-            # Accept-Language header, an invalid navigator.language under a
-            # POSIX locale, no PDF plugins, no window.chrome. "chromium" is the
-            # full browser in new headless mode. Pass
-            # channel="chromium-headless-shell" to opt back in.
-            channel = "chromium"
-        if channel:
-            options["channel"] = channel
-        if self.slow_mo_ms is not None:
-            options["slow_mo"] = self.slow_mo_ms
         native_profile = profile if profile is not None and self.uses_native_profile() else None
         args = (
             self._automation_args()
             + self._accept_lang_args(native_profile)
             + self._screen_args()
+            + self._headless_pointer_args()
             + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
             + self._fake_media_args()
@@ -466,54 +433,125 @@ class SessionConfig(BaseModel):
             + self._webrtc_ip_handling_args()
             + list(self.launch_args)
         )
-        if args:
-            options["args"] = args
-        if native_profile is not None:
-            options["env"] = native_profile_env(native_profile)
-        return options
+        if self.proxy is not None:
+            args.append(f"--proxy-server={self.proxy.server}")
+            if self.proxy.bypass:
+                args.append(f"--proxy-bypass-list={self.proxy.bypass}")
+        if self.ignore_https_errors:
+            args.append("--ignore-certificate-errors")
+        return args
+
+    def browser_env(self, profile: BrowserProfile | None = None) -> dict[str, str] | None:
+        """Return the browser environment, or None to inherit this process's.
+
+        Only a profile applied natively (see :meth:`uses_native_profile`)
+        changes it: its timezone and locale are set through ``TZ`` and the
+        locale variables.
+
+        Raises:
+            ValueError: If that profile names an unknown timezone; Chromium
+                would report ``Etc/Unknown`` instead.
+        """
+        if profile is not None and self.uses_native_profile():
+            return native_profile_env(profile)
+        return None
 
     def uses_native_profile(self) -> bool:
         """True when the profile's timezone and languages are set at launch.
 
-        That is the Patchright context profile on Linux, where Chromium reads
-        ``TZ`` and the locale variables. There, nothing is overridden over CDP:
-        ``navigator.languages`` keeps the profile's whole list and Chromium
-        builds the ``Accept-Language`` q-values itself. macOS and Windows take
-        the locale from system settings instead, so they keep the CDP
-        overrides.
+        That is ``profile_mode="locale"`` on Linux, where Chromium reads
+        ``TZ`` and the locale variables. There, nothing is overridden over
+        CDP: ``navigator.languages`` keeps the profile's whole list and
+        Chromium builds the ``Accept-Language`` q-values itself. macOS and
+        Windows take the locale from system settings instead, so they use the
+        CDP overrides.
         """
-        return (
-            self.driver == "patchright"
-            and self.patchright_context_profile
-            and self.browser == "chromium"
-            and sys.platform.startswith("linux")
-        )
+        return self.profile_mode == "locale" and sys.platform.startswith("linux")
+
+    def emulation_commands(self, profile: BrowserProfile) -> list[tuple[str, dict[str, Any]]]:
+        """Return the CDP commands that apply ``profile`` to one page.
+
+        Empty for ``profile_mode="native"``. The commands are page-scoped, so
+        every new page of a session runs them before it navigates.
+        """
+        if self.profile_mode == "native":
+            return []
+        commands: list[tuple[str, dict[str, Any]]] = []
+        full = self.profile_mode == "full"
+        if full:
+            commands.append(
+                (
+                    "Emulation.setDeviceMetricsOverride",
+                    {
+                        "width": profile.viewport.width,
+                        "height": profile.viewport.height,
+                        "deviceScaleFactor": profile.device_scale_factor,
+                        "mobile": profile.is_mobile,
+                        "screenWidth": profile.screen.width,
+                        "screenHeight": profile.screen.height,
+                    },
+                )
+            )
+            commands.append(("Emulation.setTouchEmulationEnabled", {"enabled": profile.has_touch}))
+            if profile.user_agent:
+                commands.append(
+                    (
+                        "Emulation.setUserAgentOverride",
+                        {
+                            "userAgent": profile.user_agent,
+                            "acceptLanguage": profile.accept_language(),
+                        },
+                    )
+                )
+        if full or not self.uses_native_profile():
+            commands.append(("Emulation.setLocaleOverride", {"locale": profile.locale}))
+            commands.append(("Emulation.setTimezoneOverride", {"timezoneId": profile.timezone_id}))
+        features = []
+        if profile.color_scheme != "null":
+            features.append({"name": "prefers-color-scheme", "value": profile.color_scheme})
+        if profile.reduced_motion != "null":
+            features.append({"name": "prefers-reduced-motion", "value": profile.reduced_motion})
+        if features:
+            commands.append(("Emulation.setEmulatedMedia", {"features": features}))
+        headers = profile.headers() if full else dict(profile.extra_http_headers)
+        if not full and not self.uses_native_profile():
+            # Chromium sends the locale's languages itself on Linux; elsewhere
+            # the header has to follow the emulated locale.
+            headers.setdefault("Accept-Language", profile.accept_language())
+        if headers:
+            commands.append(("Network.setExtraHTTPHeaders", {"headers": headers}))
+        return commands
 
     def _accept_lang_args(self, profile: BrowserProfile | None) -> list[str]:
         if profile is None or any(a.startswith("--accept-lang") for a in self.launch_args):
             return []
         return [f"--accept-lang={','.join(profile.navigator_languages)}"]
 
-    def _sandbox_args(self) -> list[str]:
-        """Return the sandbox opt-out flag when sandboxing is disabled.
+    def _headless_pointer_args(self) -> list[str]:
+        # Headless Chromium has no input devices, so it reports hover "none"
+        # and a coarse pointer, which no desktop browser does. Declare a mouse,
+        # as Playwright did, unless the caller set its own blink settings.
+        if not self.launch_headless or any(
+            a.startswith("--blink-settings") for a in self.launch_args
+        ):
+            return []
+        return [
+            "--blink-settings=primaryHoverType=2,availableHoverTypes=2,"
+            "primaryPointerType=4,availablePointerTypes=4"
+        ]
 
-        Playwright adds the same flag from ``chromium_sandbox``; this copy is
-        for launches WebSkrap spawns itself (see
-        :func:`webskrap.browser_session.stealth_launch_args`).
-        """
-        if self.chromium_sandbox or self.browser != "chromium":
+    def _sandbox_args(self) -> list[str]:
+        """Return the sandbox opt-out flag when sandboxing is disabled."""
+        if self.chromium_sandbox:
             return []
         if any(a == "--no-sandbox" or a.startswith("--no-sandbox=") for a in self.launch_args):
             return []
         return ["--no-sandbox"]
 
     def _automation_args(self) -> list[str]:
-        # Standard Playwright Chrome exposes navigator.webdriver=true under
-        # automation, an instant tell for detectors like DataDome. Patchright
-        # owns this surface itself, and extra evasion flags can become signals.
-        # Skipped if the caller already passed it.
-        if self.browser != "chromium" or self.driver == "patchright":
-            return []
+        # A debugging channel makes Chromium report navigator.webdriver=true,
+        # an instant tell for detectors like DataDome. Skipped if the caller
+        # already passed a --disable-blink-features flag.
         flag = "--disable-blink-features=AutomationControlled"
         if any(a.startswith("--disable-blink-features") for a in self.launch_args):
             return []
@@ -531,7 +569,7 @@ class SessionConfig(BaseModel):
         # Configure a virtual screen for headless chromium so the browser
         # reports real display metrics instead of headless defaults. Skips any
         # flag the caller already set in launch_args (their value wins).
-        if not (self.headless and self.browser == "chromium" and self.headless_screen):
+        if not (self.headless and self.headless_screen):
             return []
         width, height = self.headless_screen.width, self.headless_screen.height
         # Leave space at the right and bottom, as a normal desktop window
@@ -572,7 +610,7 @@ class SessionConfig(BaseModel):
         # Chromium requires the policy value and an explicit force flag for the
         # process-level WebRTC IP handling override to apply in Chrome.
         policy = self.effective_webrtc_ip_handling_policy()
-        if self.browser != "chromium" or policy is None:
+        if policy is None:
             return []
         candidates = {
             "--webrtc-ip-handling-policy": f"--webrtc-ip-handling-policy={policy}",
@@ -586,9 +624,7 @@ class SessionConfig(BaseModel):
 
     def _gpu_args(self) -> list[str]:
         # A caller choosing their own GL implementation keeps it.
-        if self.browser != "chromium" or any(
-            a.startswith(("--use-gl", "--use-angle")) for a in self.launch_args
-        ):
+        if any(a.startswith(("--use-gl", "--use-angle")) for a in self.launch_args):
             return []
         if self.gpu is GpuBackend.MESA:
             # --ignore-gpu-blocklist: Chromium blocklists software Vulkan
@@ -597,7 +633,7 @@ class SessionConfig(BaseModel):
         return []
 
     def _reduced_fingerprint_surface_args(self) -> list[str]:
-        if self.browser != "chromium" or not self.reduce_fingerprint_surface:
+        if not self.reduce_fingerprint_surface:
             return []
         candidates = {
             "--disable-webgl": "--disable-webgl",
@@ -611,54 +647,11 @@ class SessionConfig(BaseModel):
 
     def _fake_media_args(self) -> list[str]:
         flag = "--use-fake-device-for-media-stream"
-        if self.browser != "chromium" or not self.fake_media_devices:
+        if not self.fake_media_devices:
             return []
         if any(a == flag or a.startswith(f"{flag}=") for a in self.launch_args):
             return []
         return [flag]
-
-    def context_options(self, profile: BrowserProfile) -> dict[str, Any]:
-        """Return Playwright context options for ``profile`` under this config.
-
-        The ``patchright`` driver keeps the browser's native fingerprint and
-        applies almost nothing from the profile; every other driver applies it
-        in full. ``storage_state`` is dropped when ``user_data_dir`` is set,
-        because a persistent profile already carries that state.
-        """
-        if self.driver == "patchright":
-            # patchright defeats CDP-aware detectors by presenting the browser's
-            # real fingerprint. The default keeps the host/browser environment
-            # visible. The opt-in context profile below only applies settings
-            # Chrome can expose natively through BrowserContext options.
-            options: dict[str, Any] = {"no_viewport": True}
-            if self.patchright_focus_control is not None:
-                options["focus_control"] = self.patchright_focus_control
-            if self.patchright_context_profile:
-                options.update(
-                    {
-                        "color_scheme": profile.color_scheme,
-                        "reduced_motion": profile.reduced_motion,
-                    }
-                )
-                if not self.uses_native_profile():
-                    # On Linux these are set at launch instead.
-                    options.update({"locale": profile.locale, "timezone_id": profile.timezone_id})
-                if profile.extra_http_headers:
-                    options["extra_http_headers"] = dict(profile.extra_http_headers)
-        else:
-            options = profile.to_context_options()
-        options.update(
-            {
-                "ignore_https_errors": self.ignore_https_errors,
-                "java_script_enabled": self.java_script_enabled,
-                "service_workers": self.service_workers,
-            }
-        )
-        if self.proxy:
-            options["proxy"] = self.proxy.to_playwright()
-        if self.storage_state is not None and self.user_data_dir is None:
-            options["storage_state"] = self.storage_state
-        return options
 
 
 def native_profile_env(profile: BrowserProfile) -> dict[str, str]:
@@ -668,7 +661,7 @@ def native_profile_env(profile: BrowserProfile) -> dict[str, str]:
     ``LANGUAGE`` set its application locale, which is the default ``Intl``
     locale; ``LC_ALL`` is set too because a host value would otherwise win.
     The locale need not be installed on the host. The rest of the
-    environment is inherited, since Playwright replaces it when ``env`` is set.
+    environment is inherited, since a given environment replaces the whole.
 
     Raises:
         ValueError: If ``profile.timezone_id`` is not a known IANA timezone.

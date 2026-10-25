@@ -8,10 +8,18 @@ not establish that a provider replaced the requested page with a challenge.
 from __future__ import annotations
 
 from collections.abc import Mapping
-
-from playwright.async_api import Page
+from typing import Any, Protocol
 
 from webskrap.errors import ErrorCode, WebSkrapError
+
+
+class ScriptRunner(Protocol):
+    """Anything that runs a page script and returns its JSON value."""
+
+    async def evaluate(self, expression: str, /) -> Any:
+        """Run ``expression`` and return its JSON value."""
+        ...
+
 
 # Return only a fixed provider name, never page text, URLs, or challenge tokens.
 # Reading the DOM does not override any browser fingerprint surface.
@@ -32,7 +40,7 @@ _CHALLENGE_SCRIPT = r"""() => {
 }"""
 
 
-async def raise_for_challenge(page: Page, headers: Mapping[str, str]) -> None:
+async def raise_for_challenge(page: ScriptRunner, headers: Mapping[str, str]) -> None:
     """Raise ``blocked`` for a recognized DataDome or Cloudflare challenge.
 
     Ordinary error pages and embedded verification widgets are left alone.

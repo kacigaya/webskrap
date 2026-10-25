@@ -22,7 +22,7 @@ const FEATURES = [
   {
     title: "Async-first",
     description:
-      "Built on Playwright with an async API for concurrent data collection workflows.",
+      "An async API on its own Chrome DevTools Protocol client, with no Playwright or Node.js.",
   },
   {
     title: "Browser profiles",
@@ -40,9 +40,9 @@ const FEATURES = [
       "A resource policy blocks images, fonts, and trackers to make pages load faster and leaner.",
   },
   {
-    title: "Patchright stealth",
+    title: "Stealth by default",
     description:
-      "Patchright ships with WebSkrap for stealth-oriented sessions and CLI fetches.",
+      "The CDP client never enables the Runtime domain, so the Runtime.enable leak never happens.",
   },
   {
     title: "Human-like clicks",
@@ -125,10 +125,10 @@ export default function Home() {
             loading="eager"
           />
           <Badge variant="secondary" className="mb-6">
-            Async-first · Playwright · Patchright · MCP
+            Async-first · Own CDP client · MCP
           </Badge>
           <h1 className="text-balance font-heading text-5xl font-bold tracking-tight sm:text-6xl">
-            Python Web Scraping with Playwright and Patchright
+            Python Web Scraping on Real Chromium
           </h1>
           <p className="mt-6 max-w-2xl text-pretty text-lg text-muted-foreground">
             WebSkrap is an async-first Python web scraping and browser automation

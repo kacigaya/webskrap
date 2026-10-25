@@ -1,11 +1,11 @@
 ---
-title: Scrape JavaScript Pages with Playwright and Python
-description: Use WebSkrap to scrape JavaScript-rendered pages in Python with Playwright, Chromium, wait conditions, screenshots, and resource routing.
+title: Scrape JavaScript Pages with Python and Real Chromium
+description: Use WebSkrap to scrape JavaScript-rendered pages in Python with real Chromium, wait conditions, screenshots, and resource routing.
 ---
 
-# Scrape JavaScript Pages with Playwright and Python
+# Scrape JavaScript Pages with Python and Real Chromium
 
-Many web pages do not expose their main content in the initial HTML. WebSkrap uses Playwright and Chromium so Python scripts can scrape JavaScript-rendered pages after the browser has loaded them.
+Many web pages do not expose their main content in the initial HTML. WebSkrap drives Chromium through its own DevTools Protocol client so Python scripts can scrape JavaScript-rendered pages after the browser has loaded them.
 
 ## Browser-backed fetch
 

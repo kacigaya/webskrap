@@ -1,11 +1,12 @@
 ---
 title: WebSkrap Client API for Browser Automation
-description: Use WebSkrapClient for one-shot browser fetches, async scraping workflows, screenshots, and Playwright lifecycle management.
+description: Use WebSkrapClient for one-shot browser fetches, async scraping workflows, screenshots, and browser lifecycle management.
 ---
 
 # Client
 
-`WebSkrapClient` owns the Playwright lifecycle.
+`WebSkrapClient` owns the browser lifecycle. It starts a browser on first use
+and closes every browser it started when it exits.
 
 Use it as an async context manager:
 
@@ -52,7 +53,7 @@ Use `client.session()` when you want to keep browser state or keep a headed brow
 
 ### Wait states
 
-`wait_until` is passed to Playwright navigation and supports:
+`wait_until` sets the load state that navigation waits for:
 
 | Value | Use when |
 | --- | --- |
@@ -64,7 +65,7 @@ Use `client.session()` when you want to keep browser state or keep a headed brow
 For pages with long-polling or analytics requests, `networkidle` can be slower
 or less reliable than `domcontentloaded` plus an explicit page wait in a session.
 
-For deferred content, fetches can wait for a visible Playwright selector:
+For deferred content, fetches can wait for a visible CSS selector or snapshot ref:
 
 ```python
 result = await client.fetch(

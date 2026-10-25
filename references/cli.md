@@ -6,11 +6,12 @@ for arguments and help text.
 
 ## One-shot commands
 
-`webskrap fetch` uses headless Patchright stealth mode. `webskrap install`
-downloads the Playwright and Patchright Chromium browsers. `doctor` reports
+`webskrap fetch` runs headless Chrome through WebSkrap's own CDP client. `webskrap install`
+downloads Chrome for Testing into the user cache folder
+(`WEBSKRAP_BROWSERS_PATH` overrides it); `--force` downloads it again. `doctor` reports
 readiness, browser identity, host CPU architecture, and Fontconfig family count.
 It warns when the host timezone is UTC. `fetch` and `search` try Chrome, Edge,
-then bundled Chromium when a channel cannot launch. `schema` describes commands
+then Chrome for Testing when a channel cannot launch. `schema` describes commands
 as JSON.
 
 ```bash
@@ -27,7 +28,7 @@ webskrap fetch https://example.com --quiet --output page.html
 Use `--offset` with the previous result's next offset to continue reading a
 long page. Do not re-fetch with an ever larger limit.
 
-Pass `--ready-selector '#content'` to wait for visible content after consent
+Pass `--ready-selector '#content'` (CSS or a snapshot ref) to wait for visible content after consent
 dismissal. `--timeout-ms` applies separately to navigation and the readiness wait.
 A missing selector exits 3 (`timeout`). A known DataDome or Cloudflare challenge
 exits 11 (`blocked`) without retrying, including a challenge served with HTTP 200.
@@ -45,13 +46,16 @@ A `blocked` failure (exit 11) means the engine served a bot challenge; switch
 engine, reuse `--user-data-dir`, or change exit IP instead of retrying.
 
 On Linux ARM64, the `chrome` channel may be unavailable. `fetch` retries a
-failed launch with bundled Chromium. Pass `--channel chromium` to avoid the
+failed launch with Chrome for Testing. Pass `--channel chromium` to avoid the
 first attempt.
+
+`--profile-mode` sets how much of the profile pages see: `native` (default),
+`locale` or `full`. See the Python API reference.
 
 ## Persistent browser
 
 `webskrap browser open` launches detached Chromium. Later commands reconnect
-over CDP through Patchright, act on its current page, and exit. The browser
+over CDP, act on its current page, and exit. The browser
 gets the same automation and headless-screen flags as `fetch`; `--headed`
 also drops the `HeadlessChrome` user-agent token. `--proxy URL` (no
 credentials) routes the session through a proxy and defaults WebRTC to
@@ -62,7 +66,7 @@ fixed at launch, and reopening with different values is refused.
 webskrap browser open https://example.com
 webskrap browser snapshot
 webskrap browser click e15
-webskrap browser fill "input[name=q]" "playwright"
+webskrap browser fill "input[name=q]" "chromium"
 webskrap browser press Enter
 webskrap browser wait --text "Results"
 webskrap browser screenshot page.png --full-page
@@ -77,6 +81,10 @@ Snapshot refs become stale when the DOM changes. Take another snapshot before
 retrying. `wait` accepts one condition. Do not guess when callers provide more
 than one.
 
+Targets are snapshot refs or CSS selectors. Playwright selector engines such
+as `text=` are not supported. Snapshot refs are stable while the element exists,
+also across commands.
+
 Sessions default to the name `default`. Profiles live below
 `~/.webskrap/browser/<name>/`, unless `WEBSKRAP_BROWSER_DIR` changes the root.
 They contain cookies and logins and must remain mode `0700`.
@@ -88,7 +96,7 @@ calls, and `WEBSKRAP_CHROMIUM_SANDBOX=0` for a host. Document that disabling it
 leaves a compromised renderer uncontained. Never pass `--no-sandbox` (or its
 companions) through `--launch-arg`: those flags are blocked.
 
-Current limitations are one page per session, bundled Chromium only, no tabs,
+Current limitations are one page per session, Chrome for Testing only, no tabs,
 network mocking, tracing, or video, and history navigation that reloads.
 
 ## Vision and coordinate input

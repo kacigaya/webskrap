@@ -24,6 +24,10 @@ boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
 One-shot fetches do not share cookies between calls. Use a browser session when
 state must persist.
 
+All tools drive Chromium through WebSkrap's own CDP client. Selectors are
+snapshot refs or CSS. `stealth_fetch` takes `profile_mode` (`native`, `locale`
+or `full`) to set how much of the profile pages see.
+
 ## Keep results small
 
 - `max_chars` defaults to 8000 for fetch, snapshot, text, and eval tools.
@@ -73,7 +77,7 @@ including challenges served with HTTP 200. Ordinary HTTP error pages return
 normally with `ok: false`. A raised failure includes `code` and `hint`. Read
 `src/webskrap/errors.py` for the current catalog rather than duplicating it.
 
-Both fetch tools accept `ready_selector`, a Playwright selector that must be
+Both fetch tools accept `ready_selector`, a CSS selector or snapshot ref that must be
 visible after consent dismissal. The wait uses `timeout_ms` separately from
 navigation; a missing selector returns a `timeout` tool error. It may vary between
 calls in a warm session. These checks do not establish that later interactions
