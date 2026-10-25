@@ -218,7 +218,8 @@ def is_launch_failure(exc: BaseException) -> bool:
 
 # Matches embedded credentials (scheme://user:pass@host) so error text handed
 # to models and terminals never carries them.
-_USERINFO_PATTERN = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s@]+@")
+# The last @ ends userinfo; /, ? and # end the authority.
+_USERINFO_PATTERN = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s?#]+@")
 
 
 def scrub_userinfo(text: str) -> str:

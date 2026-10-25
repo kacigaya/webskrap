@@ -140,6 +140,31 @@ def test_arity_rejection_is_tagged_at_the_raise_site() -> None:
             "auth at http://***@proxy.test:8080 refused",
             id="http-port",
         ),
+        pytest.param(
+            "proxy failed: https://user:before@after@example.com/",
+            "proxy failed: https://***@example.com/",
+            id="password-with-at",
+        ),
+        pytest.param(
+            "proxy failed: https://user:a@b@c@example.com/",
+            "proxy failed: https://***@example.com/",
+            id="password-with-multiple-ats",
+        ),
+        pytest.param(
+            "https://example.com/?email=user@example.org",
+            "https://example.com/?email=user@example.org",
+            id="at-in-query-after-path",
+        ),
+        pytest.param(
+            "https://example.com?email=user@example.org",
+            "https://example.com?email=user@example.org",
+            id="at-in-query-without-path",
+        ),
+        pytest.param(
+            "https://example.com#user@example.org",
+            "https://example.com#user@example.org",
+            id="at-in-fragment",
+        ),
         pytest.param("no credentials here", "no credentials here", id="unchanged"),
     ],
 )
@@ -157,6 +182,18 @@ def test_error_payload_scrubs_credentials() -> None:
     payload = error_payload(WebSkrapError("proxy https://user:s3cret@example.com/ refused"))
 
     assert "s3cret" not in payload["error"]
+
+
+def test_rejected_url_error_hides_the_whole_password() -> None:
+    from webskrap.urls import validate_url
+
+    with pytest.raises(WebSkrapError) as caught:
+        validate_url("https://user:before@after@example.com/")
+
+    payload = error_payload(caught.value)
+    assert "before" not in payload["error"]
+    assert "after" not in payload["error"]
+    assert "https://***@example.com/" in payload["error"]
 
 
 def test_blocked_launch_argument_classifies_as_usage() -> None:
