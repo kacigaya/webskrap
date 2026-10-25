@@ -23,7 +23,7 @@ import json
 import re
 import time
 import zlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
@@ -468,7 +468,7 @@ async def frames(page: CDPPage) -> list[Frame]:
     await _add_child_frames(page, page, tree["frameTree"], 0.0, 0.0, found)
     targets = page.iframe_targets
     if targets is None:
-        targets = await _start_auto_attach(page)
+        targets = await start_auto_attach(page)
     for event in list(targets.values()):
         info = event.get("targetInfo", {})
         if info.get("type") != "iframe":
@@ -479,21 +479,31 @@ async def frames(page: CDPPage) -> list[Frame]:
         x, y, backend_id = owner
         frame_page = CDPPage(page.connection, event["sessionId"], info["targetId"])
         frame_page.default_timeout_s = page.default_timeout_s
-        found.append(
-            Frame(frame_page, page, info.get("url", ""), x, y, (page.session_id, backend_id))
-        )
-        with suppress(WebSkrapError):
-            subtree = await frame_page.send("Page.getFrameTree")
-            await _add_child_frames(frame_page, page, subtree["frameTree"], x, y, found)
+        try:
+            subtree = (await frame_page.send("Page.getFrameTree"))["frameTree"]
+        except WebSkrapError:
+            subtree = {}
+        # The target's own URL is set at attach time, often before it navigated.
+        url = subtree.get("frame", {}).get("url") or info.get("url", "")
+        found.append(Frame(frame_page, page, url, x, y, (page.session_id, backend_id)))
+        await _add_child_frames(frame_page, page, subtree, x, y, found)
     return found
 
 
-async def _start_auto_attach(page: CDPPage) -> dict[str, dict[str, Any]]:
-    """Track ``page``'s out-of-process iframes from now on.
+async def start_auto_attach(
+    page: CDPPage, on_attached: Callable[[dict[str, Any]], None] | None = None
+) -> dict[str, dict[str, Any]]:
+    """Track ``page``'s out-of-process iframes from now on; return the registry.
 
     Chromium reports each iframe target once, when auto-attach starts or when
     the iframe appears, so the registry outlives one :func:`frames` call: a
     consent notice that renders into an existing iframe later is still found.
+    A second ``Target.setAutoAttach`` reports nothing again, so this runs once
+    per page object.
+
+    With ``on_attached``, every new iframe and worker target waits for the
+    debugger, and ``on_attached`` gets its ``Target.attachedToTarget`` event.
+    It must resume the target with ``Runtime.runIfWaitingForDebugger``.
     """
     targets: dict[str, dict[str, Any]] = {}
 
@@ -501,6 +511,8 @@ async def _start_auto_attach(page: CDPPage) -> dict[str, dict[str, Any]]:
         info = params.get("targetInfo", {})
         if info.get("type") == "iframe":
             targets[info["targetId"]] = params
+        if on_attached is not None:
+            on_attached(params)
 
     def detached(params: dict[str, Any]) -> None:
         for target_id, event in list(targets.items()):
@@ -512,7 +524,7 @@ async def _start_auto_attach(page: CDPPage) -> dict[str, dict[str, Any]]:
     page.iframe_targets = targets
     await page.send(
         "Target.setAutoAttach",
-        {"autoAttach": True, "waitForDebuggerOnStart": False, "flatten": True},
+        {"autoAttach": True, "waitForDebuggerOnStart": on_attached is not None, "flatten": True},
     )
     # Existing iframe targets are reported right after the command.
     await asyncio.sleep(0.05)

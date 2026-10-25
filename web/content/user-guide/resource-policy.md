@@ -45,7 +45,8 @@ config = SessionConfig(resource_policy=ResourcePolicy.DOCUMENTS)
 ```
 
 Resource policies block resource types through the CDP `Fetch` domain on every
-page of the session. Scripts and XHR/fetch requests are not blocked by these presets.
+page of the session. They also cover cross-site iframes, and shared and service
+workers. Scripts and XHR/fetch requests are not blocked by these presets.
 
 ## CLI
 

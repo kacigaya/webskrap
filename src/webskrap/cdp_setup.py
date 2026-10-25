@@ -6,6 +6,20 @@ JavaScript and service-worker switches, resource blocking and proxy
 credentials. :func:`apply_storage_state` restores cookies and
 ``localStorage`` once, when a session starts.
 
+The same setup covers targets the page starts: out-of-process iframes and
+their workers attach paused, get the setup, and then run. Without it a
+cross-site iframe reports the browser's own user agent, timezone and
+languages, and loads what the resource policy blocks. Dedicated workers of a
+page's own frames need only the identity; the frame's ``Fetch`` already sees
+their requests. :func:`prepare_browser` does the same for shared and service
+workers, which belong to the browser, not to a page.
+
+Chromium refuses the device-metrics override below top-level pages, so an
+iframe still reports the real screen size and pixel ratio. A shared worker
+keeps the browser's own ``navigator.userAgent``; it is read before the
+override arrives. ``mask_headless_user_agent`` sets the user agent for the
+whole browser.
+
 Proxy credentials are answered only to challenges whose source is the proxy.
 A website asking for HTTP authentication gets the browser's default answer,
 so the proxy password never reaches a site.
@@ -16,11 +30,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from webskrap.cdp import CDPBrowser, CDPPage
+from webskrap import cdp_dom
+from webskrap.cdp import CDPBrowser, CDPConnection, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import BrowserProfile, ResourcePolicy, SessionConfig
 
@@ -34,6 +51,17 @@ BLOCKED_TYPES: dict[ResourcePolicy, tuple[str, ...]] = {
 _BLOCK_WORKERS = """if (navigator.serviceWorker) navigator.serviceWorker.register =
   async () => { throw new DOMException('Service workers are blocked', 'SecurityError'); };"""
 
+#: Emulation Chromium runs on top-level pages only.
+_TOP_LEVEL_ONLY = frozenset({"Emulation.setDeviceMetricsOverride"})
+#: Emulation Chromium refuses on workers. A worker takes its locale from
+#: whoever started it, so the locale override is refused there too.
+_NOT_ON_WORKERS = _TOP_LEVEL_ONLY | {
+    "Emulation.setTouchEmulationEnabled",
+    "Emulation.setEmulatedMedia",
+    "Emulation.setLocaleOverride",
+}
+_WORKER_TYPES = frozenset({"worker", "shared_worker", "service_worker"})
+
 # A blank document served for an origin while its localStorage is restored.
 _BLANK_PAGE = base64.b64encode(b"<!doctype html><title></title>").decode()
 
@@ -44,6 +72,90 @@ async def prepare_page(page: CDPPage, config: SessionConfig, profile: BrowserPro
     page.default_timeout_s = config.default_timeout_ms / 1000
     for method, params in config.emulation_commands(profile):
         await page.send(method, params)
+    await _prepare_document(page, config)
+    await _route(page, config)
+    if config.emulation_commands(profile) or _routes(config) or _document_switches(config):
+        await cdp_dom.start_auto_attach(
+            page, _on_attached(page.connection, page.default_timeout_s, config, profile)
+        )
+
+
+async def prepare_browser(
+    browser: CDPBrowser, config: SessionConfig, profile: BrowserProfile
+) -> None:
+    """Give shared and service workers the session's identity and routing.
+
+    They are browser targets, so a page's auto-attach does not report them.
+    Each one waits for the debugger until it is set up.
+    """
+    if not config.emulation_commands(profile) and not _routes(config):
+        return
+    connection = browser.connection
+    timeout_s = config.default_timeout_ms / 1000
+    handler = _on_attached(connection, timeout_s, config, profile)
+    connection.on("Target.attachedToTarget", handler, session_id=None)
+    await connection.send(
+        "Target.setAutoAttach",
+        {
+            "autoAttach": True,
+            "waitForDebuggerOnStart": True,
+            "flatten": True,
+            "filter": [{"type": "shared_worker"}, {"type": "service_worker"}, {"exclude": True}],
+        },
+    )
+
+
+def _on_attached(
+    connection: CDPConnection, timeout_s: float, config: SessionConfig, profile: BrowserProfile
+) -> Callable[[dict[str, Any]], None]:
+    """Return a ``Target.attachedToTarget`` handler that sets up and resumes targets."""
+    tasks: set[asyncio.Task[None]] = set()
+
+    def attached(params: dict[str, Any]) -> None:
+        info = params.get("targetInfo", {})
+        child = CDPPage(connection, params["sessionId"], info.get("targetId", ""))
+        child.default_timeout_s = timeout_s
+        task = asyncio.create_task(_prepare_target(child, info.get("type"), config, profile))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    return attached
+
+
+async def _prepare_target(
+    child: CDPPage, kind: str | None, config: SessionConfig, profile: BrowserProfile
+) -> None:
+    """Set up one attached iframe or worker, then let it run.
+
+    The target waits until ``Runtime.runIfWaitingForDebugger``, which is sent
+    even when setup fails, so a target that closed early never hangs a page.
+    """
+    try:
+        # Routing first: a refused override must not let blocked types through.
+        with suppress(WebSkrapError):
+            if kind == "iframe":
+                await _prepare_document(child, config)
+                await _route(child, config)
+                handler = _on_attached(child.connection, child.default_timeout_s, config, profile)
+                await cdp_dom.start_auto_attach(child, handler)
+            elif kind in ("shared_worker", "service_worker"):
+                await _route(child, config)
+        with suppress(WebSkrapError):
+            skipped = _NOT_ON_WORKERS if kind in _WORKER_TYPES else _TOP_LEVEL_ONLY
+            for method, command in config.emulation_commands(profile):
+                if method not in skipped:
+                    await child.send(method, command)
+    finally:
+        with suppress(WebSkrapError):
+            await child.send("Runtime.runIfWaitingForDebugger")
+
+
+def _document_switches(config: SessionConfig) -> bool:
+    return not config.java_script_enabled or config.service_workers == "block"
+
+
+async def _prepare_document(page: CDPPage, config: SessionConfig) -> None:
+    """Apply the JavaScript and service-worker switches to a page or iframe."""
     if not config.java_script_enabled:
         await page.send("Emulation.setScriptExecutionDisabled", {"value": True})
     if config.service_workers == "block":
@@ -52,7 +164,18 @@ async def prepare_page(page: CDPPage, config: SessionConfig, profile: BrowserPro
         # patch, so it runs only for callers who ask for "block".
         await page.send("Network.setBypassServiceWorker", {"bypass": True})
         await page.send("Page.addScriptToEvaluateOnNewDocument", {"source": _BLOCK_WORKERS})
-    await _route(page, config)
+
+
+def _credentials(config: SessionConfig) -> tuple[str, str] | None:
+    proxy = config.proxy
+    if proxy is None or not (proxy.username or proxy.password):
+        return None
+    return proxy.username or "", proxy.password or ""
+
+
+def _routes(config: SessionConfig) -> bool:
+    """True when :func:`_route` has anything to do for ``config``."""
+    return bool(BLOCKED_TYPES[config.resource_policy]) or _credentials(config) is not None
 
 
 async def _route(page: CDPPage, config: SessionConfig) -> None:
@@ -63,12 +186,7 @@ async def _route(page: CDPPage, config: SessionConfig) -> None:
     because ``Fetch`` reports authentication only for requests it intercepts.
     """
     blocked = BLOCKED_TYPES[config.resource_policy]
-    proxy = config.proxy
-    credentials = (
-        (proxy.username or "", proxy.password or "")
-        if proxy is not None and (proxy.username or proxy.password)
-        else None
-    )
+    credentials = _credentials(config)
     if not blocked and credentials is None:
         return
     tasks: set[asyncio.Task[Any]] = set()

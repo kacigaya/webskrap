@@ -15,6 +15,16 @@ history, so they summarize each release rather than list every change.
   listed under its `iframe` line. Its refs look like `f12345e15` and work with
   every element action and `wait_for`.
 
+### Fixed
+
+- `profile_mode` `locale` and `full` now apply to cross-site iframes and to
+  workers. Before, with `full`, a cross-site iframe reported the browser's own
+  user agent, timezone and languages. Iframes still report the real screen
+  size and pixel ratio, because Chromium allows that override on top-level
+  pages only.
+- Resource policies now block images, fonts and media in cross-site iframes
+  and in shared and service workers.
+
 ## [3.0.1] - 2026-10-25
 
 ### Changed

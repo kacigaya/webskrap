@@ -97,6 +97,15 @@ from `headless_screen`. `profile_mode="full"` also emulates the viewport,
 screen, device scale, touch and user agent, as WebSkrap 2.x did; each override
 is a surface that a page can cross-check.
 
+The overrides also reach cross-site iframes and workers. Each one starts
+paused, gets the profile, and then runs. Two limits remain:
+
+- Chromium applies the screen and device-scale override to top-level pages
+  only. A cross-site iframe reports the browser's real screen size and pixel
+  ratio.
+- A shared worker reports the browser's own `navigator.userAgent`. Use
+  `mask_headless_user_agent` to change the user agent for the whole browser.
+
 On Linux the timezone and languages are set the way a real machine
 sets them, not overridden over CDP. The browser starts with `TZ` set to the
 profile's `timezone_id`, `LC_ALL`/`LANG`/`LANGUAGE` derived from its locale and

@@ -133,6 +133,20 @@ core. `src/webskrap/cdp_setup.py` prepares every page before it navigates:
 - `Fetch`: only when a resource policy blocks resource types (then only for
   those types), or when proxy credentials are set. Credentials go only to
   challenges whose source is the proxy.
+- `Target.setAutoAttach` with `waitForDebuggerOnStart`: only when one of the
+  above has work to do. Each cross-site iframe and worker starts paused and
+  gets the same setup. Then `Runtime.runIfWaitingForDebugger` lets it run.
+  Iframes get `Fetch` too, and auto-attach for their own children. Dedicated
+  workers need only the identity, because their frame's `Fetch` already sees
+  their requests. A browser-level auto-attach, filtered to shared and service
+  workers, covers those. Measured before this step: with `profile_mode="full"`
+  a cross-site iframe reported the `HeadlessChrome` user agent, UTC and
+  `en-US`, and `lite` let its images and fonts through.
+- Chromium refuses `Emulation.setDeviceMetricsOverride` below top-level
+  pages ("only top-level targets"), so iframes keep the real screen size and
+  pixel ratio. A shared worker keeps the browser's own `navigator.userAgent`.
+  Workers refuse the locale, touch and media overrides; they inherit the
+  locale from the document that started them.
 - `Storage.setCookies` and a throwaway page restore `storage_state` once per
   session.
 
