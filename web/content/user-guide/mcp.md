@@ -195,6 +195,8 @@ A typical flow:
 
 1. `browser_open` with an optional `url`.
 2. `browser_snapshot`, where each element carries a ref like `[ref=e15]`.
+   Iframe content is listed under its `iframe` line, with refs like
+   `f12345e15`.
 3. `browser_interact` with `action: "click"` and `target: "e15"` (or any
    CSS selector). `fill` and `type` take one entry in `values`;
    `select` takes one or more. `click`, `dblclick` and `type` use human mouse

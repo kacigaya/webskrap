@@ -83,7 +83,8 @@ than one.
 
 Targets are snapshot refs or CSS selectors. Playwright selector engines such
 as `text=` are not supported. Snapshot refs are stable while the element exists,
-also across commands.
+also across commands. Iframe content is listed under its `iframe` line. Refs in a frame look
+like `f12345e15`. CSS selectors match in the main frame only.
 
 Sessions default to the name `default`. Profiles live below
 `~/.webskrap/browser/<name>/`, unless `WEBSKRAP_BROWSER_DIR` changes the root.

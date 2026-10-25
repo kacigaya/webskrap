@@ -240,8 +240,33 @@ far.addEventListener('click', () => log.textContent += 'far ');
 </script></body></html>"""
 
 
+FRAMES_PAGE = """<html><title>Frames</title><body><h1>Top</h1>
+<iframe title="Same" src="/frame/same"></iframe>
+<div style="height:3000px"></div>
+<iframe title="Cross" src="http://localhost:{port}/frame/cross"></iframe>
+</body></html>"""
+
+# Each frame reports its clicks and field value as text, so a snapshot of
+# the top page reads them back.
+FRAME_PAGE = """<html><body><button id="b">{name} button</button>
+<input aria-label="{name} field"><p id="log"></p><script>
+b.addEventListener('click', e => log.textContent += '{name}:' + e.isTrusted + ' ');
+document.querySelector('input').addEventListener('input',
+  e => log.textContent = 'value:' + e.target.value);
+</script></body></html>"""
+
+
 class _SessionHandler(_CDPHandler):
     def do_GET(self) -> None:
+        if self.path == "/frames" or self.path.startswith("/frame/"):
+            port = self.server.server_address[1]
+            name = self.path.removeprefix("/frame/").capitalize()
+            body = FRAMES_PAGE.format(port=port) if self.path == "/frames" else FRAME_PAGE
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body.replace("{name}", name).encode())
+            return
         if self.path == "/form":
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -476,7 +501,7 @@ def test_cdp_session_drives_pages_across_reconnects(
 
 def _ref(tree: str, line_start: str) -> str:
     line = next(line for line in tree.splitlines() if line.strip().startswith(line_start))
-    match = re.search(r"\[ref=(e\d+)\]", line)
+    match = re.search(r"\[ref=((?:f\d+)?e\d+)\]", line)
     assert match, line
     return match.group(1)
 
@@ -599,3 +624,61 @@ def test_cdp_session_snapshot_refs_drive_elements(
     # A disabled control is waited on, then refused, never changed.
     assert results["disabled"] is ErrorCode.TIMEOUT
     assert results["locked"] == "a"
+
+
+@pytest.mark.browser
+def test_cdp_session_snapshot_walks_into_iframes(
+    persistent_session_env: Path, session_server: str
+) -> None:
+    name = "cdp-frames"
+
+    async def exercise() -> dict[str, Any]:
+        await browser_session.open_session(name)
+        results: dict[str, Any] = {}
+
+        async def run(action: Any) -> Any:
+            return await browser_session.run_page_action(name, action, timeout_ms=20_000)
+
+        async def act(action: str, target: str, *values: str) -> None:
+            await run(
+                lambda page: browser_session.element_action(page, action, target, list(values))
+            )
+
+        async def tree(depth: int | None = None) -> str:
+            return str(
+                (await run(lambda page: browser_session.snapshot(page, depth=depth)))["snapshot"]
+            )
+
+        await run(lambda page: browser_session.goto(page, f"{session_server}/frames", "load"))
+        results["tree"] = first = await tree()
+        results["shallow"] = await tree(depth=1)
+        # 127.0.0.1 and localhost are different sites: the second frame runs
+        # out of process, below the fold. Each run is a fresh attach.
+        await act("click", _ref(first, '- button "Same button"'))
+        await act("click", _ref(first, '- button "Cross button"'))
+        results["clicked"] = await tree()
+        await act("fill", _ref(first, '- textbox "Cross field"'), "typed")
+        results["filled"] = await tree()
+        with pytest.raises(WebSkrapError) as missing:
+            await act("click", "f100000e1")  # keys stay below 100000
+        results["missing"] = missing.value.code
+        return results
+
+    try:
+        results = asyncio.run(exercise())
+    finally:
+        browser_session.close_session(name, delete_data=True)
+
+    lines = results["tree"].splitlines()
+    same = next(i for i, line in enumerate(lines) if line.startswith('- iframe "Same" [ref=e'))
+    assert lines[same].endswith(":")
+    assert re.fullmatch(r'  - button "Same button" \[ref=f\d+e\d+\]', lines[same + 1])
+    assert re.search(r'^- iframe "Cross" \[ref=e\d+\]:$', results["tree"], re.M)
+    assert re.search(r'^  - textbox "Cross field" \[ref=f\d+e\d+\]$', results["tree"], re.M)
+    same_key = re.search(r"f(\d+)e", lines[same + 1])
+    cross_key = re.search(r'"Cross button" \[ref=f(\d+)e', results["tree"])
+    assert same_key and cross_key and same_key[1] != cross_key[1]
+    assert "button" not in results["shallow"] and '- iframe "Cross"' in results["shallow"]
+    assert "Same:true" in results["clicked"] and "Cross:true" in results["clicked"]
+    assert "value:typed" in results["filled"]
+    assert results["missing"] is ErrorCode.STALE_REF

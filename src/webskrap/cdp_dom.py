@@ -4,8 +4,11 @@
 script does for its aria snapshot, and lists elements by ARIA role and
 accessible name. Each listed element gets a ref ``e<backendNodeId>``:
 Chromium's id for the node, which stays the same across connections while
-the node lives and is never written into the page. The Accessibility domain
-is not used; see docs/design/cdp-driver.md for the measurement behind that.
+the node lives and is never written into the page. Iframe content is listed
+under its ``iframe`` line, with refs ``f<key>e<backendNodeId>``: ``key`` is
+:func:`frame_key` of the frame id, so a ref names its frame on any later
+connection too. The Accessibility domain is not used; see
+docs/design/cdp-driver.md for the measurement behind that.
 
 The element actions resolve a ref or a CSS selector to one visible element
 and drive it with trusted input: the human cursor path, button hold and
@@ -19,6 +22,7 @@ import asyncio
 import json
 import re
 import time
+import zlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -30,10 +34,9 @@ from webskrap.cdp_session import key_events
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.human import MAX_WHEEL_BATCHES, VIEW_MARGIN, bezier_path, click_point, uniform
 
-#: What a ref looks like: ``e`` and Chromium's backend node id. The same
-#: pattern as ``browser_session.SNAPSHOT_REF_PATTERN``.
-REF_PREFIX = "e"
-REF_PATTERN = re.compile(r"^e\d+$")
+#: What a ref looks like: an optional ``f`` and frame key for iframe content,
+#: then ``e`` and Chromium's backend node id.
+REF_PATTERN = re.compile(r"^(?:f(\d+))?e(\d+)$")
 _POLL_S = 0.1
 
 # Builds the snapshot text with "[ref=#N]" placeholders and returns it with
@@ -339,19 +342,65 @@ _SELECT_FUNCTION = """function (wanted) {
 
 
 async def snapshot(page: CDPPage, *, depth: int | None = None) -> str:
-    """Return the snapshot text with ``e<backendNodeId>`` refs.
+    """Return the snapshot text, with iframe content under each ``iframe`` line.
+
+    Each frame is walked in its own isolated world. A frame is listed when its
+    ``<iframe>`` element is: frames under a hidden owner, or below ``depth``,
+    are left out. ``depth`` counts levels across frames.
+    """
+    # Like Playwright, a depth of 0 means no limit.
+    limit = int(depth) if depth else None
+    page_frames = await frames(page)
+    main, *children = page_frames
+    lines, refs = await _frame_snapshot(main, limit, "")
+    for frame in children:
+        owner = refs.get(frame.owner) if frame.owner else None
+        line = next((i for i, text in enumerate(lines) if f"[ref={owner}]" in text), None)
+        if owner is None or line is None:
+            continue
+        indent = len(lines[line]) - len(lines[line].lstrip(" "))
+        level = indent // 2 + 1
+        if limit is not None and level >= limit:
+            continue
+        prefix = f"f{frame_key(frame.page.target_id)}"
+        try:
+            inner, inner_refs = await _frame_snapshot(
+                frame, None if limit is None else limit - level, prefix
+            )
+        except WebSkrapError:
+            continue  # the frame navigated or closed during the walk
+        refs.update(inner_refs)
+        if inner:
+            if not lines[line].endswith(":"):
+                lines[line] += ":"
+            pad = " " * (indent + 2)
+            lines[line + 1 : line + 1] = [pad + text for text in inner]
+    return "\n".join(lines)
+
+
+def frame_key(frame_id: str) -> int:
+    """Return the short number that names ``frame_id`` in refs."""
+    return zlib.crc32(frame_id.encode()) % 100_000
+
+
+async def _frame_snapshot(
+    frame: Frame, depth: int | None, prefix: str
+) -> tuple[list[str], dict[tuple[str, int], str]]:
+    """Walk one frame; return its lines and each listed node's ref.
 
     One isolated-world evaluation builds the text and returns the listed
     elements as remote objects; ``DOM.describeNode`` maps each to its backend
-    node id. The objects are released afterwards.
+    node id. The refs are keyed by session and backend node id, the way
+    :attr:`Frame.owner` names an ``<iframe>`` element. The objects are
+    released afterwards.
     """
+    page = frame.page
     world = await page.isolated_world()
     async with _object_group(page) as group:
         result = await page.send(
             "Runtime.evaluate",
             {
-                # Like Playwright, a depth of 0 means no limit.
-                "expression": f"({_SNAPSHOT_SCRIPT})({int(depth) if depth else 'null'})",
+                "expression": f"({_SNAPSHOT_SCRIPT})({'null' if depth is None else depth})",
                 "contextId": world,
                 "returnByValue": False,
                 "objectGroup": group,
@@ -373,9 +422,13 @@ async def snapshot(page: CDPPage, *, depth: int | None = None) -> str:
         nodes = await asyncio.gather(
             *(page.send("DOM.describeNode", {"objectId": object_id}) for object_id in object_ids)
         )
+    refs: dict[tuple[str, int], str] = {}
     for index, node in enumerate(nodes):
-        text = text.replace(f"[ref=#{index}]", f"[ref={REF_PREFIX}{node['node']['backendNodeId']}]")
-    return text
+        backend_id = int(node["node"]["backendNodeId"])
+        ref = f"{prefix}e{backend_id}"
+        refs[(page.session_id, backend_id)] = ref
+        text = text.replace(f"[ref=#{index}]", f"[ref={ref}]")
+    return (text.split("\n") if text else []), refs
 
 
 @dataclass(frozen=True)
@@ -386,6 +439,8 @@ class Frame:
     out-of-process iframe's) and the frame id. ``offset_x`` and ``offset_y``
     place the frame's viewport in the top-level viewport, so element boxes
     from inside it can be turned into mouse coordinates for ``top``.
+    ``owner`` is the ``<iframe>`` element: the session that reported it and
+    its backend node id. It is None for the main frame.
     """
 
     page: CDPPage
@@ -393,6 +448,7 @@ class Frame:
     url: str
     offset_x: float = 0.0
     offset_y: float = 0.0
+    owner: tuple[str, int] | None = None
 
 
 async def frames(page: CDPPage) -> list[Frame]:
@@ -417,15 +473,18 @@ async def frames(page: CDPPage) -> list[Frame]:
         info = event.get("targetInfo", {})
         if info.get("type") != "iframe":
             continue
-        offset = await _owner_offset(page, info["targetId"])
-        if offset is None:
+        owner = await _owner_box(page, info["targetId"])
+        if owner is None:
             continue
+        x, y, backend_id = owner
         frame_page = CDPPage(page.connection, event["sessionId"], info["targetId"])
         frame_page.default_timeout_s = page.default_timeout_s
-        found.append(Frame(frame_page, page, info.get("url", ""), *offset))
+        found.append(
+            Frame(frame_page, page, info.get("url", ""), x, y, (page.session_id, backend_id))
+        )
         with suppress(WebSkrapError):
             subtree = await frame_page.send("Page.getFrameTree")
-            await _add_child_frames(frame_page, page, subtree["frameTree"], *offset, found)
+            await _add_child_frames(frame_page, page, subtree["frameTree"], x, y, found)
     return found
 
 
@@ -471,25 +530,26 @@ async def _add_child_frames(
     """Add in-process child frames of ``node``; ``base`` is the session's own offset."""
     for child in node.get("childFrames", []):
         frame_id = child["frame"]["id"]
-        offset = await _owner_offset(session_page, frame_id)
-        if offset is None:
+        owner = await _owner_box(session_page, frame_id)
+        if owner is None:
             continue
         frame_page = CDPPage(session_page.connection, session_page.session_id, frame_id)
         frame_page.default_timeout_s = session_page.default_timeout_s
-        x, y = base_x + offset[0], base_y + offset[1]
-        found.append(Frame(frame_page, top, child["frame"].get("url", ""), x, y))
+        x, y = base_x + owner[0], base_y + owner[1]
+        url = child["frame"].get("url", "")
+        found.append(Frame(frame_page, top, url, x, y, (session_page.session_id, owner[2])))
         await _add_child_frames(session_page, top, child, base_x, base_y, found)
 
 
-async def _owner_offset(session_page: CDPPage, frame_id: str) -> tuple[float, float] | None:
-    """Return the content-box origin of the ``<iframe>`` hosting ``frame_id``."""
+async def _owner_box(session_page: CDPPage, frame_id: str) -> tuple[float, float, int] | None:
+    """Return the content-box origin and backend node id of ``frame_id``'s ``<iframe>``."""
     try:
         owner = await session_page.send("DOM.getFrameOwner", {"frameId": frame_id})
         box = await session_page.send("DOM.getBoxModel", {"backendNodeId": owner["backendNodeId"]})
     except WebSkrapError:
         return None
     content = box["model"]["content"]
-    return float(content[0]), float(content[1])
+    return float(content[0]), float(content[1]), int(owner["backendNodeId"])
 
 
 class _Element:
@@ -497,7 +557,8 @@ class _Element:
 
     ``input_page`` receives mouse events, and ``offset`` turns the element's
     frame-relative box into its coordinates there; both differ from ``page``
-    only for elements inside iframes.
+    only for elements inside iframes. ``frame_id`` is set for elements a
+    frame ref resolved; see :func:`_scroll_into_view`.
     """
 
     def __init__(
@@ -508,12 +569,14 @@ class _Element:
         *,
         input_page: CDPPage | None = None,
         offset: tuple[float, float] = (0.0, 0.0),
+        frame_id: str | None = None,
     ) -> None:
         self.page = page
         self.object_id = object_id
         self.description = description
         self.input_page = input_page or page
         self.offset = offset
+        self.frame_id = frame_id
 
     async def call(self, declaration: str, *args: Any) -> Any:
         result = await self.page.send(
@@ -551,31 +614,57 @@ def _context_gone(exc: CDPError) -> bool:
     return "context" in str(exc).lower()
 
 
-async def _find(page: CDPPage, target: str, group: str) -> list[_Element]:
+async def _locate(page: CDPPage, target: str) -> Frame:
+    """Return the frame ``target`` lives in: the main frame, or a frame ref's frame.
+
+    CSS selectors match in the main frame only.
+
+    Raises:
+        WebSkrapError: ``stale_ref`` when no current frame has the ref's key.
+    """
+    match = REF_PATTERN.fullmatch(target)
+    if not match or match[1] is None:
+        return Frame(page, page, "")
+    key = int(match[1])
+    for frame in (await frames(page))[1:]:
+        if frame_key(frame.page.target_id) == key:
+            return frame
+    raise _stale(target)
+
+
+async def _find(frame: Frame, target: str, group: str) -> list[_Element]:
     """Resolve ``target`` to its current elements: one for a ref, all CSS matches.
 
-    Runs in the page's shared isolated world and retries once in a new world
+    Runs in the frame's shared isolated world and retries once in a new world
     when a navigation destroyed the old one.
     """
+    page = frame.page
     for attempt in range(2):
         world = await page.shared_world()
         try:
-            return await _find_in(page, target, group, world)
+            elements = await _find_in(page, target, group, world)
         except CDPError as exc:
             if attempt == 0 and _context_gone(exc):
                 page.forget_world()
                 continue
             raise
+        if frame.owner is not None:
+            for element in elements:
+                element.input_page = frame.top
+                element.offset = (frame.offset_x, frame.offset_y)
+                element.frame_id = page.target_id
+        return elements
     raise AssertionError("unreachable")
 
 
 async def _find_in(page: CDPPage, target: str, group: str, world: int) -> list[_Element]:
-    if REF_PATTERN.fullmatch(target):
+    match = REF_PATTERN.fullmatch(target)
+    if match:
         try:
             resolved = await page.send(
                 "DOM.resolveNode",
                 {
-                    "backendNodeId": int(target[len(REF_PREFIX) :]),
+                    "backendNodeId": int(match[2]),
                     "executionContextId": world,
                     "objectGroup": group,
                 },
@@ -584,7 +673,12 @@ async def _find_in(page: CDPPage, target: str, group: str, world: int) -> list[_
             if _context_gone(exc):
                 raise
             raise _stale(target) from exc
-        return [_Element(page, resolved["object"]["objectId"], target)]
+        element = _Element(page, resolved["object"]["objectId"], target)
+        # In-process frames share one session: a node of another frame resolves
+        # too, so a ref whose node left its frame's document is stale.
+        if not await element.call("function () { return this.ownerDocument === document; }"):
+            raise _stale(target)
+        return [element]
     result = await page.send(
         "Runtime.evaluate",
         {
@@ -616,7 +710,7 @@ async def element_state(page: CDPPage, target: str) -> str:
     """
     async with _object_group(page) as group:
         try:
-            elements = await _find(page, target, group)
+            elements = await _find(await _locate(page, target), target, group)
         except WebSkrapError as exc:
             if exc.code is ErrorCode.STALE_REF:
                 return "detached"
@@ -635,8 +729,9 @@ async def _actionable(
     clicking, checking, filling, typing or selecting.
     """
     deadline = time.monotonic() + timeout_s
+    frame = await _locate(page, target)
     while True:
-        elements = await _find(page, target, group)
+        elements = await _find(frame, target, group)
         if len(elements) > 1:
             msg = f"strict mode: '{target}' matches {len(elements)} elements; use a ref"
             raise WebSkrapError(msg, code=ErrorCode.USAGE)
@@ -669,8 +764,13 @@ async def _scroll_into_view(element: _Element) -> None:
     """Port of :func:`webskrap.human.scroll_into_view`: wheel notches, then a jump.
 
     The wheel goes where a fresh connection's mouse is, the viewport origin,
-    as Patchright's ``mouse.wheel`` does after reattaching.
+    as Patchright's ``mouse.wheel`` does after reattaching. An element from a
+    frame ref can sit in an iframe that is out of view itself, so it gets the
+    jump at once, which scrolls every frame above it too.
     """
+    if element.frame_id is not None:
+        await _scroll_frame_element(element)
+        return
     page = element.input_page
     # Over a frame, the wheel must sit inside it to scroll its document.
     wheel_x, wheel_y = element.offset[0] + 1, element.offset[1] + 1
@@ -695,6 +795,16 @@ async def _scroll_into_view(element: _Element) -> None:
             await asyncio.sleep(uniform(16, 45) / 1000)
         await asyncio.sleep(uniform(60, 160) / 1000)
     await element.call(_SCROLL_FUNCTION)
+
+
+async def _scroll_frame_element(element: _Element) -> None:
+    """Scroll a frame element into view, then measure its frame's offset again."""
+    await element.call(_SCROLL_FUNCTION)
+    for frame in await frames(element.input_page):
+        if frame.page.target_id == element.frame_id:
+            element.offset = (frame.offset_x, frame.offset_y)
+            return
+    raise _stale(element.description)
 
 
 async def _human_pointer(element: _Element, *, click_count: int = 0) -> None:
@@ -892,7 +1002,10 @@ async def instant_click(page: CDPPage, target: str, *, click_count: int = 1) -> 
     """
     async with _object_group(page) as group:
         element = await _actionable(page, target, group, page.default_timeout_s, enabled=True)
-        await element.call(_SCROLL_FUNCTION)
+        if element.frame_id is not None:
+            await _scroll_frame_element(element)
+        else:
+            await element.call(_SCROLL_FUNCTION)
         box = await _box(element)
         x = box["x"] + box["width"] / 2 + element.offset[0]
         y = box["y"] + box["height"] / 2 + element.offset[1]

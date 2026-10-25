@@ -55,7 +55,6 @@ T = TypeVar("T")
 SessionPage = CDPPage
 
 SESSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
-SNAPSHOT_REF_PATTERN = re.compile(r"^e\d+$")
 DEVTOOLS_PORT_FILE = "DevToolsActivePort"
 LAUNCH_TIMEOUT_S = 20.0
 CLOSE_TIMEOUT_S = 5.0

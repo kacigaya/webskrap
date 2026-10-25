@@ -9,6 +9,12 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Snapshots walk into iframes, same-site and cross-site. Frame content is
+  listed under its `iframe` line. Its refs look like `f12345e15` and work with
+  every element action and `wait_for`.
+
 ## [3.0.1] - 2026-10-25
 
 ### Changed

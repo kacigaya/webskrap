@@ -233,7 +233,8 @@ webskrap browser close
 ref like `[ref=e15]`. Interaction commands (`click`, `dblclick`, `hover`,
 `fill`, `type`, `select`, `check`, `uncheck`) accept either a ref or a CSS
 selector. Refs describe the current page, so take a fresh
-`snapshot` after the page changes.
+`snapshot` after the page changes. Iframe content is listed under its `iframe` line. Refs in a frame look
+like `f12345e15`. CSS selectors match in the main frame only.
 
 `click` and `dblclick` scroll with the mouse wheel, move the cursor along a
 curved path and hold the button for a human 60-140 ms; `type` clicks into the

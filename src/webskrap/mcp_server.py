@@ -633,7 +633,8 @@ async def browser_snapshot(
     """Return an aria snapshot of the current page with eN element refs.
 
     Each element carries a ref like [ref=e15]; pass that ref (e.g. "e15") as
-    the target of browser_interact or browser_wait_for. Refs describe the
+    the target of browser_interact or browser_wait_for. Iframe content is
+    listed under its iframe line, with refs like f12345e15. Refs describe the
     current DOM, so take a fresh snapshot after the page changes.
 
     Args:

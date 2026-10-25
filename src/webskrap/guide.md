@@ -52,6 +52,7 @@ IP, not a retry.
 
 1. `browser_open(url=...)` -- starts or reuses a detached headless Chromium.
 2. `browser_snapshot()` -- returns the accessibility tree with `[ref=eN]` handles.
+   Iframe content has refs like `f12345e15`.
 3. `browser_interact(action="fill", target="e12", values=["hello"])`.
 4. `browser_wait_for(text="Welcome")` -- not another snapshot.
 5. `browser_snapshot()` again, because the refs from step 2 are now stale.

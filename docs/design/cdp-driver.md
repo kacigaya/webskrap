@@ -225,9 +225,15 @@ the same.
 - DuckDuckGo answers with a bot challenge from this host's IP; Bing serves
   results.
 - The snapshot leaves out `generic` wrappers and Playwright's
-  `[cursor=pointer]` marks. It does not descend into iframes; an iframe is
-  listed as one node. Roles and names cover the ARIA implicit-role table and
-  the common accessible-name rules, not the full specification.
+  `[cursor=pointer]` marks. Roles and names cover the ARIA implicit-role
+  table and the common accessible-name rules, not the full specification.
+- Since 3.1 the snapshot walks into iframes. Refs in a frame are
+  `f<key>e<backendNodeId>`, where the key is a CRC32 of the frame id modulo
+  100000. A fresh connection finds the frame again from the key. Frames
+  nested in a cross-site frame are not walked, because auto-attach runs on
+  the page target only. CSS selectors match in the main frame only.
+- A frame ref element is scrolled into view with `scrollIntoView`, not with
+  the mouse wheel, because its iframe can be out of view too.
 - As in Playwright's strict mode, a CSS selector that matches several elements
   is refused; use a ref.
 - A `networkidle` wait in a persistent session, on an already loaded page,
