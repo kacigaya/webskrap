@@ -44,7 +44,6 @@ LEFTOVER_NOTICE_PATTERN = re.compile(
 )
 
 LIVE_CONFIG = SessionConfig(
-    driver="patchright",
     channel=os.environ.get("WEBSKRAP_BROWSER_CHANNEL", "chrome"),
     headless=True,
     navigation_timeout_ms=60_000,

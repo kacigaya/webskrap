@@ -1,7 +1,7 @@
 """A private Xvfb display, so a "headless" run can be a real headed browser.
 
 Headless Chrome announces itself: ``HeadlessChrome`` in the user agent, plus
-the flags Playwright only adds in headless mode (hidden scrollbars, forced
+the flags headless automation adds (hidden scrollbars, forced
 hover/pointer types). Rewriting the user agent with ``--user-agent`` makes
 Chromium drop every high-entropy client hint, which no real browser does.
 Running headed on an invisible X server avoids the whole class instead of

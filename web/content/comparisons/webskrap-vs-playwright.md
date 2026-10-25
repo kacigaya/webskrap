@@ -1,11 +1,11 @@
 ---
 title: WebSkrap vs Playwright for Python Web Scraping
-description: Compare WebSkrap and Playwright for Python web scraping, browser automation, persistent sessions, resource routing, Patchright stealth, and MCP agent tools.
+description: Compare WebSkrap and Playwright for Python web scraping, browser automation, persistent sessions, resource routing, stealth defaults, and MCP agent tools.
 ---
 
 # WebSkrap vs Playwright for Python Web Scraping
 
-Playwright is a browser automation library. WebSkrap builds on Playwright and Patchright and adds a higher-level Python scraping API on top.
+Playwright is a browser automation library that drives several browsers through a Node.js driver process. WebSkrap is a Python scraping package that drives Chromium through its own Chrome DevTools Protocol client, with no Playwright and no Node.js.
 
 ## When Playwright is enough
 
@@ -23,12 +23,14 @@ WebSkrap packages common scraping needs into a smaller API:
 
 | Capability | Playwright | WebSkrap |
 | --- | --- | --- |
-| Browser automation | Yes | Yes, via Playwright/Patchright |
+| Browser automation | Chromium, Firefox, WebKit | Chromium only, through its own CDP client |
+| Node.js driver process | Yes | No |
+| `Runtime.enable` CDP leak | Yes | No |
 | One-shot fetch result object | Manual | Built in |
 | Persistent scraping sessions | Manual setup | Built in |
 | Browser profiles | Manual setup | Built in |
 | Resource routing presets | Manual setup | Built in |
-| Patchright stealth path | Separate integration | Built in |
+| Human cursor and typing | Manual | Built in |
 | MCP server for agents | Manual | Built in |
 | CLI JSON fetch output | Manual | Built in |
 
@@ -50,7 +52,7 @@ asyncio.run(main())
 
 ## Recommendation
 
-Use Playwright directly when you need total browser control. Use WebSkrap when you want a Python web scraping package with sensible defaults, reusable sessions, profiles, resource policy, CLI output, and MCP tools.
+Use Playwright directly when you need Firefox or WebKit, or its full testing API. Use WebSkrap when you want a Python web scraping package with sensible defaults, reusable sessions, profiles, resource policy, CLI output, and MCP tools.
 
 ## Related docs
 

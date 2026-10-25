@@ -1,16 +1,17 @@
 # Humanizer
 
 WebSkrap's humanizer drives the real mouse and keyboard with human timing
-instead of Playwright's direct input. `human_click` waits for a visible target,
+instead of mechanical input. `human_click` waits for a visible target,
 scrolls it into view with the mouse wheel, moves the mouse along a curved eased
 path, and clicks near the target center with a human button hold;
 `human_type` clicks into a field the same way and types one key at a time.
+Both send trusted input through the CDP `Input` domain.
 
 ```python
 async with WebSkrapClient() as client:
     session = await client.session("default")
-    page = await session.context.new_page()
-    await page.goto("https://example.com", wait_until="domcontentloaded")
+    page = await session.new_page()
+    await page.goto("https://example.com", wait_until="domcontentloaded", timeout_s=30)
     await session.human_click(page, "button[type='submit']")
 ```
 
@@ -19,29 +20,28 @@ click. It is useful for flows with hover-sensitive controls, scroll-dependent
 layouts, or simple behavioral checks that treat instant coordinate jumps as
 synthetic.
 
-The cursor follows a cubic Bezier curve with randomized control points and
-eased spacing, so it accelerates and slows near the target instead of tracing a
+The cursor follows a Bezier curve with randomized control points and eased
+spacing, so it accelerates and slows near the target instead of tracing a
 straight, evenly spaced line. The algorithm is adapted from
-[HumanCursor](https://github.com/riflosnake/HumanCursor) and reimplemented for
-Playwright's async mouse without adding a dependency.
+[HumanCursor](https://github.com/riflosnake/HumanCursor) and reimplemented
+without adding a dependency.
 
-What a page's scripts see, compared with Playwright's own input:
+What a page's scripts see, compared with mechanical input (`human=False`):
 
-| Signal | Playwright | Humanizer |
+| Signal | Mechanical | Humanizer |
 |---|---|---|
 | Scrolling to an off-screen target | a jump with no `wheel` events | `wheel` events in notch-sized steps with short pauses |
-| Cursor before the click | teleports to the target | a curved path of `mousemove` events |
-| Button hold (`mousedown` to `mouseup`) | about 2 ms | 60-140 ms, unless you pass `delay` |
-| Typing | `fill`: no key events; `press_sequentially`: a constant rate | each key held 30-90 ms, 40-160 ms apart, with an occasional longer pause |
+| Cursor before the click | moves straight to the target center | a curved path of `mousemove` events |
+| Button hold (`mousedown` to `mouseup`) | no pause | 60-140 ms |
+| Typing | `fill`: no key events | each key held 30-90 ms, 40-160 ms apart, with an occasional longer pause |
 
 Before any pointer event, the humanizer checks with `elementFromPoint` that
 nothing covers the exact click point, in the element's own frame and shadow
-root, and raises a `usage` error if something does. It does not use
-Playwright's `click(trial=True)` for that: a trial click scrolls the page and
-sends a `mousemove` and a `click` event the page can see.
+root, and raises a `usage` error if something does. The check runs in an
+isolated world, so the page sees no event from it.
 
 If the mouse wheel cannot move the target into view, for example inside an
-inner scroll container the cursor is not over, Playwright's scroll finishes the
+inner scroll container the cursor is not over, a direct scroll finishes the
 job.
 
 ## Typing
@@ -50,8 +50,8 @@ job.
 await session.human_type(page, "input[name='q']", "running shoes")
 ```
 
-The text is appended to what the field holds, as with Playwright's
-`press_sequentially`. `timeout` is honored.
+The text is appended to what the field holds. Characters that a US keyboard
+cannot type are inserted as text. `timeout` is honored.
 
 ## Where it applies automatically
 
@@ -68,8 +68,8 @@ second, and typing about a tenth of a second per character.
 
 ## Direct click fallback
 
-Pass `human=False` to keep the same call shape while delegating to Playwright's
-click implementation.
+Pass `human=False` to click the element's center at once. The visibility,
+enabled and strict-match checks still apply.
 
 ```python
 await session.human_click(page, "button[type='submit']", human=False, timeout=5_000)
@@ -77,17 +77,10 @@ await session.human_click(page, "button[type='submit']", human=False, timeout=5_
 
 ## Click options
 
-`human_click` accepts normal Playwright click options including `button`,
-`click_count`, `delay`, `modifiers`, `position`, `strict`, `timeout`, and
-`trial`. `delay` sets the button hold in milliseconds; `trial` runs the checks,
-including the coverage check, without moving the mouse.
+`human_click` takes `click_count` (1 for a click, 2 for a double-click) and
+`timeout` in milliseconds. The target is a CSS selector or a snapshot ref
+(`e12`). A CSS selector that matches more than one element is refused.
 
 ```python
-await session.human_click(
-    page,
-    "button[type='submit']",
-    strict=True,
-    timeout=10_000,
-    modifiers=["Shift"],
-)
+await session.human_click(page, "button[type='submit']", click_count=2, timeout=10_000)
 ```

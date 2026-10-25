@@ -16,12 +16,13 @@ Two strategies, tried in order inside every frame of the page:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from contextlib import suppress
 from time import monotonic
-from typing import Any
 
-from webskrap import human as humanize
+from webskrap import cdp_dom
+from webskrap.cdp import CDPPage
 
 # Reject/deny buttons of common consent management platforms.
 CMP_REJECT_SELECTORS = (
@@ -160,7 +161,10 @@ REJECT_TEXT_PATTERN = re.compile(
 # A banner has a handful of buttons at most; scanning more means we matched the
 # wrong container.
 MAX_CANDIDATES = 6
-CLICK_TIMEOUT_MS = 1_500
+# The humanized click (wheel scroll, a curved cursor path, pauses, a button
+# hold) takes about 0.7 to 1.2 s on a fast host and more on a slow one; a
+# click cut short is a notice left up.
+CLICK_TIMEOUT_MS = 4_000
 # Time for the notice to animate away before the page is read.
 SETTLE_MS = 300
 # A consent platform's iframe is visible before its contents finish rendering,
@@ -172,20 +176,49 @@ POLL_INTERVAL_MS = 250
 POLL_ATTEMPTS = 12
 # Hard cap on everything after detection (polling plus click attempts), so the
 # total cost stays timeout_ms + this instead of growing with candidate count.
-POST_DETECT_BUDGET_MS = 3_000
+POST_DETECT_BUDGET_MS = 5_000
 # A caller that already waited for networkidle gave CMP scripts their chance to
 # inject, so the detection wait on top of that is mostly dead time.
 SETTLED_PAGE_TIMEOUT_MS = 500
 
 
-async def decline_cookies(page: Any, *, timeout_ms: float = 2_000) -> str | None:
+# Visible elements matching a CSS list; the notice-presence check.
+_VISIBLE_MATCH_SCRIPT = """(css) => {
+  for (const element of document.querySelectorAll(css)) {
+    const box = element.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== 'hidden')
+      return true;
+  }
+  return false;
+}"""
+
+# Reject-control candidates in one frame, at most ``max`` per strategy. The
+# text strategy scopes to cookie-looking containers unless the whole frame is
+# a consent platform's document.
+_CANDIDATES_SCRIPT = """(options) => {
+  const { strategy, cmpCss, containerCss, clickableCss, pattern, wholeFrame, max } = options;
+  let found;
+  if (strategy === 'cmp') {
+    found = [...document.querySelectorAll(cmpCss)];
+  } else {
+    const scopes = wholeFrame ? [document] : [...document.querySelectorAll(containerCss)];
+    const reject = new RegExp(pattern, 'i');
+    found = scopes.flatMap((scope) => [...scope.querySelectorAll(clickableCss)])
+      .filter((element) => reject.test(element.innerText || element.textContent || ''));
+  }
+  return [...new Set(found)].slice(0, max);
+}"""
+
+
+async def decline_cookies(page: CDPPage, *, timeout_ms: float = 2_000) -> str | None:
     """Click the reject control of a cookie consent notice, if one shows up.
 
     Waits up to ``timeout_ms`` for a consent notice to appear (CMP scripts
-    usually inject it after DOMContentLoaded), then tries every frame. Returns
-    the strategy that clicked (``"cmp"`` or ``"text"``), or ``None`` when no
-    notice was found. Never raises: a page without a notice, or a notice this
-    cannot handle, is not an error.
+    usually inject it after DOMContentLoaded), then tries every frame,
+    including cross-site iframes. Returns the strategy that clicked
+    (``"cmp"`` or ``"text"``), or ``None`` when no notice was found. Never
+    raises: a page without a notice, or a notice this cannot handle, is not
+    an error.
 
     Total wall time is bounded by ``timeout_ms + POST_DETECT_BUDGET_MS``.
 
@@ -196,76 +229,82 @@ async def decline_cookies(page: Any, *, timeout_ms: float = 2_000) -> str | None
     page. Walking further needs per-CMP second-layer flows.
     """
     deadline = monotonic() + (max(timeout_ms, 0.0) + POST_DETECT_BUDGET_MS) / 1000
-    if timeout_ms > 0:
-        try:
-            await page.wait_for_selector(
-                f"{CONSENT_PRESENT_CSS} >> visible=true", timeout=timeout_ms
-            )
-        except Exception:  # noqa: BLE001 - no notice appeared, nothing to decline
-            return None
-
+    if timeout_ms > 0 and not await _notice_appears(page, timeout_ms):
+        return None
     for attempt in range(POLL_ATTEMPTS):
-        for frame in page.frames:
-            strategy = await _decline_in_frame(page, frame, deadline)
+        try:
+            page_frames = await cdp_dom.frames(page)
+        except Exception:  # noqa: BLE001 - the page navigated; nothing to decline
+            return None
+        for frame in page_frames:
+            strategy = await _decline_in_frame(frame, deadline)
             if strategy is not None:
-                with suppress(Exception):  # settle wait is best-effort
-                    await page.wait_for_timeout(SETTLE_MS)
+                await asyncio.sleep(SETTLE_MS / 1000)
                 return strategy
         # Nothing left that can still render into a notice, or out of budget.
         if (
             timeout_ms <= 0
             or attempt + 1 == POLL_ATTEMPTS
             or monotonic() >= deadline
-            or not _has_consent_frame(page)
+            or not any(_is_consent_frame(frame.url) for frame in page_frames)
         ):
             break
-        with suppress(Exception):
-            await page.wait_for_timeout(POLL_INTERVAL_MS)
+        await asyncio.sleep(POLL_INTERVAL_MS / 1000)
     return None
 
 
-def _has_consent_frame(page: Any) -> bool:
-    try:
-        return any(CONSENT_FRAME_URL_PATTERN.search(frame.url or "") for frame in page.frames)
-    except Exception:  # noqa: BLE001 - frames detach mid-iteration
-        return False
+async def _notice_appears(page: CDPPage, timeout_ms: float) -> bool:
+    """Poll the main frame until a consent notice is visible or time runs out."""
+    deadline = monotonic() + timeout_ms / 1000
+    while True:
+        with suppress(Exception):  # a navigation can destroy the world mid-poll
+            if await page.evaluate(_VISIBLE_MATCH_SCRIPT, CONSENT_PRESENT_CSS):
+                return True
+        if monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.1)
 
 
-def _is_consent_frame(frame: Any) -> bool:
-    return bool(CONSENT_FRAME_URL_PATTERN.search(getattr(frame, "url", "") or ""))
+def _is_consent_frame(url: str) -> bool:
+    return bool(CONSENT_FRAME_URL_PATTERN.search(url or ""))
 
 
-async def _decline_in_frame(page: Any, frame: Any, deadline: float) -> str | None:
-    text_scope = frame if _is_consent_frame(frame) else frame.locator(CONSENT_CONTAINER_CSS)
-    candidates = (
-        ("cmp", frame.locator(CMP_REJECT_CSS)),
-        ("text", text_scope.locator(CLICKABLE_CSS).filter(has_text=REJECT_TEXT_PATTERN)),
-    )
-    for strategy, locator in candidates:
+async def _decline_in_frame(frame: cdp_dom.Frame, deadline: float) -> str | None:
+    for strategy in ("cmp", "text"):
+        arg = {
+            "strategy": strategy,
+            "cmpCss": CMP_REJECT_CSS,
+            "containerCss": CONSENT_CONTAINER_CSS,
+            "clickableCss": CLICKABLE_CSS,
+            "pattern": REJECT_TEXT_PATTERN.pattern,
+            "wholeFrame": _is_consent_frame(frame.url),
+            "max": MAX_CANDIDATES,
+        }
         try:
-            total = min(await locator.count(), MAX_CANDIDATES)
-        except Exception:  # noqa: BLE001 - detached frame or bad selector engine
+            async with cdp_dom.query_elements(frame, _CANDIDATES_SCRIPT, arg) as candidates:
+                for element in candidates:
+                    click_timeout = min(CLICK_TIMEOUT_MS / 1000, deadline - monotonic())
+                    if click_timeout <= 0:
+                        return None
+                    try:
+                        if not await cdp_dom.is_visible(element):
+                            continue
+                        # The banner is usually the first thing clicked on a
+                        # page, and the page's own bot script sees every mouse
+                        # event, so a teleported 2 ms click here is the one
+                        # that gets scored. The humanized click refuses a
+                        # covered element.
+                        await cdp_dom.human_click(
+                            element,
+                            description="cookie notice reject control",
+                            timeout_s=click_timeout,
+                        )
+                    # S112/BLE001: one unclickable candidate (covered, detached,
+                    # or the page already navigating) must not abandon the
+                    # remaining ones, and the library logs nothing by design.
+                    except Exception:  # nosec B112  # noqa: BLE001, S112
+                        continue
+                    return strategy
+        except Exception:  # noqa: BLE001 - detached frame or a world destroyed mid-query
             return None
-        for index in range(total):
-            click_timeout = min(CLICK_TIMEOUT_MS, (deadline - monotonic()) * 1000)
-            if click_timeout <= 0:
-                return None
-            element = locator.nth(index)
-            try:
-                if not await element.is_visible():
-                    continue
-                # The banner is usually the first thing clicked on a page, and
-                # the page's own bot script sees every mouse event, so a
-                # teleported 2 ms click here is the one that gets scored. The
-                # humanized click moves the page's mouse, which reaches into
-                # frames, and refuses a covered element.
-                await humanize.click(
-                    page, element, description="cookie notice reject control", timeout=click_timeout
-                )
-            # S112/BLE001: one unclickable candidate (covered, detached, or the
-            # page already navigating) must not abandon the remaining ones, and
-            # the library logs nothing by design.
-            except Exception:  # nosec B112  # noqa: BLE001, S112
-                continue
-            return strategy
     return None

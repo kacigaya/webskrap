@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "webskrap"
-version = "2.15.0"
-description = "A Playwright-based Python scraping framework with coherent browser profiles and session controls."
+version = "3.0.0"
+description = "Async Python scraping on Chromium over its own CDP client, with coherent browser profiles and session controls."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [
   { name = "kacigaya" }
 ]
-keywords = ["browser-automation", "playwright", "scraping", "crawler"]
+keywords = ["browser-automation", "cdp", "chromium", "scraping", "crawler"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
@@ -26,8 +26,6 @@ classifiers = [
 ]
 dependencies = [
   "mcp>=2,<3",
-  "patchright>=1.60.0",
-  "playwright>=1.49",
   "pydantic>=2.8",
   "rich>=13.9",
   "typer>=0.15",
@@ -65,7 +63,7 @@ exclude = ["web", ".github", "assets"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
-  "browser: requires installed Playwright browsers",
+  "browser: requires an installed browser (webskrap install)",
   "live: hits public third-party bot-detection demos (opt-in via WEBSKRAP_LIVE=1)",
 ]
 

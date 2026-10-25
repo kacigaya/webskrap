@@ -11,8 +11,8 @@ from typing import cast, get_args
 
 from webskrap.models import (
     ElementState,
-    FetchDriver,
     LoadState,
+    ProfileMode,
     ResourcePolicy,
     SearchEngine,
     WaitUntil,
@@ -49,13 +49,13 @@ def parse_wait_until(value: str) -> WaitUntil:
     return cast(WaitUntil, parse_literal(value, WaitUntil, "wait_until"))
 
 
-def parse_fetch_driver(value: str) -> FetchDriver:
-    """Parse a fetch driver name.
+def parse_profile_mode(value: str) -> ProfileMode:
+    """Parse a profile mode: native, locale, or full.
 
     Raises:
-        ValueError: If ``value`` is not ``patchright`` or ``cdp``.
+        ValueError: If ``value`` is not a profile mode.
     """
-    return cast(FetchDriver, parse_literal(value, FetchDriver, "driver"))
+    return cast(ProfileMode, parse_literal(value, ProfileMode, "profile_mode"))
 
 
 def parse_load_state(value: str) -> LoadState:

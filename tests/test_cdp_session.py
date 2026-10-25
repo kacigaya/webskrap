@@ -271,14 +271,13 @@ def session_server() -> Iterator[str]:
 
 
 @pytest.mark.browser
-@pytest.mark.skipif(sys.platform == "win32", reason="the CDP driver needs posix_spawn")
 def test_cdp_session_drives_pages_across_reconnects(
     persistent_session_env: Path, session_server: str, tmp_path: Path
 ) -> None:
     name = "cdp-session"
 
     async def exercise() -> dict[str, Any]:
-        opened = await browser_session.open_session(name, driver="cdp")
+        opened = await browser_session.open_session(name)
         results: dict[str, Any] = {"opened": opened}
 
         async def run(action: Any) -> Any:
@@ -394,7 +393,7 @@ def test_cdp_session_drives_pages_across_reconnects(
         await run(lambda page: browser_session.screenshot(page, shot, full_page=True))
         results["shot"] = shot.read_bytes()[:8]
         # A popup becomes the current page for the next command, as with
-        # Patchright's pages[-1]; the opener stays reachable once it closes.
+        # Playwright's pages[-1]; the opener stays reachable once it closes.
         await run(lambda page: browser_session.evaluate(page, "window.open('/session-2')"))
         results["popup"] = await run(browser_session.page_state)
         await run(lambda page: browser_session.evaluate(page, "window.close()"))
@@ -406,7 +405,7 @@ def test_cdp_session_drives_pages_across_reconnects(
         results["gesture_popup"] = await run(browser_session.page_state)
         await run(lambda page: browser_session.evaluate(page, "window.close()"))
         with pytest.raises(WebSkrapError) as mismatch:
-            await browser_session.open_session(name, driver="patchright")
+            await browser_session.open_session(name, proxy_server="http://127.0.0.1:9")
         results["mismatch"] = mismatch.value.code
         results["reused"] = await browser_session.open_session(name)
         await run(
@@ -427,7 +426,7 @@ def test_cdp_session_drives_pages_across_reconnects(
     finally:
         browser_session.close_session(name, delete_data=True)
 
-    assert results["opened"]["driver"] == "cdp"
+    assert results["opened"]["reused"] is False
     assert results["goto"]["status"] == 200
     assert results["goto"]["title"] == "/session"
     assert results["back"]["title"] == "/session"
@@ -435,7 +434,7 @@ def test_cdp_session_drives_pages_across_reconnects(
     assert results["hash_forward"]["url"].endswith("/session#part")
     assert results["main_world"] == 42  # page globals are visible to eval
     assert results["function"] == "/session"
-    # Same placeholders Patchright reports for values JSON cannot carry.
+    # Same placeholders WebSkrap 2.x reported for values JSON cannot carry.
     assert results["serialized"] == [
         "ref: <Window>",
         "ref: <Node>",
@@ -470,7 +469,6 @@ def test_cdp_session_drives_pages_across_reconnects(
     assert results["gesture_popup"]["url"].endswith("?gesture")
     assert results["mismatch"] is ErrorCode.USAGE
     assert results["reused"]["reused"] is True
-    assert results["reused"]["driver"] == "cdp"
     # Across all these attaches the page never saw Runtime or Console enabled.
     assert '"touched":false' in results["probe_text"]["text"]
     assert '"webdriver":false' in results["probe_text"]["text"]
@@ -484,14 +482,13 @@ def _ref(tree: str, line_start: str) -> str:
 
 
 @pytest.mark.browser
-@pytest.mark.skipif(sys.platform == "win32", reason="the CDP driver needs posix_spawn")
 def test_cdp_session_snapshot_refs_drive_elements(
     persistent_session_env: Path, session_server: str
 ) -> None:
     name = "cdp-elements"
 
     async def exercise() -> dict[str, Any]:
-        await browser_session.open_session(name, driver="cdp")
+        await browser_session.open_session(name)
         results: dict[str, Any] = {}
 
         async def run(action: Any) -> Any:

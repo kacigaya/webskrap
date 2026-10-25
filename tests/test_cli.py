@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -132,10 +131,9 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
     }
 
     config = _FakeClient.calls[0]["config"]
-    assert config.driver == "patchright"
     assert config.headless is True
     assert config.channel == "chrome"
-    assert config.patchright_focus_control is None
+    assert config.profile_mode == "native"
     assert config.decline_cookies is True
 
 
@@ -169,8 +167,7 @@ class _LaunchFailingClient(_FakeClient):
         self.attempts.append(config.channel)
         if config.channel in self.fail_channels:
             raise RuntimeError(
-                f"Chromium distribution '{config.channel}' is not found at /opt/google/chrome\n"
-                'Run "playwright install chrome"'
+                f"Chromium distribution '{config.channel}' is not found at /opt/google/chrome"
             )
 
     async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
@@ -354,77 +351,54 @@ def test_doctor_json_failure(monkeypatch: Any) -> None:
     assert json.loads(result.output) == {"ok": False, "message": "broken", "hint": "fix it"}
 
 
-def test_install_json_success(monkeypatch: Any) -> None:
-    calls: list[tuple[str, ...]] = []
+def _fake_install(monkeypatch: Any, *, installed: bool = True) -> list[bool]:
+    calls: list[bool] = []
 
-    def fake_run(command: tuple[str, ...], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout="installed", stderr="")
+    def fake(*, force: bool = False) -> dict[str, Any]:
+        calls.append(force)
+        return {
+            "version": "156.0.8078.47",
+            "platform": "linux64",
+            "executable": "/browsers/chrome-156.0.8078.47-linux64/chrome-linux64/chrome",
+            "installed": installed,
+        }
 
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "install_browser", fake)
+    return calls
 
-    result = runner.invoke(cli.app, ["install", "--format", "json"])
+
+def test_install_json_reports_the_installed_browser(monkeypatch: Any) -> None:
+    calls = _fake_install(monkeypatch)
+    result = runner.invoke(cli.app, ["install", "--force", "--format", "json"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["ok"] is True
-    assert [tuple(step["command"]) for step in payload["steps"]] == list(cli.INSTALL_COMMANDS)
-    assert calls == list(cli.INSTALL_COMMANDS)
+    assert payload["ok"] is True and payload["installed"] is True
+    assert payload["version"] == "156.0.8078.47"
+    assert calls == [True]
 
 
-def test_install_json_failure(monkeypatch: Any) -> None:
-    def fake_run(command: tuple[str, ...], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        return_code = 1 if "patchright" in command else 0
-        return subprocess.CompletedProcess(
-            command,
-            return_code,
-            stdout="",
-            stderr="missing browser",
-        )
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
-
-    result = runner.invoke(cli.app, ["install", "--format", "json"])
-
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
-    assert payload["ok"] is False
-    assert payload["steps"][0]["ok"] is True
-    assert payload["steps"][1]["ok"] is False
-    assert payload["steps"][1]["message"] == "missing browser"
-
-
-def test_install_json_handles_missing_executable(monkeypatch: Any) -> None:
-    def fake_run(command: tuple[str, ...], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        if "patchright" in command:
-            raise FileNotFoundError("missing patchright")
-        return subprocess.CompletedProcess(command, 0, stdout="installed", stderr="")
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
-
-    result = runner.invoke(cli.app, ["install", "--format", "json"])
-
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
-    assert payload["ok"] is False
-    assert payload["steps"][1]["ok"] is False
-    assert payload["steps"][1]["message"] == "missing patchright"
-
-
-def test_install_human_output(monkeypatch: Any) -> None:
-    def fake_run(command: tuple[str, ...], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(command, 0, stdout="installed", stderr="")
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
-
+def test_install_human_says_when_nothing_was_downloaded(monkeypatch: Any) -> None:
+    calls = _fake_install(monkeypatch, installed=False)
     result = runner.invoke(cli.app, ["install"])
 
     assert result.exit_code == 0, result.output
-    assert "OK:" in result.output
-    assert "playwright" in result.output
-    assert "patchright" in result.output
-    assert "install" in result.output
-    assert "chromium" in result.output
+    assert "Already installed: Chrome for Testing 156.0.8078.47" in result.output
+    assert calls == [False]
+
+
+def test_install_failure_uses_the_error_envelope(monkeypatch: Any) -> None:
+    from webskrap.errors import ErrorCode, WebSkrapError
+
+    def fail(*, force: bool = False) -> dict[str, Any]:
+        raise WebSkrapError("could not read the index", code=ErrorCode.BROWSER_LAUNCH)
+
+    monkeypatch.setattr(cli, "install_browser", fail)
+    result = runner.invoke(cli.app, ["install", "--format", "json"])
+
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload["ok"] is False and payload["code"] == "browser_launch"
 
 
 def test_profiles_human_output_lists_every_profile() -> None:
@@ -458,19 +432,6 @@ def test_doctor_human_failure_shows_the_hint(monkeypatch: Any) -> None:
     assert result.exit_code == 1
     assert "did not launch" in result.output
     assert "webskrap install" in result.output
-
-
-def test_install_human_reports_failures(monkeypatch: Any) -> None:
-    def fake_run(command: tuple[str, ...], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(command, 1, stdout="", stderr="download failed")
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
-
-    result = runner.invoke(cli.app, ["install"])
-
-    assert result.exit_code == 1
-    assert "FAILED:" in result.output
-    assert "download failed" in result.output
 
 
 def _plain(output: str) -> str:
@@ -560,7 +521,7 @@ def test_doctor_human_prints_the_surrounding_facts(monkeypatch: Any) -> None:
             "ok": True,
             "message": "ready",
             "executable_path": "/browsers/chrome",
-            "versions": {"webskrap": "2.0.0", "patchright": None},
+            "versions": {"webskrap": "3.0.0", "mcp": None},
             "paths": {"output_root": "/tmp/out"},
             "environment": {"WEBSKRAP_OUTPUT_DIR": "/tmp/out", "WEBSKRAP_BROWSER_DIR": None},
             "sessions": [{"session": "shop", "running": True}],
@@ -571,9 +532,9 @@ def test_doctor_human_prints_the_surrounding_facts(monkeypatch: Any) -> None:
     result = runner.invoke(cli.app, ["doctor"])
 
     assert result.exit_code == 0, result.output
-    assert "webskrap 2.0.0" in result.output
-    # A driver that is not installed is named rather than silently omitted.
-    assert "patchright missing" in result.output
+    assert "webskrap 3.0.0" in result.output
+    # A package that is not installed is named rather than silently omitted.
+    assert "mcp missing" in result.output
     assert "/browsers/chrome" in result.output
     assert "1 (1 running)" in result.output
     # Only the overrides actually set are shown.
@@ -651,7 +612,6 @@ def test_search_json_is_the_shared_payload(monkeypatch: Any) -> None:
     assert call["engine"] is SearchEngine.BING
     assert call["max_results"] == 1
     config = call["config"]
-    assert config.driver == "patchright"
     assert config.headless is True
     assert config.channel == "chrome"
     assert config.decline_cookies is True
@@ -833,7 +793,7 @@ def test_fetch_stays_sandboxed_by_default(monkeypatch: Any) -> None:
     assert result.exit_code == 0, result.output
     config = _FakeClient.calls[0]["config"]
     assert config.chromium_sandbox is True
-    assert "--no-sandbox" not in config.launch_options().get("args", [])
+    assert "--no-sandbox" not in config.browser_args()
 
 
 def test_fetch_no_sandbox_flag_opts_out(monkeypatch: Any) -> None:
@@ -846,7 +806,7 @@ def test_fetch_no_sandbox_flag_opts_out(monkeypatch: Any) -> None:
     assert result.exit_code == 0, result.output
     config = _FakeClient.calls[0]["config"]
     assert config.chromium_sandbox is False
-    assert "--no-sandbox" in config.launch_options()["args"]
+    assert "--no-sandbox" in config.browser_args()
 
 
 def test_fetch_no_sandbox_env_opts_out(monkeypatch: Any) -> None:

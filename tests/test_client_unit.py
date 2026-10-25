@@ -2,114 +2,184 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from anyio import CancelScope, sleep
-from patchright.async_api import TimeoutError as PatchrightTimeoutError
-from playwright.async_api import BrowserContext
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from webskrap import client as client_module
+from webskrap.cdp import CDPBrowser, CDPConnection, CDPPage
+from webskrap.challenges import _CHALLENGE_SCRIPT
 from webskrap.client import (
+    _CONTENT_SCRIPT,
+    _STATE_SCRIPT,
+    LINKS_SCRIPT,
     WebSkrapClient,
     WebSkrapError,
     WebSkrapSession,
-    _resource_route_handler,
     browser_doctor,
     lavapipe_available,
     with_channel_fallback,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
-from webskrap.human import bezier_path, scroll_into_view
-from webskrap.models import ResourcePolicy, SearchEngine, SessionConfig
+from webskrap.human import bezier_path
+from webskrap.models import SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
 
 SEARCH_FIXTURES = Path(__file__).parent / "fixtures" / "search"
+EXECUTABLE = Path("/browsers/chrome")
+
+
+def _fake_browser(user_agent: str = "") -> MagicMock:
+    browser = MagicMock(spec=CDPBrowser)
+    browser.connection = MagicMock(spec=CDPConnection)
+    browser.connection.send = AsyncMock(
+        return_value={"userAgent": user_agent, "product": "Chrome/150.0", "cookies": []}
+    )
+    browser.close = AsyncMock()
+    return browser
 
 
 async def test_ua_probe_is_shared_cached_and_reset_on_close(monkeypatch) -> None:
     client = WebSkrapClient()
     probe = AsyncMock(return_value="Chrome/140.0")
-    monkeypatch.setattr(client, "_probe_headless_user_agent", probe)
+    monkeypatch.setattr(client_module, "_probe_headless_user_agent", probe)
     config = SessionConfig(mask_headless_user_agent=True)
     uas = await asyncio.gather(
-        *(client._headless_clean_user_agent(object(), config) for _ in range(8))
+        *(client._headless_clean_user_agent(EXECUTABLE, config) for _ in range(8))
     )
     assert uas == ["Chrome/140.0"] * 8
     assert probe.await_count == 1
-    await client._headless_clean_user_agent(object(), SessionConfig(channel="chrome"))
+    await client._headless_clean_user_agent(Path("/browsers/chromium"), config)
     assert probe.await_count == 2
     await client.close()
-    await client._headless_clean_user_agent(object(), config)
+    await client._headless_clean_user_agent(EXECUTABLE, config)
     assert probe.await_count == 3
 
 
 async def test_failed_ua_probe_is_not_cached(monkeypatch) -> None:
     client = WebSkrapClient()
     probe = AsyncMock(side_effect=[None, "Chrome/140.0"])
-    monkeypatch.setattr(client, "_probe_headless_user_agent", probe)
-    assert await client._headless_clean_user_agent(object(), SessionConfig()) is None
-    assert await client._headless_clean_user_agent(object(), SessionConfig()) == "Chrome/140.0"
+    monkeypatch.setattr(client_module, "_probe_headless_user_agent", probe)
+    assert await client._headless_clean_user_agent(EXECUTABLE, SessionConfig()) is None
+    assert await client._headless_clean_user_agent(EXECUTABLE, SessionConfig()) == "Chrome/140.0"
     assert probe.await_count == 2
 
 
 async def test_ua_probe_rewrites_native_version_and_closes_without_sleep(monkeypatch) -> None:
-    page = MagicMock()
-    page.evaluate = AsyncMock(return_value="Mozilla/5.0 HeadlessChrome/140.0.1 Safari/537.36")
-    browser = MagicMock()
-    browser.new_page = AsyncMock(return_value=page)
-    browser.close = AsyncMock()
-    browser_type = MagicMock()
-    browser_type.launch = AsyncMock(return_value=browser)
-    sleep = AsyncMock(side_effect=AssertionError("UA probe must not sleep"))
-    monkeypatch.setattr("webskrap.client.asyncio.sleep", sleep)
-    ua = await WebSkrapClient()._headless_clean_user_agent(browser_type, SessionConfig())
+    browser = _fake_browser("Mozilla/5.0 HeadlessChrome/140.0.1 Safari/537.36")
+    monkeypatch.setattr(client_module, "launch", AsyncMock(return_value=browser))
+    sleep_mock = AsyncMock(side_effect=AssertionError("UA probe must not sleep"))
+    monkeypatch.setattr("webskrap.client.asyncio.sleep", sleep_mock)
+    ua = await WebSkrapClient()._headless_clean_user_agent(EXECUTABLE, SessionConfig())
     assert ua == "Mozilla/5.0 Chrome/140.0.1 Safari/537.36"
     browser.close.assert_awaited_once()
-    sleep.assert_not_awaited()
+    sleep_mock.assert_not_awaited()
+
+
+class _Launcher:
+    """Stands in for ``cdp.launch`` and records how the browser was started."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict[str, Any]] = []
+
+    async def __call__(self, executable: Path, **options: Any) -> MagicMock:
+        self.calls.append({"executable": executable, **options})
+        if self.fail:
+            raise WebSkrapError("browser failed to launch", code=ErrorCode.BROWSER_LAUNCH)
+        return _fake_browser()
+
+    @property
+    def options(self) -> dict[str, Any]:
+        return self.calls[-1] if self.calls else {}
+
+
+class _FakeDisplay:
+    def __init__(self) -> None:
+        self.stopped = 0
+        self.env = {"DISPLAY": ":99", "XAUTHORITY": "/tmp/webskrap-display-x/Xauthority"}
+
+    async def stop(self) -> None:
+        self.stopped += 1
+
+
+def _launch_client(
+    monkeypatch: pytest.MonkeyPatch, launcher: _Launcher, *, probe: bool = False
+) -> tuple[WebSkrapClient, list[_FakeDisplay], list[tuple[int, int]]]:
+    displays: list[_FakeDisplay] = []
+    sizes: list[tuple[int, int]] = []
+
+    async def fake_start(width: int, height: int) -> _FakeDisplay:
+        sizes.append((width, height))
+        displays.append(_FakeDisplay())
+        return displays[-1]
+
+    async def no_probe(*_args: object) -> str:
+        raise AssertionError("the UA probe must not run here")
+
+    monkeypatch.setattr("webskrap.client.VirtualDisplay.start", fake_start)
+    monkeypatch.setattr(client_module, "launch", launcher)
+    monkeypatch.setattr(client_module, "find_executable", lambda _channel: EXECUTABLE)
+    client = WebSkrapClient()
+    if not probe:
+        monkeypatch.setattr(client, "_headless_clean_user_agent", no_probe)
+    return client, displays, sizes
 
 
 async def test_explicit_ua_skips_probe(monkeypatch) -> None:
-    chromium = _LaunchChromium()
-    client, _displays, _sizes = _virtual_display_client(monkeypatch, chromium)
-    config = SessionConfig(
-        driver="patchright",
-        mask_headless_user_agent=True,
-        launch_args=["--user-agent=Caller UA"],
-    )
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher)
+    config = SessionConfig(mask_headless_user_agent=True, launch_args=["--user-agent=Caller UA"])
     session = await client._create_session("ua", config, get_profile(None))
-    assert "--user-agent=Caller UA" in chromium.options["args"]
+    assert "--user-agent=Caller UA" in launcher.options["args"]
     await session.close()
 
 
-async def test_session_close_survives_repeated_cancellation_and_removes_profile(tmp_path) -> None:
-    profile_dir = tmp_path / "profile"
-    profile_dir.mkdir()
+async def test_masked_headless_ua_goes_in_as_a_launch_flag(monkeypatch) -> None:
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher, probe=True)
+    monkeypatch.setattr(client, "_headless_clean_user_agent", AsyncMock(return_value="Clean UA"))
+    session = await client._create_session(
+        "ua", SessionConfig(mask_headless_user_agent=True), get_profile(None)
+    )
+    assert "--user-agent=Clean UA" in launcher.options["args"]
+    assert launcher.options["headless"] is True
+    await session.close()
 
-    async def checkpoint_close():
+
+async def test_session_close_survives_repeated_cancellation() -> None:
+    async def checkpoint_close() -> None:
         await sleep(0)
         await sleep(0)
 
-    context = MagicMock(spec=BrowserContext)
-    context.close = AsyncMock(side_effect=checkpoint_close)
+    browser = _fake_browser()
+    browser.close = AsyncMock(side_effect=checkpoint_close)
     session = WebSkrapSession(
-        name="cancelled",
-        context=context,
-        config=SessionConfig(),
-        profile=get_profile(None),
-        temp_user_data_dir=str(profile_dir),
+        name="cancelled", browser=browser, config=SessionConfig(), profile=get_profile(None)
     )
     with CancelScope() as scope:
         scope.cancel()
         await session.close()
     assert session._closed
-    context.close.assert_awaited_once()
-    assert not profile_dir.exists()
+    browser.close.assert_awaited_once()
+
+
+class _ManagedSession:
+    def __init__(self) -> None:
+        self._closed = False
+
+    async def close(self) -> None:
+        self._closed = True
+
+
+async def _new_managed_session() -> _ManagedSession:
+    return _ManagedSession()
 
 
 async def test_failed_close_keeps_client_ownership(monkeypatch) -> None:
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
     client = WebSkrapClient()
     monkeypatch.setattr(client, "_create_session", lambda *_args: _new_managed_session())
     session = await client.session("retained")
@@ -123,348 +193,182 @@ async def test_failed_close_keeps_client_ownership(monkeypatch) -> None:
     await client.close()
 
 
-class _Request:
-    def __init__(self, resource_type: str) -> None:
-        self.resource_type = resource_type
+class _FakePage:
+    """A CDP page stand-in that answers WebSkrap's own page scripts.
 
+    ``challenges`` are the successive answers of the challenge probe; the
+    last one repeats. ``states`` are what ``cdp_dom.element_state`` reports
+    for a readiness target, in order.
+    """
 
-class _Route:
-    def __init__(self, resource_type: str) -> None:
-        self.request = _Request(resource_type)
-        self.aborted = False
-        self.continued = False
-
-    async def abort(self) -> None:
-        self.aborted = True
-
-    async def continue_(self) -> None:
-        self.continued = True
-
-
-class _Mouse:
-    def __init__(self) -> None:
-        self.moves: list[tuple[float, float, int | None]] = []
-        self.clicks: list[tuple[float, float, dict[str, object]]] = []
-        self.wheels: list[tuple[float, float]] = []
-
-    async def move(self, x: float, y: float, *, steps: int | None = None) -> None:
-        self.moves.append((x, y, steps))
-
-    async def click(self, x: float, y: float, **options: object) -> None:
-        self.clicks.append((x, y, options))
-
-    async def wheel(self, delta_x: float, delta_y: float) -> None:
-        self.wheels.append((delta_x, delta_y))
-
-
-class _Keyboard:
-    def __init__(self) -> None:
-        self.events: list[tuple[str, str]] = []
-
-    async def down(self, key: str) -> None:
-        self.events.append(("down", key))
-
-    async def up(self, key: str) -> None:
-        self.events.append(("up", key))
-
-
-class _Locator:
     def __init__(
-        self, box: dict[str, float] | None = None, count: int = 1, *, receives_click: bool = True
+        self,
+        *,
+        html: str = "<html><body>Page body</body></html>",
+        text: str = "Visible body",
+        challenges: list[object] | None = None,
     ) -> None:
-        self.box = box or {"x": 10, "y": 20, "width": 100, "height": 40}
-        self.element_count = count
-        self.receives_click = receives_click
-        self.hit_tests: list[object] = []
-        self.waits: list[dict[str, object]] = []
-        self.scrolled: list[dict[str, object]] = []
+        self.html = html
+        self.text = text
+        self.challenges = list(challenges or [None])
+        self.requested: list[str] = []
+        self.scripts: list[str] = []
+        self.default_timeout_s = 30.0
 
-    async def wait_for(self, **options: object) -> None:
-        self.waits.append(options)
+    async def goto(self, url: str, *, wait_until: str, timeout_s: float) -> dict[str, Any]:
+        self.requested.append(url)
+        return {"status": 200, "headers": {"Content-Type": "text/html"}}
 
-    async def scroll_into_view_if_needed(self, **options: object) -> None:
-        self.scrolled.append(options)
-
-    async def bounding_box(self, **options: object) -> dict[str, float] | None:
-        return self.box
-
-    async def count(self) -> int:
-        return self.element_count
-
-    async def evaluate(self, _script: str, arg: object) -> bool:
-        self.hit_tests.append(arg)
-        return self.receives_click
-
-
-class _Page:
-    def __init__(self, locator: _Locator | None = None) -> None:
-        self._locator = locator or _Locator()
-        self.mouse = _Mouse()
-        self.keyboard = _Keyboard()
-        self.clicks: list[tuple[str, dict[str, object]]] = []
-        self.evaluations: list[str] = []
-        self.timeouts: list[float] = []
-        self.locators: list[str] = []
-
-    def locator(self, selector: str) -> _Locator:
-        self.locators.append(selector)
-        return self._locator
-
-    async def click(self, selector: str, **options: object) -> None:
-        self.clicks.append((selector, options))
-
-    async def wait_for_timeout(self, timeout: float) -> None:
-        self.timeouts.append(timeout)
-
-    async def evaluate(self, script: str) -> object:
-        self.evaluations.append(script)
-        if "innerHeight" in script:
-            return [1280, 720]
-        return None
+    async def evaluate(self, script: str, arg: Any = None) -> Any:
+        self.scripts.append(script)
+        if script == _CHALLENGE_SCRIPT:
+            answer = self.challenges.pop(0) if len(self.challenges) > 1 else self.challenges[0]
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer
+        if script == _STATE_SCRIPT:
+            return {"url": self.requested[-1], "title": "Title", "text": self.text}
+        if script == _CONTENT_SCRIPT:
+            return self.html
+        if script == LINKS_SCRIPT:
+            return {"links": [], "total": 0}
+        raise AssertionError(f"unexpected script: {script[:60]}")
 
 
-class _Response:
-    status = 200
-    headers = {"content-type": "text/html"}
-
-
-class _BodyLocator:
-    async def inner_text(self) -> str:
-        return "Visible body"
-
-
-class _FetchPage:
-    url = "https://example.test/final"
-    frames: list[object] = []
-
-    def __init__(self) -> None:
-        self.content_called = False
-        self.closed = False
-        self.locators: list[str] = []
-        self.consent_waits: list[float] = []
-        self.default_timeout: float | None = None
-        self.default_navigation_timeout: float | None = None
-
-    def set_default_timeout(self, timeout: float) -> None:
-        self.default_timeout = timeout
-
-    def set_default_navigation_timeout(self, timeout: float) -> None:
-        self.default_navigation_timeout = timeout
-
-    async def goto(self, *_args: object, **_kwargs: object) -> _Response:
-        return _Response()
-
-    async def wait_for_selector(self, _selector: str, *, timeout: float) -> object:
-        self.consent_waits.append(timeout)
-        raise TimeoutError("no cookie notice on this page")
-
-    async def title(self) -> str:
-        return "Example"
-
-    async def content(self) -> str:
-        self.content_called = True
-        return "<html><body>Visible body</body></html>"
-
-    async def evaluate(self, _script: str) -> None:
-        return None
-
-    def locator(self, selector: str) -> _BodyLocator:
-        self.locators.append(selector)
-        return _BodyLocator()
-
-    async def close(self) -> None:
-        self.closed = True
-
-
-class _FetchContext:
-    def __init__(self, page: _FetchPage) -> None:
-        self.page = page
-
-    async def new_page(self) -> _FetchPage:
-        return self.page
-
-    async def cookies(self) -> list[dict[str, object]]:
-        return []
-
-
-def _session() -> WebSkrapSession:
-    return WebSkrapSession(
-        name="test",
-        context=None,  # type: ignore[arg-type]
-        config=SessionConfig(),
-        profile=get_profile(None),
-    )
-
-
-@pytest.mark.asyncio
-async def test_lite_resource_policy_blocks_heavy_assets() -> None:
-    handler = _resource_route_handler(ResourcePolicy.LITE)
-    route = _Route("image")
-
-    await handler(route)
-
-    assert route.aborted is True
-    assert route.continued is False
-
-
-@pytest.mark.asyncio
-async def test_lite_resource_policy_allows_documents() -> None:
-    handler = _resource_route_handler(ResourcePolicy.LITE)
-    route = _Route("document")
-
-    await handler(route)
-
-    assert route.aborted is False
-    assert route.continued is True
-
-
-@pytest.mark.asyncio
-async def test_fetch_text_only_uses_body_inner_text() -> None:
-    page = _FetchPage()
+def _session(page: _FakePage | None = None, **config: Any) -> WebSkrapSession:
     session = WebSkrapSession(
         name="test",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(),
+        browser=_fake_browser(),
+        config=SessionConfig(**config),
         profile=get_profile(None),
     )
+    session.closed_pages = []  # type: ignore[attr-defined]
+
+    async def new_page() -> Any:
+        if page is None:
+            raise AssertionError("no page may open")
+        return page
+
+    async def close_page(closed: Any) -> None:
+        session.closed_pages.append(closed)  # type: ignore[attr-defined]
+
+    session.new_page = new_page  # type: ignore[method-assign]
+    session.close_page = close_page  # type: ignore[method-assign]
+    return session
+
+
+def _element_states(monkeypatch: pytest.MonkeyPatch, *states: str) -> list[str]:
+    """Make ``cdp_dom.element_state`` report ``states`` in turn; return the targets asked."""
+    asked: list[str] = []
+    remaining = list(states)
+
+    async def element_state(_page: object, target: str) -> str:
+        asked.append(target)
+        return remaining.pop(0) if len(remaining) > 1 else remaining[0]
+
+    monkeypatch.setattr("webskrap.client.cdp_dom.element_state", element_state)
+    return asked
+
+
+async def test_fetch_text_only_reads_visible_text_not_html() -> None:
+    page = _FakePage()
+    session = _session(page)
 
     result = await session.fetch("https://example.test", text_only=True)
 
     assert result.text == "Visible body"
-    assert page.locators == ["body"]
-    assert page.content_called is False
-    assert page.closed is True
+    assert result.headers == {"content-type": "text/html"}
+    assert _CONTENT_SCRIPT not in page.scripts
+    assert session.closed_pages == [page]  # type: ignore[attr-defined]
     assert result.cookie_notice_declined is None
 
 
 @pytest.mark.parametrize("provider", ["DataDome", "Cloudflare"])
 async def test_fetch_blocks_challenges_before_consent_or_extraction(provider, monkeypatch) -> None:
-    page = _FetchPage()
-    page.evaluate = AsyncMock(return_value=provider)
+    page = _FakePage(challenges=[provider])
     decline = AsyncMock()
     monkeypatch.setattr("webskrap.client._decline_cookies", decline)
-    session = WebSkrapSession(
-        name="blocked",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(decline_cookies=True),
-        profile=get_profile(None),
-    )
+    asked = _element_states(monkeypatch, "visible")
+    session = _session(page, decline_cookies=True)
     with pytest.raises(WebSkrapError) as error:
         await session.fetch("https://example.test", ready_selector="#quote")
     assert error.value.code is ErrorCode.BLOCKED
     assert provider in str(error.value)
     decline.assert_not_awaited()
-    assert page.locators == []
-    assert not page.content_called
-    assert page.closed
+    assert asked == []
+    assert _CONTENT_SCRIPT not in page.scripts
+    assert session.closed_pages == [page]  # type: ignore[attr-defined]
 
 
-async def test_fetch_waits_for_visible_selector_before_extracting() -> None:
-    page = _FetchPage()
-    locator = MagicMock()
-    locator.wait_for = AsyncMock()
-    locator.inner_text = AsyncMock(return_value="Ready quote form")
-    page.locator = MagicMock(return_value=locator)
-    session = WebSkrapSession(
-        name="ready",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(),
-        profile=get_profile(None),
-    )
+async def test_fetch_waits_for_visible_selector_before_extracting(monkeypatch) -> None:
+    page = _FakePage(text="Ready quote form")
+    asked = _element_states(monkeypatch, "hidden", "hidden", "visible")
+    session = _session(page)
     result = await session.fetch(
         "https://example.test", ready_selector="#quote", timeout_ms=4321, text_only=True
     )
-    locator.wait_for.assert_awaited_once_with(state="visible", timeout=4321)
-    assert page.locator.call_args_list[0].args == ("#quote",)
+    assert asked == ["#quote"] * 3
     assert result.text == "Ready quote form"
-    assert page.closed
+    assert session.closed_pages == [page]  # type: ignore[attr-defined]
 
 
-@pytest.mark.parametrize("timeout_type", [PlaywrightTimeoutError, PatchrightTimeoutError])
 @pytest.mark.parametrize("provider", [None, "DataDome"])
-async def test_readiness_timeout_rechecks_challenge_and_closes_page(timeout_type, provider) -> None:
-    page = _FetchPage()
-    page.evaluate = AsyncMock(side_effect=[None, provider])
-    locator = MagicMock()
-    locator.wait_for = AsyncMock(side_effect=timeout_type("Timeout waiting for #quote"))
-    page.locator = MagicMock(return_value=locator)
-    session = WebSkrapSession(
-        name="late",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(),
-        profile=get_profile(None),
-    )
-    with pytest.raises(WebSkrapError if provider else timeout_type) as error:
-        await session.fetch("https://example.test", ready_selector="#quote")
-    if provider:
-        assert error.value.code is ErrorCode.BLOCKED
-    assert not page.content_called
-    assert page.closed
+async def test_readiness_timeout_rechecks_challenge_and_closes_page(provider, monkeypatch) -> None:
+    page = _FakePage(challenges=[None, provider])
+    _element_states(monkeypatch, "hidden")
+    session = _session(page)
+    with pytest.raises(WebSkrapError) as error:
+        await session.fetch("https://example.test", ready_selector="#quote", timeout_ms=150)
+    assert error.value.code is (ErrorCode.BLOCKED if provider else ErrorCode.TIMEOUT)
+    assert _CONTENT_SCRIPT not in page.scripts
+    assert session.closed_pages == [page]  # type: ignore[attr-defined]
 
 
 async def test_fetch_rechecks_challenge_after_consent(monkeypatch) -> None:
-    page = _FetchPage()
-    page.evaluate = AsyncMock(side_effect=[None, "DataDome"])
+    page = _FakePage(challenges=[None, "DataDome"])
     monkeypatch.setattr("webskrap.client._decline_cookies", AsyncMock(return_value="cmp"))
-    session = WebSkrapSession(
-        name="late",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(decline_cookies=True),
-        profile=get_profile(None),
-    )
+    session = _session(page, decline_cookies=True)
     with pytest.raises(WebSkrapError) as error:
         await session.fetch("https://example.test")
     assert error.value.code is ErrorCode.BLOCKED
-    assert page.closed
-
-
-async def test_readiness_keeps_timeout_when_challenge_probe_loses_context() -> None:
-    page = _FetchPage()
-    page.evaluate = AsyncMock(side_effect=[None, RuntimeError("Execution context was destroyed")])
-    locator = MagicMock()
-    timeout = PlaywrightTimeoutError("Timeout waiting for #quote")
-    locator.wait_for = AsyncMock(side_effect=timeout)
-    page.locator = MagicMock(return_value=locator)
-    session = WebSkrapSession(
-        name="navigation",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(),
-        profile=get_profile(None),
-    )
-    with pytest.raises(PlaywrightTimeoutError) as error:
-        await session.fetch("https://example.test", ready_selector="#quote")
-    assert error.value is timeout
-    assert page.closed
+    assert session.closed_pages == [page]  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize("selector", ["", "  "])
 async def test_fetch_rejects_blank_readiness_without_opening_page(selector) -> None:
-    context = MagicMock(spec=BrowserContext)
-    context.new_page = AsyncMock()
-    session = WebSkrapSession(
-        name="invalid", context=context, config=SessionConfig(), profile=get_profile(None)
-    )
     with pytest.raises(WebSkrapError) as error:
-        await session.fetch("https://example.test", ready_selector=selector)
+        await _session().fetch("https://example.test", ready_selector=selector)
     assert error.value.code is ErrorCode.USAGE
-    context.new_page.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_fetch_declines_cookie_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("file:///etc/passwd", id="file"),
+        pytest.param("ftp://example.test/x", id="ftp"),
+        pytest.param("https://user:pass@example.test/", id="userinfo"),
+    ],
+)
+async def test_fetch_rejects_unfetchable_targets_without_a_page(url: str) -> None:
+    with pytest.raises(WebSkrapError) as caught:
+        await _session().fetch(url)
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def _record_declines(monkeypatch: pytest.MonkeyPatch, answer: str | None) -> list[float]:
     timeouts: list[float] = []
 
-    async def fake_decline(_page: object, *, timeout_ms: float) -> str:
+    async def fake_decline(_page: object, *, timeout_ms: float) -> str | None:
         timeouts.append(timeout_ms)
-        return "cmp"
+        return answer
 
     monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
-    session = WebSkrapSession(
-        name="test",
-        context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
-        config=SessionConfig(decline_cookies=True, decline_cookies_timeout_ms=1234),
-        profile=get_profile(None),
-    )
+    return timeouts
+
+
+async def test_fetch_declines_cookie_notice(monkeypatch: pytest.MonkeyPatch) -> None:
+    timeouts = _record_declines(monkeypatch, "cmp")
+    session = _session(_FakePage(), decline_cookies=True, decline_cookies_timeout_ms=1234)
 
     result = await session.fetch("https://example.test")
 
@@ -472,21 +376,9 @@ async def test_fetch_declines_cookie_notice(monkeypatch: pytest.MonkeyPatch) -> 
     assert timeouts == [1234]
 
 
-@pytest.mark.asyncio
 async def test_networkidle_shrinks_the_decline_budget(monkeypatch: pytest.MonkeyPatch) -> None:
-    timeouts: list[float] = []
-
-    async def fake_decline(_page: object, *, timeout_ms: float) -> None:
-        timeouts.append(timeout_ms)
-        return None
-
-    monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
-    session = WebSkrapSession(
-        name="test",
-        context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
-        config=SessionConfig(decline_cookies=True, decline_cookies_timeout_ms=5_000),
-        profile=get_profile(None),
-    )
+    timeouts = _record_declines(monkeypatch, None)
+    session = _session(_FakePage(), decline_cookies=True, decline_cookies_timeout_ms=5_000)
 
     await session.fetch("https://example.test", wait_until="networkidle")
     await session.fetch("https://example.test", wait_until="domcontentloaded")
@@ -495,90 +387,41 @@ async def test_networkidle_shrinks_the_decline_budget(monkeypatch: pytest.Monkey
     assert timeouts == [SETTLED_PAGE_TIMEOUT_MS, 5_000]
 
 
-@pytest.mark.asyncio
-async def test_fetch_skips_cookie_decline_when_disabled() -> None:
-    page = _FetchPage()
-    session = WebSkrapSession(
-        name="test",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(decline_cookies=False),
-        profile=get_profile(None),
-    )
+async def test_fetch_skips_cookie_decline_when_disabled(monkeypatch) -> None:
+    timeouts = _record_declines(monkeypatch, "cmp")
 
-    result = await session.fetch("https://example.test")
+    result = await _session(_FakePage(), decline_cookies=False).fetch("https://example.test")
 
     assert result.cookie_notice_declined is None
-    assert page.consent_waits == []
+    assert timeouts == []
 
 
 async def test_fetch_consent_override_is_per_call_and_preserves_config(monkeypatch) -> None:
-    declined = []
-
-    async def fake_decline(page, *, timeout_ms):
-        declined.append(page)
-        return "cmp"
-
-    monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
-    config = SessionConfig(decline_cookies=True)
-    session = WebSkrapSession(
-        name="consent",
-        context=_FetchContext(_FetchPage()),  # type: ignore[arg-type]
-        config=config,
-        profile=get_profile(None),
-    )
-    skipped, clicked = await asyncio.gather(
-        session.fetch("https://example.test", decline_cookies=False),
-        session.fetch("https://example.test", decline_cookies=True),
-    )
+    timeouts = _record_declines(monkeypatch, "cmp")
+    session = _session(_FakePage(), decline_cookies=True)
+    skipped = await session.fetch("https://example.test", decline_cookies=False)
+    clicked = await session.fetch("https://example.test", decline_cookies=True)
     assert skipped.cookie_notice_declined is None
     assert clicked.cookie_notice_declined == "cmp"
-    assert len(declined) == 1
-    assert config.decline_cookies is True
+    assert len(timeouts) == 1
+    assert session.config.decline_cookies is True
 
 
-class _SearchPage(_FetchPage):
-    """A fetch page that serves a saved results page and records the URL."""
-
-    def __init__(self, fixture: str) -> None:
-        super().__init__()
-        self.html = (SEARCH_FIXTURES / fixture).read_text(encoding="utf-8")
-        self.requested: list[str] = []
-        self.ready_waits: list[float] = []
-
-    async def goto(self, url: str, **_kwargs: object) -> _Response:
-        self.requested.append(url)
-        return _Response()
-
-    async def wait_for_selector(self, selector: str, *, timeout: float, **_state: object) -> object:
-        if selector == "body > *":
-            self.ready_waits.append(timeout)
-            return object()
-        return await super().wait_for_selector(selector, timeout=timeout)
-
-    async def content(self) -> str:
-        return self.html
+def _search_page(fixture: str) -> _FakePage:
+    return _FakePage(html=(SEARCH_FIXTURES / fixture).read_text(encoding="utf-8"))
 
 
-def _search_session(page: _SearchPage, **config: object) -> WebSkrapSession:
-    return WebSkrapSession(
-        name="test",
-        context=_FetchContext(page),  # type: ignore[arg-type]
-        config=SessionConfig(**config),  # type: ignore[arg-type]
-        profile=get_profile(None),
-    )
+async def test_search_loads_the_results_page_and_caps_the_hits(monkeypatch) -> None:
+    page = _search_page("bing.html")
+    # Bing's head-only interstitial has no body children; the read waits them out.
+    asked = _element_states(monkeypatch, "detached", "visible")
+    session = _session(page)
 
-
-@pytest.mark.asyncio
-async def test_search_loads_the_results_page_and_caps_the_hits() -> None:
-    page = _SearchPage("bing.html")
-
-    result = await _search_session(page).search("example domain", max_results=2)
+    result = await session.search("example domain", max_results=2)
 
     assert page.requested == ["https://www.bing.com/search?q=example+domain"]
-    # The body wait covers Bing's head-only redirect interstitial; it is on
-    # the navigation budget, not the consent one.
-    assert page.ready_waits == [SessionConfig().navigation_timeout_ms]
-    assert page.closed is True
+    assert asked == ["body > *", "body > *"]
+    assert session.closed_pages == [page]  # type: ignore[attr-defined]
     assert result.query == "example domain"
     assert "elapsed_ms" in result.timings
     assert result.engine is SearchEngine.BING
@@ -592,62 +435,54 @@ async def test_search_loads_the_results_page_and_caps_the_hits() -> None:
     assert result.hits_total == 3
 
 
-@pytest.mark.asyncio
-async def test_search_selects_the_engine() -> None:
-    page = _SearchPage("ddg.html")
+async def test_search_selects_the_engine(monkeypatch) -> None:
+    page = _search_page("ddg.html")
+    _element_states(monkeypatch, "visible")
 
-    result = await _search_session(page).search("example domain", engine=SearchEngine.DDG)
+    result = await _session(page).search("example domain", engine=SearchEngine.DDG)
 
     assert page.requested == ["https://html.duckduckgo.com/html/?q=example+domain"]
     assert result.engine is SearchEngine.DDG
     assert result.hits_total == 4
 
 
-@pytest.mark.asyncio
 async def test_search_goes_through_the_consent_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_decline(_page: object, *, timeout_ms: float) -> str:
-        return "cmp"
-
-    monkeypatch.setattr("webskrap.client._decline_cookies", fake_decline)
-    session = _search_session(_SearchPage("bing.html"), decline_cookies=True)
+    _record_declines(monkeypatch, "cmp")
+    _element_states(monkeypatch, "visible")
+    session = _session(_search_page("bing.html"), decline_cookies=True)
 
     result = await session.search("example domain", engine=SearchEngine.BING)
 
     assert result.cookie_notice_declined == "cmp"
 
 
-@pytest.mark.asyncio
-async def test_search_reports_a_challenge_page_as_blocked() -> None:
+async def test_search_reports_a_challenge_page_as_blocked(monkeypatch) -> None:
+    _element_states(monkeypatch, "visible")
     with pytest.raises(WebSkrapError) as excinfo:
-        await _search_session(_SearchPage("bing_challenge.html")).search("example domain")
+        await _session(_search_page("bing_challenge.html")).search("example domain")
 
     assert excinfo.value.code is ErrorCode.BLOCKED
 
 
-@pytest.mark.asyncio
 async def test_search_rejects_a_blank_query_before_opening_a_page() -> None:
-    page = _SearchPage("bing.html")
-
     with pytest.raises(WebSkrapError) as excinfo:
-        await _search_session(page).search("   ")
+        await _session().search("   ")
 
     assert excinfo.value.code is ErrorCode.USAGE
-    assert page.requested == []
 
 
-@pytest.mark.asyncio
 async def test_search_on_a_closed_session_fails() -> None:
-    session = _search_session(_SearchPage("bing.html"))
+    session = _session()
     session._closed = True
 
     with pytest.raises(WebSkrapError, match="is closed"):
         await session.search("example domain")
 
 
-@pytest.mark.asyncio
 async def test_client_search_uses_a_throwaway_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    page = _SearchPage("bing.html")
-    session = _search_session(page)
+    page = _search_page("bing.html")
+    _element_states(monkeypatch, "visible")
+    session = _session(page)
     closed: list[str] = []
 
     async def fake_close() -> None:
@@ -655,7 +490,6 @@ async def test_client_search_uses_a_throwaway_session(monkeypatch: pytest.Monkey
         session._closed = True
 
     monkeypatch.setattr(session, "close", fake_close)
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
     client = WebSkrapClient()
     monkeypatch.setattr(client, "_create_session", lambda *_args: _resolved(session))
 
@@ -664,7 +498,6 @@ async def test_client_search_uses_a_throwaway_session(monkeypatch: pytest.Monkey
 
     assert [hit.url for hit in result.hits] == ["https://example.com/"]
     assert result.hits_total == 3
-    assert result.engine is SearchEngine.BING
     assert page.requested == ["https://www.bing.com/search?q=example+domain"]
     assert closed == [session.name]
     assert client._sessions == {}
@@ -674,140 +507,14 @@ async def _resolved(session: WebSkrapSession) -> WebSkrapSession:
     return session
 
 
-@pytest.mark.asyncio
-async def test_human_click_false_delegates_to_page_click() -> None:
-    page = _Page()
-
-    await _session().human_click(
-        page,  # type: ignore[arg-type]
-        "label[for='radio1']",
-        human=False,
-        timeout=1000,
-        strict=True,
-    )
-
-    assert page.clicks == [("label[for='radio1']", {"timeout": 1000, "strict": True})]
-    assert page.mouse.clicks == []
-
-
-@pytest.mark.asyncio
-async def test_human_click_waits_moves_and_clicks(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("webskrap.human.uniform", lambda _start, _end: 0)
-    locator = _Locator()
-    page = _Page(locator)
-
-    await _session().human_click(
-        page,  # type: ignore[arg-type]
-        "label[for='radio1']",
-        position={"x": 20, "y": 10},
-        timeout=1500,
-        button="left",
-        click_count=1,
-        delay=25,
-        modifiers=["Shift"],
-    )
-
-    assert page.locators == ["label[for='radio1']"]
-    assert locator.waits == [{"state": "visible", "timeout": 1500}]
-    assert locator.scrolled == [{"timeout": 1500}]
-    # uniform mocked to 0: start == end == (30, 30), so distance 0 -> 12 steps.
-    assert page.mouse.moves[0] == (30, 30, 1)
-    assert len(page.mouse.moves) == 1 + 12
-    assert page.mouse.moves[-1] == (30, 30, 1)  # path lands exactly on target
-    assert all(
-        move[2] == 1 and abs(move[0] - 30) < 1e-6 and abs(move[1] - 30) < 1e-6
-        for move in page.mouse.moves
-    )
-    # The box starts 20px from the top, inside the view margin, but aiming
-    # it lower needs less than one wheel notch, so the wheel stays still and
-    # Playwright's scroll finishes (one pause); then one settle wait, one
-    # wait per curve step and one final wait.
-    assert page.mouse.wheels == []
-    assert page.timeouts == [0] * (1 + 1 + 12 + 1)
-    assert page.mouse.clicks == [(30, 30, {"button": "left", "click_count": 1, "delay": 25})]
-    assert page.keyboard.events == [("down", "Shift"), ("up", "Shift")]
-
-
-def test_bezier_path_curves_and_lands_on_target() -> None:
-    start, end = (0.0, 0.0), (200.0, 100.0)
-    path = bezier_path(start, end, 24)
-
-    assert len(path) == 24
-    assert path[-1] == end  # exact landing
-    # at least one point bows off the straight start->end line (curved, not linear).
-    dx, dy = end[0] - start[0], end[1] - start[1]
-
-    def offline(p: tuple[float, float]) -> float:
-        return abs(dx * (start[1] - p[1]) - (start[0] - p[0]) * dy)
-
-    assert max(offline(p) for p in path) > 1.0
-
-
-@pytest.mark.asyncio
-async def test_human_click_trial_does_not_click() -> None:
-    page = _Page()
-
-    await _session().human_click(
-        page,  # type: ignore[arg-type]
-        "label[for='radio1']",
-        trial=True,
-    )
-
-    assert page.mouse.moves == []
-    assert page.mouse.clicks == []
-
-
-@pytest.mark.asyncio
-async def test_human_click_raises_for_missing_bounding_box() -> None:
-    page = _Page(_Locator(box=None))
-    page._locator.box = None
-
-    with pytest.raises(WebSkrapError, match="visible bounding box"):
-        await _session().human_click(page, "label[for='radio1']")  # type: ignore[arg-type]
-
-
-class _ManagedSession:
-    def __init__(self) -> None:
-        self._closed = False
-
-    async def close(self) -> None:
-        self._closed = True
-
-
-class _Playwright:
-    async def stop(self) -> None:
-        return None
-
-
-class _Manager:
-    async def start(self) -> _Playwright:
-        return _Playwright()
-
-
-@pytest.mark.asyncio
-async def test_session_config_selects_the_started_driver(monkeypatch: pytest.MonkeyPatch) -> None:
-    drivers: list[str] = []
-
-    def fake_factory(driver: str) -> _Manager:
-        drivers.append(driver)
-        return _Manager()
-
-    async def fake_create(*_args: object) -> _ManagedSession:
-        return _ManagedSession()
-
-    monkeypatch.setattr("webskrap.client._async_playwright", fake_factory)
-    client = WebSkrapClient()
-    monkeypatch.setattr(client, "_create_session", fake_create)
-
-    await client.session("stealth", config=SessionConfig(driver="patchright"))
-    await client.close()
-
-    assert drivers == ["patchright"]
+async def test_human_click_rejects_a_bad_click_count() -> None:
+    with pytest.raises(WebSkrapError, match="click_count") as excinfo:
+        await _session().human_click(MagicMock(spec=CDPPage), "#go", click_count=3)
+    assert excinfo.value.code is ErrorCode.USAGE
 
 
 @pytest.mark.asyncio
 async def test_closed_named_session_is_recreated(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
     client = WebSkrapClient()
     monkeypatch.setattr(client, "_create_session", lambda *_args: _new_managed_session())
 
@@ -821,7 +528,6 @@ async def test_closed_named_session_is_recreated(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_concurrent_named_session_is_created_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
     client = WebSkrapClient()
     started = asyncio.Event()
     release = asyncio.Event()
@@ -851,7 +557,6 @@ async def test_concurrent_named_session_is_created_once(monkeypatch: pytest.Monk
 async def test_close_cleans_session_that_is_still_starting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Manager())
     client = WebSkrapClient()
     started = asyncio.Event()
     release = asyncio.Event()
@@ -876,265 +581,148 @@ async def test_close_cleans_session_that_is_still_starting(
     assert created._closed is True
 
 
-@pytest.mark.asyncio
-async def test_close_stops_driver_that_is_still_starting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    class SlowPlaywright(_Playwright):
-        stopped = False
-
-        async def stop(self) -> None:
-            self.stopped = True
-
-    class SlowManager:
-        async def start(self) -> SlowPlaywright:
-            started.set()
-            await release.wait()
-            return playwright
-
-    playwright = SlowPlaywright()
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: SlowManager())
-    client = WebSkrapClient()
-    session_task = asyncio.create_task(client.session("starting"))
-    await started.wait()
-    close_task = asyncio.create_task(client.close())
-    await asyncio.sleep(0)
-    release.set()
-
-    with pytest.raises(WebSkrapError, match="driver was starting"):
-        await session_task
-    await close_task
-
-    assert playwright.stopped is True
-    assert client._playwright is None
-
-
-async def _new_managed_session() -> _ManagedSession:
-    return _ManagedSession()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "url",
-    [
-        pytest.param("file:///etc/passwd", id="file"),
-        pytest.param("ftp://example.test/x", id="ftp"),
-        pytest.param("https://user:pass@example.test/", id="userinfo"),
-    ],
-)
-async def test_fetch_rejects_unfetchable_targets_without_a_page(url: str) -> None:
-    # Validation runs before new_page, so a session without a context proves
-    # no browser work starts for a rejected URL.
-    session = _session()
-
-    with pytest.raises(WebSkrapError) as caught:
-        await session.fetch(url)
-
-    assert caught.value.code is ErrorCode.USAGE
-
-
-class _LaunchContext:
-    def __init__(self) -> None:
-        self.closed = False
-
-    def set_default_timeout(self, _timeout: float) -> None:
-        pass
-
-    def set_default_navigation_timeout(self, _timeout: float) -> None:
-        pass
-
-    async def close(self) -> None:
-        self.closed = True
-
-
-class _LaunchChromium:
-    def __init__(self, fail: bool = False) -> None:
-        self.fail = fail
-        self.options: dict[str, object] = {}
-
-    async def launch_persistent_context(self, _dir: str, **options: object) -> _LaunchContext:
-        self.options = options
-        if self.fail:
-            msg = "browserType.launchPersistentContext: failed to launch"
-            raise RuntimeError(msg)
-        return _LaunchContext()
-
-
-class _FakeDisplay:
-    def __init__(self) -> None:
-        self.stopped = 0
-        self.env = {"DISPLAY": ":99", "XAUTHORITY": "/tmp/webskrap-display-x/Xauthority"}
-
-    async def stop(self) -> None:
-        self.stopped += 1
-
-
-def _virtual_display_client(
-    monkeypatch: pytest.MonkeyPatch, chromium: _LaunchChromium
-) -> tuple[WebSkrapClient, list[_FakeDisplay], list[tuple[int, int]]]:
-    displays: list[_FakeDisplay] = []
-    sizes: list[tuple[int, int]] = []
-
-    async def fake_start(width: int, height: int) -> _FakeDisplay:
-        sizes.append((width, height))
-        displays.append(_FakeDisplay())
-        return displays[-1]
-
-    async def no_probe(*_args: object) -> str:
-        raise AssertionError("the UA probe must not run under a virtual display")
-
-    monkeypatch.setattr("webskrap.client.VirtualDisplay.start", fake_start)
-    client = WebSkrapClient()
-    monkeypatch.setattr(client, "_headless_clean_user_agent", no_probe)
-    client._playwright = type("_PW", (), {"chromium": chromium})()
-    return client, displays, sizes
-
-
-@pytest.mark.asyncio
 async def test_virtual_display_session_runs_headed_on_the_display(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    chromium = _LaunchChromium()
-    client, displays, sizes = _virtual_display_client(monkeypatch, chromium)
-    config = SessionConfig(driver="patchright", virtual_display=True, mask_headless_user_agent=True)
+    launcher = _Launcher()
+    client, displays, sizes = _launch_client(monkeypatch, launcher)
+    config = SessionConfig(virtual_display=True, mask_headless_user_agent=True)
 
     session = await client._create_session("vd", config, get_profile("desktop-chrome"))
 
-    env = chromium.options["env"]
-    assert isinstance(env, dict)
+    env = launcher.options["env"]
     assert env["DISPLAY"] == ":99"
     assert env["XAUTHORITY"].endswith("Xauthority")
     assert "PATH" in env  # the rest of the environment survives
-    assert chromium.options["headless"] is False
-    assert not any(str(a).startswith("--user-agent") for a in chromium.options["args"])
+    assert launcher.options["headless"] is False
+    assert not any(str(a).startswith("--user-agent") for a in launcher.options["args"])
     assert sizes == [(1920, 1080)]
 
     await session.close()
     assert displays[0].stopped == 1
 
 
-@pytest.mark.asyncio
 async def test_virtual_display_is_stopped_when_launch_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client, displays, _sizes = _virtual_display_client(monkeypatch, _LaunchChromium(fail=True))
-    config = SessionConfig(driver="patchright", virtual_display=True)
+    client, displays, _sizes = _launch_client(monkeypatch, _Launcher(fail=True))
 
-    with pytest.raises(RuntimeError, match="failed to launch"):
-        await client._create_session("vd", config, get_profile("desktop-chrome"))
+    with pytest.raises(WebSkrapError, match="failed to launch"):
+        await client._create_session(
+            "vd", SessionConfig(virtual_display=True), get_profile("desktop-chrome")
+        )
 
     assert displays[0].stopped == 1
 
 
-@pytest.mark.asyncio
 async def test_virtual_display_keeps_the_native_profile_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("sys.platform", "linux")
-    chromium = _LaunchChromium()
-    client, _displays, _sizes = _virtual_display_client(monkeypatch, chromium)
-    config = SessionConfig(
-        driver="patchright", virtual_display=True, patchright_context_profile=True
-    )
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher)
+    config = SessionConfig(virtual_display=True, profile_mode="locale")
 
     session = await client._create_session("vd", config, get_profile("desktop-chrome"))
     await session.close()
 
-    env = chromium.options["env"]
-    assert isinstance(env, dict)
+    env = launcher.options["env"]
     assert env["DISPLAY"] == ":99"
     assert env["TZ"] == "Europe/Paris"
     assert env["LANG"] == "en_US.UTF-8"
 
 
-@pytest.mark.asyncio
 async def test_unknown_profile_timezone_is_a_usage_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("sys.platform", "linux")
-    client = WebSkrapClient()
-    client._playwright = type("_PW", (), {"chromium": _LaunchChromium()})()
-    config = SessionConfig(driver="patchright", patchright_context_profile=True)
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher)
     profile = get_profile("desktop-chrome").model_copy(update={"timezone_id": "Mars/Olympus"})
 
     with pytest.raises(WebSkrapError, match="unknown timezone") as excinfo:
-        await client._create_session("tz", config, profile)
+        await client._create_session("tz", SessionConfig(profile_mode="locale"), profile)
 
     assert excinfo.value.code is ErrorCode.USAGE
+    assert launcher.calls == []
 
 
-@pytest.mark.asyncio
+async def test_mesa_gpu_without_lavapipe_fails_before_launch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = _Launcher()
+    client, displays, _sizes = _launch_client(monkeypatch, launcher)
+    monkeypatch.setattr("webskrap.client.lavapipe_available", lambda: False)
+    config = SessionConfig(gpu="mesa", virtual_display=True)
+
+    with pytest.raises(WebSkrapError, match="mesa-vulkan-drivers") as excinfo:
+        await client._create_session("gpu", config, get_profile("desktop-chrome"))
+
+    assert excinfo.value.code is ErrorCode.BROWSER_LAUNCH
+    assert launcher.calls == []  # the browser was never launched
+    assert displays == []  # nor the display
+
+
+async def test_storage_state_is_restored_once_the_browser_runs(monkeypatch) -> None:
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher)
+    restored: list[object] = []
+
+    async def apply(browser: object, state: object) -> None:
+        restored.append(state)
+
+    monkeypatch.setattr("webskrap.client.cdp_setup.apply_storage_state", apply)
+    state = {"cookies": [], "origins": []}
+    session = await client._create_session(
+        "state", SessionConfig(storage_state=state), get_profile(None)
+    )
+    await session.close()
+    assert restored == [state]
+
+
 async def test_doctor_hints_at_the_sandbox_when_that_is_what_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    launches: list[dict[str, object]] = []
+    launches: list[dict[str, Any]] = []
 
-    class _Chromium:
-        executable_path = "/browsers/chromium"
+    async def fake_launch(executable: Path, **options: Any) -> None:
+        launches.append({"executable": executable, **options})
+        raise WebSkrapError(
+            "browser exited during startup\nChromium sandboxing failed!",
+            code=ErrorCode.BROWSER_LAUNCH,
+        )
 
-        async def launch(self, **options: object) -> None:
-            launches.append(options)
-            raise RuntimeError(
-                "BrowserType.launch: closed\nBrowser logs:\nChromium sandboxing failed!"
-            )
-
-    class _PW:
-        chromium = _Chromium()
-
-        async def stop(self) -> None:
-            pass
-
-    class _Starter:
-        async def start(self) -> _PW:
-            return _PW()
-
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Starter())
+    monkeypatch.setattr(client_module, "find_executable", lambda channel: Path(f"/b/{channel}"))
+    monkeypatch.setattr(client_module, "launch", fake_launch)
 
     report = await browser_doctor(chromium_sandbox=True)
 
     assert report["ok"] is False
     assert report["browser_identity"] is None
-    assert all(options["chromium_sandbox"] is True for options in launches)
-    assert [options["channel"] for options in launches] == ["chrome"]
+    assert all("--no-sandbox" not in options["args"] for options in launches)
+    assert [options["executable"] for options in launches] == [Path("/b/chrome")]
     assert "--no-sandbox" in str(report["hint"])
 
 
-@pytest.mark.asyncio
 async def test_doctor_tries_edge_before_bundled_chromium(monkeypatch: pytest.MonkeyPatch) -> None:
     channels: list[str | None] = []
 
-    class _Browser:
-        async def close(self) -> None:
-            pass
+    def fake_find(channel: str | None) -> Path:
+        channels.append(channel)
+        if channel == "chrome":
+            raise WebSkrapError(
+                "Chromium distribution 'chrome' is not found at /opt",
+                code=ErrorCode.BROWSER_LAUNCH,
+            )
+        return Path(f"/b/{channel}")
 
-    class _Chromium:
-        executable_path = "/browsers/chromium"
-
-        async def launch(self, **options: object) -> _Browser:
-            channel = options["channel"]
-            channels.append(channel if isinstance(channel, str) else None)
-            if channel == "chrome":
-                raise RuntimeError("Chrome not installed")
-            return _Browser()
-
-    class _PW:
-        chromium = _Chromium()
-
-        async def stop(self) -> None:
-            pass
-
-    class _Starter:
-        async def start(self) -> _PW:
-            return _PW()
-
-    monkeypatch.setattr("webskrap.client._async_playwright", lambda _driver: _Starter())
+    monkeypatch.setattr(client_module, "find_executable", fake_find)
+    monkeypatch.setattr(client_module, "launch", AsyncMock(return_value=_fake_browser()))
 
     report = await browser_doctor()
 
     assert report["ok"] is True
     assert report["channel"] == "msedge"
     assert report["browser_identity"] == "Edge"
+    assert report["browser_version"] == "Chrome/150.0"
     assert channels == ["chrome", "msedge"]
 
 
@@ -1159,164 +747,19 @@ def test_lavapipe_is_never_available_off_linux(monkeypatch: pytest.MonkeyPatch) 
     assert not lavapipe_available()
 
 
-@pytest.mark.asyncio
-async def test_mesa_gpu_without_lavapipe_fails_before_launch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    chromium = _LaunchChromium()
-    client, displays, _sizes = _virtual_display_client(monkeypatch, chromium)
-    monkeypatch.setattr("webskrap.client.lavapipe_available", lambda: False)
-    config = SessionConfig(driver="patchright", gpu="mesa", virtual_display=True)
+def test_bezier_path_curves_and_lands_on_target() -> None:
+    start, end = (0.0, 0.0), (200.0, 100.0)
+    path = bezier_path(start, end, 24)
 
-    with pytest.raises(WebSkrapError, match="mesa-vulkan-drivers") as excinfo:
-        await client._create_session("gpu", config, get_profile("desktop-chrome"))
+    assert len(path) == 24
+    assert path[-1] == end  # exact landing
+    # at least one point bows off the straight start->end line (curved, not linear).
+    dx, dy = end[0] - start[0], end[1] - start[1]
 
-    assert excinfo.value.code is ErrorCode.BROWSER_LAUNCH
-    assert chromium.options == {}  # the browser was never launched
-    assert displays == []  # nor the display
+    def offline(p: tuple[float, float]) -> float:
+        return abs(dx * (start[1] - p[1]) - (start[0] - p[0]) * dy)
 
-
-@pytest.mark.asyncio
-async def test_human_click_holds_the_button_for_a_human_duration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Playwright's own click releases after ~2 ms; unset, the hold is drawn
-    # from 60-140 ms. uniform() returning its lower bound pins it to 60.
-    monkeypatch.setattr("webskrap.human.uniform", lambda start, _end: start)
-    page = _Page()
-
-    await _session().human_click(page, "button")  # type: ignore[arg-type]
-
-    assert page.mouse.clicks[0][2] == {"delay": 60}
-
-
-class _ScrollingPage(_Page):
-    """A page whose wheel moves the locator's box, like a scrolling document."""
-
-    def __init__(self, box_y: float, scrolls: bool = True) -> None:
-        super().__init__(_Locator(box={"x": 100, "y": box_y, "width": 80, "height": 30}))
-        self._scrolls = scrolls
-        page = self
-
-        async def wheel(delta_x: float, delta_y: float) -> None:
-            page.mouse.wheels.append((delta_x, delta_y))
-            if page._scrolls:
-                page._locator.box["y"] -= delta_y
-
-        self.mouse.wheel = wheel  # type: ignore[method-assign]
-
-
-@pytest.mark.asyncio
-async def test_scroll_wheels_a_far_element_into_view() -> None:
-    page = _ScrollingPage(box_y=2400)
-
-    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
-
-    deltas = [dy for _dx, dy in page.mouse.wheels]
-    assert deltas and all(0 < dy <= 120 for dy in deltas)  # notch-sized, downward
-    assert 40 <= page._locator.box["y"] <= 720 - 40 - 30
-    assert page._locator.scrolled == []  # no programmatic jump needed
-
-
-@pytest.mark.asyncio
-async def test_scroll_wheels_up_to_an_element_above() -> None:
-    page = _ScrollingPage(box_y=-900)
-
-    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
-
-    assert all(dy < 0 for _dx, dy in page.mouse.wheels)
-    assert page._locator.scrolled == []
-
-
-@pytest.mark.asyncio
-async def test_scroll_leaves_a_visible_element_alone() -> None:
-    page = _ScrollingPage(box_y=300)
-
-    await scroll_into_view(page, page._locator)  # type: ignore[arg-type]
-
-    assert page.mouse.wheels == []
-    assert page._locator.scrolled == []
-
-
-@pytest.mark.asyncio
-async def test_scroll_falls_back_when_the_wheel_moves_nothing() -> None:
-    # e.g. the element sits in an inner scroll container the cursor is not over.
-    page = _ScrollingPage(box_y=2400, scrolls=False)
-
-    await scroll_into_view(page, page._locator, timeout=500)  # type: ignore[arg-type]
-
-    assert page.mouse.wheels  # it tried the wheel first
-    assert page._locator.scrolled == [{"timeout": 500}]
-
-
-class _TypingKeyboard(_Keyboard):
-    def __init__(self) -> None:
-        super().__init__()
-        self.typed: list[tuple[str, float]] = []
-
-    async def type(self, text: str, *, delay: float) -> None:
-        self.typed.append((text, delay))
-
-
-@pytest.mark.asyncio
-async def test_human_type_clicks_then_types_each_key_with_human_timing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # uniform() returning its upper bound: hold 90 ms, and the "long pause"
-    # draw (1.0) never beats 1/12, so every gap is the 160 ms upper bound.
-    monkeypatch.setattr("webskrap.human.uniform", lambda _start, end: end)
-    page = _Page(_Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}))
-    page.keyboard = _TypingKeyboard()
-
-    await _session().human_type(page, "input[name=q]", "hé!")  # type: ignore[arg-type]
-
-    assert len(page.mouse.clicks) == 1  # focused with a humanized click
-    assert page.keyboard.typed == [("h", 90), ("é", 90), ("!", 90)]
-    assert page.timeouts[-3:] == [160, 160, 160]
-
-
-@pytest.mark.asyncio
-async def test_human_type_pauses_now_and_then(monkeypatch: pytest.MonkeyPatch) -> None:
-    # A draw of 0 lands under 1/12, so each gap is a long 250-600 ms pause.
-    monkeypatch.setattr("webskrap.human.uniform", lambda start, _end: start)
-    page = _Page(_Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}))
-    page.keyboard = _TypingKeyboard()
-
-    await _session().human_type(page, "input", "ab")  # type: ignore[arg-type]
-
-    assert page.timeouts[-2:] == [250, 250]
-
-
-@pytest.mark.asyncio
-async def test_human_type_on_a_closed_session_fails() -> None:
-    session = _session()
-    session._closed = True
-
-    with pytest.raises(WebSkrapError, match="is closed"):
-        await session.human_type(_Page(), "input", "x")  # type: ignore[arg-type]
-
-
-@pytest.mark.asyncio
-async def test_human_click_refuses_a_covered_element() -> None:
-    locator = _Locator(box={"x": 10, "y": 200, "width": 100, "height": 30}, receives_click=False)
-    page = _Page(locator)
-
-    with pytest.raises(WebSkrapError, match="covers the click point"):
-        await _session().human_click(page, "#go")  # type: ignore[arg-type]
-
-    # Checked before any pointer event, so the page saw nothing.
-    assert page.mouse.moves == []
-    assert page.mouse.clicks == []
-
-
-@pytest.mark.asyncio
-async def test_human_click_hit_tests_the_exact_click_point() -> None:
-    locator = _Locator(box={"x": 10, "y": 200, "width": 100, "height": 30})
-    page = _Page(locator)
-
-    await _session().human_click(page, "#go", position={"x": 7, "y": 5})  # type: ignore[arg-type]
-
-    assert locator.hit_tests == [[7, 5]]
+    assert max(offline(p) for p in path) > 1.0
 
 
 def _launcher(missing: set[str | None], attempts: list[str | None]):
@@ -1424,3 +867,75 @@ async def test_channel_fallback_remembers_a_channel_whose_page_failed() -> None:
         with pytest.raises(RuntimeError, match="ERR_NAME_NOT_RESOLVED"):
             await with_channel_fallback(run, SessionConfig(channel="chrome"), exclusive=True)
     assert attempts == ["chrome", "msedge", "msedge"]
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"cookies": "bad"},
+        {"origins": [{"localStorage": []}]},
+        {"origins": [{"origin": "https://a.test", "localStorage": "x"}]},
+        {"origins": [{"origin": "https://a.test", "localStorage": [1]}]},
+        {"origins": [{"origin": "file:///etc", "localStorage": []}]},
+        {"cookies": [{"name": ["not-a-string"], "value": "x", "domain": "a.test"}]},
+        {"cookies": [{"name": "n", "value": "v"}]},
+        {"cookies": [{"name": "n", "value": "v", "domain": "a.test", "secure": "false"}]},
+        {"cookies": [{"name": "n", "value": "v", "domain": "a.test", "sameSite": "lax"}]},
+        {"origins": [{"origin": "https://", "localStorage": []}]},
+        {"origins": [{"origin": "https:example.com", "localStorage": []}]},
+        {"origins": [{"origin": "https://a.test:99999", "localStorage": []}]},
+        ["not", "an", "object"],
+    ],
+)
+async def test_malformed_storage_state_is_a_usage_error_before_launch(monkeypatch, state) -> None:
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher)
+    config = SessionConfig.model_construct(**{**SessionConfig().__dict__, "storage_state": state})
+    with pytest.raises(WebSkrapError) as excinfo:
+        await client._create_session("state", config, get_profile(None))
+    assert excinfo.value.code is ErrorCode.USAGE
+    assert launcher.calls == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "browser exited during startup or closed the CDP pipe",
+        "browser did not report a DevTools port within 30s",
+        "browser did not answer over CDP within 30s",
+    ],
+)
+async def test_channel_fallback_retries_cdp_startup_failures(message: str) -> None:
+    attempts: list[str | None] = []
+
+    async def run(config: SessionConfig) -> str | None:
+        attempts.append(config.channel)
+        if config.channel == "chrome":
+            raise WebSkrapError(message, code=ErrorCode.BROWSER_LAUNCH)
+        return config.channel
+
+    assert await with_channel_fallback(run, SessionConfig(channel="chrome")) == "msedge"
+    assert attempts == ["chrome", "msedge"]
+
+
+def test_a_real_playwright_storage_state_is_accepted() -> None:
+    from webskrap.cdp_setup import load_storage_state
+
+    state = {
+        "cookies": [
+            {
+                "name": "sid",
+                "value": "1",
+                "domain": ".a.test",
+                "path": "/",
+                "expires": 1893456000.5,
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ],
+        "origins": [
+            {"origin": "https://a.test:8443", "localStorage": [{"name": "k", "value": "v"}]}
+        ],
+    }
+    assert load_storage_state(state) is state

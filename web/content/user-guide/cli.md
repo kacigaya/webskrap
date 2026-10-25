@@ -14,8 +14,8 @@ webskrap install
 webskrap install --format json
 ```
 
-`webskrap install` downloads the Chromium browsers used by Playwright and
-Patchright. Use JSON output in scripts.
+`webskrap install` downloads Chrome for Testing into the user cache folder.
+`--force` downloads it again. Use JSON output in scripts.
 
 ## Check environment
 
@@ -24,8 +24,8 @@ webskrap doctor
 webskrap doctor --format json
 ```
 
-The CLI `fetch` command uses headless Patchright stealth mode, so `doctor`
-checks that Patchright can launch headless Chrome. It also reports the host
+The CLI `fetch` command runs headless Chrome, so `doctor` checks that headless
+Chrome can launch. It also reports the host
 timezone and warns when it is UTC, which pages read as a server.
 
 ## List profiles
@@ -52,7 +52,7 @@ webskrap fetch https://example.com --format json --max-chars 12000
 JSON output includes `url`, `final_url`, `status`, `ok`, `title`, `headers`,
 `text`, `text_length`, `text_truncated`, and `elapsed_ms`.
 
-Wait for deferred content with a visible Playwright selector:
+Wait for deferred content with a visible CSS selector or snapshot ref:
 
 ```bash
 webskrap fetch https://example.com --ready-selector '#content' --format json
@@ -150,11 +150,10 @@ cost on pages that have none. Use `0` for a single immediate check.
 
 `--channel` defaults to `chrome`, which does not exist on every platform (Linux
 ARM64 has no Chrome build). When the channel cannot launch, `fetch` and
-`search` print a notice on stderr and try installed Edge, then bundled Chromium
-(the full browser in new headless mode, not Playwright's headless shell), so
-piped stdout stays clean. Sandbox failures stop without trying another channel.
+`search` print a notice on stderr and try installed Edge, then Chrome for
+Testing (the full browser in new headless mode), so piped stdout stays clean. Sandbox failures stop without trying another channel.
 If nothing launches you get a one-line error and `Run: webskrap install`, not a
-Playwright traceback.
+traceback.
 
 `webskrap doctor` follows the same Chrome, Edge, Chromium order. JSON output
 names the working `channel` and `browser_identity`, the host
@@ -162,9 +161,9 @@ names the working `channel` and `browser_identity`, the host
 families. `font_count` is `null` where `fc-list` is unavailable. Human output
 shows these values too.
 
-## Headless Patchright controls
+## Headless stealth controls
 
-`webskrap fetch` always runs headless Patchright. Use real Chrome and a stable
+`webskrap fetch` always runs headless. Use real Chrome and a stable
 profile directory when browser continuity matters:
 
 ```bash
@@ -189,7 +188,7 @@ without viewport, user-agent, or JavaScript patches:
 webskrap fetch https://amiunique.org/fr/fingerprint \
   --channel chrome \
   --virtual-display \
-  --patchright-context-profile \
+  --profile-mode locale \
   --reduce-fingerprint-surface \
   --webrtc-ip-handling-policy disable_non_proxied_udp
 ```
@@ -207,13 +206,13 @@ webskrap fetch https://example.com \
 
 `webskrap browser` drives a persistent browser with commands modeled on the
 official [Playwright CLI](https://playwright.dev/agent-cli/introduction),
-implemented natively on Playwright for Python. `open` launches a detached
+implemented natively on WebSkrap's own CDP client. `open` launches a detached
 Chromium that keeps running between commands; every other command reconnects
 to it over CDP, acts on the current page, and exits.
 
-The session uses the same stealth path as `webskrap fetch`: commands attach
-through Patchright, so no CDP `Runtime.enable` leak reaches the page or its
-workers, and the browser launches with
+The session uses the same stealth path as `webskrap fetch`: commands never
+enable the CDP `Runtime` domain, so no `Runtime.enable` leak reaches the page or
+its workers, and the browser launches with
 `--disable-blink-features=AutomationControlled` (`navigator.webdriver` stays
 false) plus the 1920x1080 virtual screen used by headless fetches. Headless
 sessions still report `HeadlessChrome` in the user agent; pass `--headed` when
@@ -224,7 +223,7 @@ page globals are visible.
 webskrap browser open https://example.com
 webskrap browser snapshot
 webskrap browser click e15
-webskrap browser fill "input[name=q]" "playwright"
+webskrap browser fill "input[name=q]" "chromium"
 webskrap browser press Enter
 webskrap browser screenshot page.png --full-page
 webskrap browser close
@@ -232,14 +231,14 @@ webskrap browser close
 
 `snapshot` prints an aria snapshot of the page where each element carries a
 ref like `[ref=e15]`. Interaction commands (`click`, `dblclick`, `hover`,
-`fill`, `type`, `select`, `check`, `uncheck`) accept either a ref or any
-Playwright selector. Refs describe the current page, so take a fresh
+`fill`, `type`, `select`, `check`, `uncheck`) accept either a ref or a CSS
+selector. Refs describe the current page, so take a fresh
 `snapshot` after the page changes.
 
 `click` and `dblclick` scroll with the mouse wheel, move the cursor along a
 curved path and hold the button for a human 60-140 ms; `type` clicks into the
 field and types with human keystroke timing. Both refuse a target covered by
-another element. They are slower than Playwright's direct input on purpose (see
+another element. They are slower than mechanical input on purpose (see
 [Humanizer](/docs/user-guide/humanizer)); `fill` still sets a value at once.
 
 Navigation uses `goto`, `back`, `forward`, and `reload`; `press` sends a key
@@ -345,7 +344,7 @@ it without `--proxy` reuses it as it is. `webskrap browser list` shows each
 running session's proxy.
 
 Deliberate limitations versus the official Playwright CLI: one page per
-session (no tab commands), bundled Chromium only, and no commands for network
+session (no tab commands), Chrome for Testing only, and no commands for network
 mocking, tracing, or video. `back` and `forward` always reload the page,
 because the back/forward cache is disabled to keep history navigation
 deterministic.

@@ -1,4 +1,8 @@
-"""Compare Patchright and the CDP driver on public anti-bot test pages.
+"""Compare WebSkrap's client and its bare CDP core on public anti-bot test pages.
+
+The ``client`` path is what callers get: a WebSkrapClient session with its
+page setup. The ``core`` path is a bare :func:`webskrap.cdp.launch` with the
+same flags. A gap between them points at the client's page setup.
 
 Each run starts a fresh browser and profile, loads one target, and polls a
 fixed check for up to ``--wait`` seconds. The check returns ``passed``,
@@ -33,8 +37,7 @@ from uuid import uuid4
 
 from webskrap import SessionConfig, WebSkrapClient, browser_session
 from webskrap.browser_session import sandbox_enabled
-from webskrap.cdp import find_executable, launch
-from webskrap.cdp_fetch import launch_args
+from webskrap.cdp import CDPPage, find_executable, launch
 from webskrap.challenges import _CHALLENGE_SCRIPT
 from webskrap.display import VirtualDisplay
 from webskrap.profiles import get_profile
@@ -112,7 +115,7 @@ Mouse = Callable[[str, float, float], Awaitable[None]]
 
 @dataclass
 class Page:
-    """What a run needs from either driver."""
+    """What a run needs from either path."""
 
     evaluate: Evaluate
     screenshot: Screenshot
@@ -139,8 +142,8 @@ _TURNSTILE_BOX = """(() => {
 async def human_click(mouse: Mouse, x: float, y: float) -> None:
     """Move along an eased, jittered curve to (x, y), then press and release.
 
-    Both drivers get the same path through their own CDP input events, so the
-    comparison measures the driver, not the cursor model.
+    Both paths get the same cursor path through CDP input events, so the
+    comparison measures the browser setup, not the cursor model.
     """
     start_x, start_y = x + _rng.uniform(250, 450), y + _rng.uniform(150, 300)
     control_x, control_y = (start_x + x) / 2 + _rng.uniform(-80, 80), start_y - 60
@@ -167,79 +170,70 @@ def _config(mode: str) -> SessionConfig:
     )
 
 
+def _page(page: CDPPage) -> Page:
+    async def screenshot(path: Path) -> None:
+        shot = await page.send("Page.captureScreenshot", {"format": "png"})
+        path.write_bytes(base64.b64decode(shot["data"]))
+
+    async def mouse(kind: str, x: float, y: float) -> None:
+        # A held left button reports buttons=1 until it is released.
+        event = {"move": "mouseMoved", "down": "mousePressed", "up": "mouseReleased"}[kind]
+        pressed = kind == "down"
+        await page.send(
+            "Input.dispatchMouseEvent",
+            {
+                "type": event,
+                "x": x,
+                "y": y,
+                "button": "none" if kind == "move" else "left",
+                "buttons": 1 if pressed else 0,
+                "clickCount": 0 if kind == "move" else 1,
+            },
+        )
+
+    # Isolated worlds: the page cannot see the checks, and they need no globals.
+    return Page(page.evaluate, screenshot, mouse)
+
+
 @asynccontextmanager
-async def _patchright(url: str, mode: str) -> AsyncIterator[Page]:
-    config = _config(mode).model_copy(update={"driver": "patchright"})
+async def _client(url: str, mode: str) -> AsyncIterator[Page]:
     async with WebSkrapClient() as client:
-        session = await client.session("parity", config=config)
-        page = await session.context.new_page()
-        await page.goto(url, wait_until="commit", timeout=60_000)
-
-        async def screenshot(path: Path) -> None:
-            await page.screenshot(path=str(path))
-
-        async def mouse(kind: str, x: float, y: float) -> None:
-            if kind == "move":
-                await page.mouse.move(x, y)
-            elif kind == "down":
-                await page.mouse.down()
-            else:
-                await page.mouse.up()
-
-        yield Page(page.evaluate, screenshot, mouse)
+        session = await client.session("parity", config=_config(mode))
+        page = await session.new_page()
+        await page.goto(url, wait_until="commit", timeout_s=60)
+        yield _page(page)
 
 
 @asynccontextmanager
-async def _cdp(url: str, mode: str) -> AsyncIterator[Page]:
+async def _core(url: str, mode: str) -> AsyncIterator[Page]:
     config = _config(mode)
-    args, env = launch_args(config, get_profile(None))
+    profile = get_profile(None)
+    env = config.browser_env(profile)
     display = None
     if config.uses_virtual_display():
         display = await VirtualDisplay.start(1920, 1080)
-        env = {**os.environ, **display.env}
+        env = {**(env or os.environ), **display.env}
     browser = await launch(
         find_executable(config.channel),
-        args=args,
-        headless=config.headless and not config.virtual_display,
-        env=env or None,
+        args=config.browser_args(profile),
+        headless=config.launch_headless,
+        env=env,
     )
     try:
         page = await browser.new_page()
-        await page.send("Page.enable")
-        await page.send("Page.navigate", {"url": url}, timeout_s=60)
-
-        async def screenshot(path: Path) -> None:
-            shot = await page.send("Page.captureScreenshot", {"format": "png"})
-            path.write_bytes(base64.b64decode(shot["data"]))
-
-        async def mouse(kind: str, x: float, y: float) -> None:
-            # Same events Playwright's mouse sends: a held left button
-            # reports buttons=1 until it is released.
-            event = {"move": "mouseMoved", "down": "mousePressed", "up": "mouseReleased"}[kind]
-            pressed = kind == "down"
-            await page.send(
-                "Input.dispatchMouseEvent",
-                {
-                    "type": event,
-                    "x": x,
-                    "y": y,
-                    "button": "none" if kind == "move" else "left",
-                    "buttons": 1 if pressed else 0,
-                    "clickCount": 0 if kind == "move" else 1,
-                },
-            )
-
-        yield Page(page.evaluate, screenshot, mouse)
+        await page.enable_events()
+        await page.goto(url, wait_until="commit", timeout_s=60)
+        yield _page(page)
     finally:
         await browser.close()
         if display is not None:
             await display.stop()
 
 
-DRIVERS = {"patchright": _patchright, "cdp": _cdp}
+DRIVERS = {"client": _client, "core": _core}
 
 
-def _via_session(driver: str) -> Callable[[str, str], AbstractAsyncContextManager[Page]]:
+def _via_session() -> Callable[[str, str], AbstractAsyncContextManager[Page]]:
     """Run a target through a persistent session, as `webskrap browser` does.
 
     Every call attaches anew, like each CLI command or MCP tool call. Sessions
@@ -252,10 +246,8 @@ def _via_session(driver: str) -> Callable[[str, str], AbstractAsyncContextManage
             raise ValueError("sessions run headless or headed, not on a virtual display")
         # A fresh name per run: cleanup deletes the session's data, so it must
         # never reuse a session the operator opened.
-        name = f"parity-{driver}-{uuid4().hex[:12]}"
-        await browser_session.open_session(
-            name, headless=mode != "headed", driver="cdp" if driver == "cdp" else "patchright"
-        )
+        name = f"parity-{uuid4().hex[:12]}"
+        await browser_session.open_session(name, headless=mode != "headed")
         try:
 
             async def act(action: Callable[[Any], Awaitable[Any]]) -> Any:
@@ -279,7 +271,7 @@ def _via_session(driver: str) -> Callable[[str, str], AbstractAsyncContextManage
     return run
 
 
-SESSION_DRIVERS = {driver: _via_session(driver) for driver in DRIVERS}
+SESSION_DRIVERS = {"session": _via_session()}
 
 # The widget box renders before the checkbox inside its iframe does.
 WIDGET_SETTLE_S = 3.0
@@ -359,7 +351,7 @@ async def run_once(
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--runs", type=int, default=3, help="Runs per driver, mode and target.")
+    parser.add_argument("--runs", type=int, default=3, help="Runs per path, mode and target.")
     parser.add_argument("--wait", type=float, default=30, help="Seconds to poll each run.")
     parser.add_argument(
         "--mode", action="append", choices=("headless", "virtual-display", "headed")
@@ -403,9 +395,10 @@ async def main() -> None:
     for target in targets:
         for mode in modes:
             for run in range(args.runs):
-                # Alternate the order so neither driver always runs first on
+                # Alternate the order so neither path always runs first on
                 # an IP that the target may start to distrust.
-                order = ("patchright", "cdp") if run % 2 == 0 else ("cdp", "patchright")
+                paths = list(SESSION_DRIVERS if args.via == "session" else DRIVERS)
+                order = paths if run % 2 == 0 else paths[::-1]
                 for driver in order:
                     shot = (
                         args.screenshots / f"{target}-{mode}-{driver}-{run + 1}.png"
@@ -429,7 +422,7 @@ async def main() -> None:
     for target in targets:
         for mode in modes:
             parts = []
-            for driver in DRIVERS:
+            for driver in SESSION_DRIVERS if args.via == "session" else DRIVERS:
                 states = [
                     r["state"]
                     for r in results

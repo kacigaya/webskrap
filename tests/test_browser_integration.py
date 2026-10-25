@@ -100,7 +100,7 @@ async def test_mcp_protocol_reuses_fetch_sessions_and_keeps_unnamed_calls_isolat
             server.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await server
-    assert runtimes[0].client._playwright is None
+    assert runtimes[0].client._sessions == {}
 
 
 # A OneTrust-shaped notice: matched by an exact CMP selector.
@@ -252,15 +252,27 @@ async def test_fetch_local_page(test_server: str, sandbox_supported: bool) -> No
     assert result.cookie_notice_declined is None
 
 
-@pytest.mark.parametrize("driver", ["playwright", "patchright"])
-async def test_fetch_challenge_readiness_and_http_errors(test_server, sandbox_supported, driver):
-    config = SessionConfig(driver=driver, channel="chromium", chromium_sandbox=sandbox_supported)
+async def _page_targets(session, expected: set[str] | None = None) -> set[str]:
+    # Target.closeTarget returns before the target is gone; give it a moment.
+    for _ in range(20):
+        targets = await session.browser.connection.send("Target.getTargets")
+        found = {info["targetId"] for info in targets["targetInfos"] if info["type"] == "page"}
+        if expected is None or found == expected:
+            break
+        await asyncio.sleep(0.1)
+    return found
+
+
+async def test_fetch_challenge_readiness_and_http_errors(test_server, sandbox_supported):
+    config = SessionConfig(
+        channel="chromium",
+        chromium_sandbox=sandbox_supported,
+        # The challenge pages load DataDome's script; no request may leave the test.
+        launch_args=["--host-resolver-rules=MAP *.captcha-delivery.com ~NOTFOUND"],
+    )
     async with WebSkrapClient(default_config=config) as client:
         session = await client.session("quote")
-        original_pages = set(session.context.pages)
-        await session.context.route(
-            "https://*.captcha-delivery.com/**", lambda route: route.abort()
-        )
+        original_pages = await _page_targets(session)
         result = await session.fetch(
             f"{test_server}/ready", ready_selector="#quote", text_only=True
         )
@@ -269,7 +281,7 @@ async def test_fetch_challenge_readiness_and_http_errors(test_server, sandbox_su
             with pytest.raises(WebSkrapError) as error:
                 await session.fetch(f"{test_server}/{path}", ready_selector="#quote")
             assert error.value.code is ErrorCode.BLOCKED
-            assert set(session.context.pages) == original_pages
+            assert await _page_targets(session, original_pages) == original_pages
         result = await session.fetch(f"{test_server}/forbidden", text_only=True)
         assert result.status == 403
         assert not result.ok
@@ -343,20 +355,6 @@ async def test_persistent_session_reuses_cookies(
 
 
 @pytest.mark.asyncio
-async def test_per_call_patchright_config_starts_patchright(sandbox_supported: bool) -> None:
-    config = SessionConfig(
-        chromium_sandbox=sandbox_supported, driver="patchright", channel=None, decline_cookies=False
-    )
-
-    async with WebSkrapClient(
-        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
-    ) as client:
-        session = await client.session("patchright", config=config)
-
-    assert type(session.context).__module__.startswith("patchright.")
-
-
-@pytest.mark.asyncio
 async def test_links_are_off_by_default(test_server: str, sandbox_supported: bool) -> None:
     async with WebSkrapClient(
         default_config=SessionConfig(chromium_sandbox=sandbox_supported)
@@ -425,15 +423,14 @@ async def test_virtual_display_presents_a_headed_browser(
     # which a --user-agent rewrite of headless Chrome cannot give.
     config = SessionConfig(
         chromium_sandbox=sandbox_supported,
-        driver="patchright",
         channel="chromium",
         virtual_display=True,
     )
     async with WebSkrapClient(default_config=config) as client:
         session = await client.session("virtual-display", config=config)
-        page = await session.context.new_page()
+        page = await session.new_page()
         # userAgentData needs a secure context; a data: URL is not one.
-        await page.goto(f"{test_server}/links")
+        await page.goto(f"{test_server}/links", wait_until="load", timeout_s=30)
         seen = await page.evaluate(
             """async () => ({
                 ua: navigator.userAgent,
@@ -454,13 +451,11 @@ async def test_virtual_display_presents_a_headed_browser(
 
 @pytest.mark.skipif(not lavapipe_available(), reason="needs Mesa's lavapipe Vulkan driver")
 async def test_mesa_gpu_replaces_swiftshader(test_server: str, sandbox_supported: bool) -> None:
-    config = SessionConfig(
-        chromium_sandbox=sandbox_supported, driver="patchright", channel="chromium", gpu="mesa"
-    )
+    config = SessionConfig(chromium_sandbox=sandbox_supported, channel="chromium", gpu="mesa")
     async with WebSkrapClient(default_config=config) as client:
         session = await client.session("mesa-gpu", config=config)
-        page = await session.context.new_page()
-        await page.goto(f"{test_server}/links")
+        page = await session.new_page()
+        await page.goto(f"{test_server}/links", wait_until="load", timeout_s=30)
         renderer = await page.evaluate(
             """() => {
                 const gl = document.createElement('canvas').getContext('webgl');

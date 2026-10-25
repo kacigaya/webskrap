@@ -14,7 +14,7 @@ from webskrap.errors import ErrorCode, WebSkrapError
 
 
 class ScriptRunner(Protocol):
-    """Anything that runs a page script: a Playwright page or a CDP page."""
+    """Anything that runs a page script and returns its JSON value."""
 
     async def evaluate(self, expression: str, /) -> Any:
         """Run ``expression`` and return its JSON value."""

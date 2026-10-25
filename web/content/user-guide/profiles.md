@@ -1,5 +1,5 @@
 ---
-title: Browser Profiles for Playwright Scraping
+title: Browser Profiles for Python Scraping
 description: Configure coherent desktop and mobile browser profiles for Python web scraping with realistic locale, viewport, and headers.
 ---
 
@@ -7,9 +7,13 @@ description: Configure coherent desktop and mobile browser profiles for Python w
 
 Profiles describe browser-visible settings such as viewport, locale, timezone, language headers, and device characteristics.
 
-Patchright sessions use the browser's native context by default. Set
-`patchright_context_profile=True` when you intentionally want WebSkrap to apply
-the selected profile's locale, timezone, viewport, media, and user agent.
+Sessions use the browser's native identity by default. `profile_mode` sets how
+much of the selected profile pages see:
+
+- `"native"` (default): nothing is applied.
+- `"locale"`: locale, timezone, color scheme, reduced motion and extra headers.
+- `"full"`: also viewport, screen, device scale, touch and user agent. Each
+  override is a surface that a page can cross-check.
 
 ## Built-in profiles
 
