@@ -1,3 +1,8 @@
+---
+title: Human-Like Mouse and Keyboard Input in Python
+description: Use the WebSkrap humanizer for curved mouse paths, wheel scrolling, and per-key typing with human timing in Python browser automation.
+---
+
 # Humanizer
 
 WebSkrap's humanizer drives the real mouse and keyboard with human timing
