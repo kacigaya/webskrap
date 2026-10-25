@@ -123,7 +123,7 @@ const DETECTION_ROWS: {
     stock: "FAIL",
     cloak: "PASS",
     webskrap: "PASS",
-    notes: "Production sitekey issued a real token without interaction (3/3 headed, 3/3 headless; rechecked September 30 on macOS)",
+    notes: "Production sitekey issued a real token without interaction, headed and on the virtual display",
   },
   {
     service: "FingerprintJS bot detection",
@@ -137,7 +137,7 @@ const DETECTION_ROWS: {
     stock: "DETECTED",
     cloak: "NORMAL (4/4)",
     webskrap: "PASS",
-    notes: "0 abnormal checks in headed run",
+    notes: "0 abnormal checks, headed and on the virtual display",
   },
   {
     service: "bot.incolumitas.com",
@@ -190,48 +190,49 @@ const DETECTION_ROWS: {
   },
 ];
 
+// Medians of three virtual-display passes.
 const RESOURCE_ROUTING = [
-  { policy: "DOCUMENTS", time: "238.78", vs: "0.43x" },
-  { policy: "LITE", time: "286.02", vs: "0.51x" },
-  { policy: "ALL", time: "558.60", vs: "1.00x" },
+  { policy: "DOCUMENTS", time: "174.40", vs: "0.53x" },
+  { policy: "LITE", time: "204.32", vs: "0.62x" },
+  { policy: "ALL", time: "328.44", vs: "1.00x" },
 ];
 
 const SESSION_REUSE = [
-  { mode: "Warm session reuse", time: "257.81", vs: "1.00x", best: true },
-  { mode: "Cold launch per fetch", time: "1,373.01", vs: "5.33x", best: false },
+  { mode: "Warm session reuse", time: "209.66", vs: "1.00x", best: true },
+  { mode: "Cold launch per fetch", time: "1,154.79", vs: "5.51x", best: false },
 ];
 
 // Median of three alternating passes per mode; ranges show run-to-run spread.
 const MODE_COMPARISON = [
   {
     benchmark: "ALL policy",
-    virtual: { median: "546.19", range: "526.00-971.66" },
-    headed: { median: "491.86", range: "469.94-502.30" },
+    virtual: { median: "328.44", range: "301.09-351.45" },
+    headed: { median: "307.55", range: "304.13-309.37" },
   },
   {
     benchmark: "LITE policy",
-    virtual: { median: "264.63", range: "224.47-276.93" },
-    headed: { median: "276.98", range: "257.43-277.03" },
+    virtual: { median: "204.32", range: "199.26-233.81" },
+    headed: { median: "209.53", range: "195.46-211.47" },
   },
   {
     benchmark: "DOCUMENTS policy",
-    virtual: { median: "244.70", range: "207.87-253.18" },
-    headed: { median: "217.09", range: "200.15-217.14" },
+    virtual: { median: "174.40", range: "169.59-190.99" },
+    headed: { median: "169.05", range: "165.37-174.14" },
   },
   {
     benchmark: "Warm session reuse",
-    virtual: { median: "253.54", range: "251.61-282.66" },
-    headed: { median: "278.05", range: "245.17-309.57" },
+    virtual: { median: "209.66", range: "200.82-226.29" },
+    headed: { median: "208.64", range: "203.08-220.83" },
   },
   {
     benchmark: "Cold launch per fetch",
-    virtual: { median: "2,185.87", range: "1,359.93-2,724.47" },
-    headed: { median: "2,505.93", range: "1,151.82-3,457.16" },
+    virtual: { median: "1,154.79", range: "1,137.44-1,216.78" },
+    headed: { median: "1,021.96", range: "947.38-1,190.56" },
   },
   {
     benchmark: "Concurrency, per page",
-    virtual: { median: "225.75", range: "224.87-250.63" },
-    headed: { median: "213.82", range: "193.72-299.11" },
+    virtual: { median: "160.22", range: "153.17-176.12" },
+    headed: { median: "160.61", range: "157.73-167.13" },
   },
 ];
 
@@ -251,21 +252,23 @@ export default function BenchmarksPage() {
         <div className="flex flex-col gap-1">
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Comparison</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            This is a September 29, 2026 snapshot. CloakBrowser values came from its{" "}
+            WebSkrap values are an October 25, 2026 snapshot. Stock Playwright and
+            CloakBrowser values came from CloakBrowser&apos;s{" "}
             <a
               href="https://github.com/CloakHQ/CloakBrowser/blob/main/README.md"
               className="text-primary underline"
             >
               upstream README
             </a>
-            ; WebSkrap values came from a separate live report generated with{" "}
+            , read on September 29, 2026. WebSkrap values came from a live report generated with{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
               WEBSKRAP_BROWSER_CHANNEL=chromium WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1
               WEBSKRAP_LIVE_GPU=mesa WEBSKRAP_CHROMIUM_SANDBOX=0 xvfb-run -a python
               scripts/live_stealth_report.py --no-open --report-only
             </code>
-            . Both suites ran WebSkrap 2.x on Patchright with Chromium 153 on ARM64 Linux with no GPU
-            and no proxy, rendering WebGL through Mesa lavapipe. The headed suite ran under{" "}
+            . Both suites ran WebSkrap 3.0.0 on its own CDP client with Chrome for Testing
+            156.0.8078.47 on ARM64 Linux, on a datacenter IP with no GPU and no proxy,
+            rendering WebGL through Mesa lavapipe. The headed suite ran under{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">xvfb-run</code>; the
             headless suite used{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">virtual_display=True</code>
@@ -324,7 +327,7 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameTitle>Detection services</FrameTitle>
-            <FrameDescription>Stock Playwright vs CloakBrowser vs WebSkrap 2.x (Patchright) headed on Xvfb</FrameDescription>
+            <FrameDescription>Stock Playwright vs CloakBrowser vs WebSkrap 3.0 headed on Xvfb</FrameDescription>
           </FrameHeader>
           <Table
             variant="card"
@@ -365,17 +368,12 @@ export default function BenchmarksPage() {
         <Frame className="gap-3 bg-transparent p-0">
           <FrameHeader className="p-0">
             <FrameDescription>
-              September 29 WebSkrap live summary: 25 passed, 2 skipped, 0 failed. Headed:
+              October 25 WebSkrap live summary: 25 passed, 2 skipped, 0 failed. Headed:
               17 passed, 1 skipped. Virtual display: 8 passed, 1 skipped. Both skips were
-              Are You Headless, which returned 502 Bad Gateway to every client; the suites
-              skip a site that answers with a 5xx status. reCAPTCHA v3 returned a score in
-              both suites. On September 30 the Turnstile check was rerun on macOS 26.1
-              with Google Chrome 151 and Patchright 1.63.0 on a residential connection.
-              The earlier Turnstile demo used a Cloudflare test sitekey, which always
-              returns a dummy token, so it could not show detection. A production
-              sitekey issued real tokens in 3 of 3 headed runs and 3 of 3 headless runs;
-              headed tokens arrived in 3 to 4 seconds. Its managed mode also issued a token in 3 of 3 headed
-              runs, with no clicks.
+              Are You Headless, which returned 502 Bad Gateway; the suites skip a site
+              that answers with a 5xx status. reCAPTCHA v3 returned a score in both
+              suites. The Turnstile demo uses a production sitekey, and the suite rejects
+              the dummy token that a Cloudflare test sitekey returns.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -386,19 +384,20 @@ export default function BenchmarksPage() {
         <div className="flex flex-col gap-1">
           <h2 className="text-balance font-heading text-2xl font-bold tracking-tight">Performance</h2>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Measured on 2026-09-25 with WebSkrap 2.x against a local HTTP server with delayed assets. No
-            external sites were contacted. Every session used the stealth setup: the
-            Patchright driver with{" "}
+            Measured on 2026-10-25 with WebSkrap 3.0.0 against a local HTTP server with
+            delayed assets. No external sites were contacted. Every session used the
+            stealth setup:{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">headless=True</code>{" "}
             and{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">virtual_display=True</code>
             , so Chromium ran headed on a private 1920x1080 Xvfb screen. The host was
-            ARM64, running Python 3.14.7, Patchright 1.63.0, and Chromium
-            153.0.8010.12. Its Chromium sandbox was unavailable, so this run used{" "}
+            ARM64, running Python 3.14.7 and Chrome for Testing 156.0.8078.47. Its
+            Chromium sandbox was unavailable, so these runs used{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
               WEBSKRAP_CHROMIUM_SANDBOX=0 python benchmarks.py
             </code>
-            . Timings vary with hardware, browser version, and host load.
+            . Each figure is the median of three passes. Timings vary with hardware,
+            browser version, and host load.
           </p>
         </div>
 
@@ -431,8 +430,8 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              In this run, DOCUMENTS took 57% less time than ALL and LITE took 49% less.
-              A second full run kept the same order (213.65, 250.37, and 502.51 ms).
+              DOCUMENTS took 47% less time than ALL and LITE took 38% less. All three
+              passes kept the same order.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -464,9 +463,8 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              Cold launch took 5.33 times as long as warm session reuse in this run.
-              Each cold fetch also starts its own Xvfb server, which adds to launch
-              cost.
+              Cold launch took 5.51 times as long as warm session reuse. Each cold
+              fetch also starts its own Xvfb server, which adds to launch cost.
             </FrameDescription>
           </FrameHeader>
         </Frame>
@@ -478,13 +476,13 @@ export default function BenchmarksPage() {
           </FrameHeader>
           <Frame className="bg-transparent p-0">
             <FrameHeader className="flex-row items-baseline gap-3">
-              <span className="shrink-0 whitespace-nowrap font-heading text-3xl font-bold tabular-nums sm:text-4xl">260.61 ms</span>
+              <span className="shrink-0 whitespace-nowrap font-heading text-3xl font-bold tabular-nums sm:text-4xl">160.22 ms</span>
               <FrameDescription>batch time divided by 8 pages</FrameDescription>
             </FrameHeader>
             <FrameDescription>
-              Average batch time was 2,084.91 ms. The per-page figure is a
-              throughput equivalent, not the latency of an individual page. A second
-              run measured 1,740.49 ms per batch, so expect this figure to vary.
+              Median batch time was 1,281.78 ms (1,225.39 to 1,408.99 ms across passes).
+              The per-page figure is a throughput equivalent, not the latency of an
+              individual page.
             </FrameDescription>
           </Frame>
         </Frame>
@@ -522,7 +520,7 @@ export default function BenchmarksPage() {
           </Table>
           <FrameHeader>
             <FrameDescription>
-              Measured on 2026-09-29 on the same host, alternating three passes of{" "}
+              Measured on 2026-10-25 on the same host, alternating three passes of{" "}
               <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
                 python benchmarks.py
               </code>{" "}
@@ -538,8 +536,7 @@ export default function BenchmarksPage() {
               <code className="rounded bg-muted px-1.5 py-0.5 text-sm">headless=False</code>{" "}
               on a 1920x1080 Xvfb screen started by xvfb-run instead of one per
               session. Once the browser is running, the two modes differ by less than
-              the spread between passes. Cold launch varied the most, because the
-              host was also serving other work during these runs.
+              the spread between passes. Cold launch varied the most.
             </FrameDescription>
           </FrameHeader>
         </Frame>
