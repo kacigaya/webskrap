@@ -239,7 +239,7 @@ selector. Refs describe the current page, so take a fresh
 curved path and hold the button for a human 60-140 ms; `type` clicks into the
 field and types with human keystroke timing. Both refuse a target covered by
 another element. They are slower than mechanical input on purpose (see
-[Humanizer](/docs/user-guide/humanizer)); `fill` still sets a value at once.
+[Humanizer](/docs/user-guide/humanizer/)); `fill` still sets a value at once.
 
 Navigation uses `goto`, `back`, `forward`, and `reload`; `press` sends a key
 to the page, and `eval` runs JavaScript and prints the JSON result. All
@@ -349,5 +349,5 @@ mocking, tracing, or video. `back` and `forward` always reload the page,
 because the back/forward cache is disabled to keep history navigation
 deterministic.
 
-The [MCP server](/docs/user-guide/mcp#interactive-browser-tools) exposes the
+The [MCP server](/docs/user-guide/mcp/#interactive-browser-tools) exposes the
 same sessions to agents as `browser_*` tools.

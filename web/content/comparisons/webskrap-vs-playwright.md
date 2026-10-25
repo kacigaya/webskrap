@@ -56,7 +56,7 @@ Use Playwright directly when you need Firefox or WebKit, or its full testing API
 
 ## Related docs
 
-- [Python Web Scraping with WebSkrap](/docs/guides/python-web-scraping)
-- [Client API](/docs/user-guide/client)
-- [Stealth](/docs/user-guide/stealth)
-- [MCP Server](/docs/user-guide/mcp)
+- [Python Web Scraping with WebSkrap](/docs/guides/python-web-scraping/)
+- [Client API](/docs/user-guide/client/)
+- [Stealth](/docs/user-guide/stealth/)
+- [MCP Server](/docs/user-guide/mcp/)

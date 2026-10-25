@@ -56,7 +56,7 @@ Persistent sessions can keep cookies and local storage between fetches for sites
 
 ## Related docs
 
-- [Client API](/docs/user-guide/client)
-- [Sessions](/docs/user-guide/sessions)
-- [Profiles](/docs/user-guide/profiles)
-- [Resource policy](/docs/user-guide/resource-policy)
+- [Client API](/docs/user-guide/client/)
+- [Sessions](/docs/user-guide/sessions/)
+- [Profiles](/docs/user-guide/profiles/)
+- [Resource policy](/docs/user-guide/resource-policy/)

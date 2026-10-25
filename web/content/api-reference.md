@@ -35,8 +35,8 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 `webskrap.browser_session` and `webskrap.paths` implement persistent CLI and
 MCP browser sessions, sandbox selection, profile storage, and confined MCP
 output. These modules are not re-exported from `webskrap` and are not part of
-the stable public Python API. Use the [`webskrap browser` CLI](/docs/user-guide/cli#interactive-browser-sessions)
-or the [MCP browser tools](/docs/user-guide/mcp#interactive-browser-tools)
+the stable public Python API. Use the [`webskrap browser` CLI](/docs/user-guide/cli/#interactive-browser-sessions)
+or the [MCP browser tools](/docs/user-guide/mcp/#interactive-browser-tools)
 instead of importing their helpers directly.
 
 ## Profiles

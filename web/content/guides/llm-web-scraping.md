@@ -36,7 +36,7 @@ Raw HTML spends thousands of tokens on tags, inline scripts, and styles the mode
 
 ## Related docs
 
-- [MCP Server](/docs/user-guide/mcp)
-- [CLI](/docs/user-guide/cli)
-- [Stealth](/docs/user-guide/stealth)
-- [API Reference](/docs/api-reference)
+- [MCP Server](/docs/user-guide/mcp/)
+- [CLI](/docs/user-guide/cli/)
+- [Stealth](/docs/user-guide/stealth/)
+- [API Reference](/docs/api-reference/)

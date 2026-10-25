@@ -53,8 +53,8 @@ Common use cases:
 
 ## Next steps
 
-- [Quickstart](/docs/getting-started/quickstart)
-- [Client API](/docs/user-guide/client)
-- [Persistent sessions](/docs/user-guide/sessions)
-- [Browser profiles](/docs/user-guide/profiles)
-- [Resource policy](/docs/user-guide/resource-policy)
+- [Quickstart](/docs/getting-started/quickstart/)
+- [Client API](/docs/user-guide/client/)
+- [Persistent sessions](/docs/user-guide/sessions/)
+- [Browser profiles](/docs/user-guide/profiles/)
+- [Resource policy](/docs/user-guide/resource-policy/)

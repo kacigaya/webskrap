@@ -145,7 +145,7 @@ time with human timing:
 await session.human_type(page, "input[name='q']", "running shoes")
 ```
 
-See the [Humanizer](/docs/user-guide/humanizer) guide for the focused behavior
+See the [Humanizer](/docs/user-guide/humanizer/) guide for the focused behavior
 reference and safety boundaries.
 
 ## Common options

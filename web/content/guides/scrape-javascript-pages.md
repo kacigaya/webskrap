@@ -62,7 +62,7 @@ Then inspect what the browser actually sees before changing the scraper.
 
 ## Related docs
 
-- [Quickstart](/docs/getting-started/quickstart)
-- [Resource policy](/docs/user-guide/resource-policy)
-- [Sessions](/docs/user-guide/sessions)
-- [CLI](/docs/user-guide/cli)
+- [Quickstart](/docs/getting-started/quickstart/)
+- [Resource policy](/docs/user-guide/resource-policy/)
+- [Sessions](/docs/user-guide/sessions/)
+- [CLI](/docs/user-guide/cli/)

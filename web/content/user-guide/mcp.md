@@ -175,7 +175,7 @@ Switch engine or exit IP instead of retrying.
 ## Interactive browser tools
 
 The `browser_*` tools drive the same persistent sessions as
-[`webskrap browser`](/docs/user-guide/cli#interactive-browser-sessions) in the
+[`webskrap browser`](/docs/user-guide/cli/#interactive-browser-sessions) in the
 CLI: `browser_open` launches a detached headless Chromium that keeps running
 between tool calls (and between MCP server restarts), and every other tool
 reconnects to it over CDP, with the same automation and
@@ -199,7 +199,7 @@ A typical flow:
    CSS selector). `fill` and `type` take one entry in `values`;
    `select` takes one or more. `click`, `dblclick` and `type` use human mouse
    and keystroke timing, so they take noticeably longer than `fill`; see
-   [Humanizer](/docs/user-guide/humanizer).
+   [Humanizer](/docs/user-guide/humanizer/).
 4. `browser_eval` or `browser_screenshot` to read results.
 5. `browser_close` when done (`delete_data: true` to drop the profile).
 
@@ -311,7 +311,7 @@ args = []
 ## Stealth
 
 `stealth_fetch` accepts the same controls as the
-[Stealth](/docs/user-guide/stealth) guide, including
+[Stealth](/docs/user-guide/stealth/) guide, including
 `channel`, `headless`, `user_data_dir`, `profile_mode`,
 `reduce_fingerprint_surface`, `mask_headless_user_agent`, `virtual_display`,
 `gpu`, and `webrtc_ip_handling_policy`. On Linux with Xvfb, prefer `virtual_display`
