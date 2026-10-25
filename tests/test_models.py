@@ -18,7 +18,13 @@ from webskrap import (
     Viewport,
     WebRtcIPHandlingPolicy,
 )
-from webskrap.models import TextWindow, shape_fetch_result, shape_search_result, text_window
+from webskrap.models import (
+    TextWindow,
+    shape_fetch_result,
+    shape_search_result,
+    text_window,
+    user_agent_metadata,
+)
 
 
 def test_full_profile_mode_emulates_the_whole_profile() -> None:
@@ -44,6 +50,87 @@ def test_full_profile_mode_emulates_the_whole_profile() -> None:
     headers = commands["Network.setExtraHTTPHeaders"]["headers"]
     assert headers["Accept-Language"] == "en-US,en;q=0.9"
     assert "Accept" not in headers
+
+
+def test_full_profile_sends_user_agent_metadata_with_the_override() -> None:
+    profile = BrowserProfile(name="test", user_agent="Custom/1.0")
+    metadata = {"platform": "Linux"}
+
+    commands = dict(
+        SessionConfig(profile_mode="full").emulation_commands(profile, user_agent_metadata=metadata)
+    )
+
+    assert commands["Emulation.setUserAgentOverride"]["userAgentMetadata"] == metadata
+
+
+WINDOWS_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/{}.0.0.0 Safari/537.36"
+)
+
+
+@pytest.mark.parametrize(
+    ("major", "brand", "header"),
+    [
+        # Sec-CH-UA values real browsers sent.
+        (120, "Google Chrome", '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"'),
+        (124, "Google Chrome", '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'),
+        # Chrome for Testing 156 on this project's CI hosts, measured.
+        (156, None, '"Not:A-Brand";v="8", "Chromium";v="156"'),
+    ],
+)
+def test_user_agent_metadata_brands_follow_chromium_grease(
+    major: int, brand: str | None, header: str
+) -> None:
+    metadata = user_agent_metadata(WINDOWS_UA.format(major), brand=brand, full_version="1.2.3.4")
+
+    assert metadata is not None
+    sent = ", ".join(f'"{b["brand"]}";v="{b["version"]}"' for b in metadata["brands"])
+    assert sent == header
+    assert metadata["platform"] == "Windows"
+    assert (metadata["architecture"], metadata["bitness"], metadata["mobile"]) == (
+        "x86",
+        "64",
+        False,
+    )
+    # The running browser's version is used only when its major version matches.
+    assert metadata["fullVersion"] == f"{major}.0.0.0"
+
+
+def test_user_agent_metadata_reads_android_and_macos_details() -> None:
+    android = user_agent_metadata(
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/156.0.0.0 Mobile Safari/537.36",
+        brand="Google Chrome",
+        full_version="156.0.8078.47",
+    )
+    assert android is not None
+    assert (android["platform"], android["platformVersion"], android["model"]) == (
+        "Android",
+        "13.0.0",
+        "Pixel 7",
+    )
+    assert android["mobile"] is True and android["formFactors"] == ["Mobile"]
+    assert android["fullVersion"] == "156.0.8078.47"
+    assert {"brand": "Google Chrome", "version": "156.0.8078.47"} in android["fullVersionList"]
+    reduced = user_agent_metadata(
+        "Mozilla/5.0 (Linux; Android 10; K) Chrome/156.0.0.0 Mobile", brand=None, full_version=""
+    )
+    assert reduced is not None and reduced["model"] == ""
+    mac = user_agent_metadata(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/156.0.0.0 Safari/537.36",
+        brand=None,
+        full_version="",
+    )
+    assert mac is not None and (mac["platform"], mac["platformVersion"]) == ("macOS", "10.15.7")
+
+
+@pytest.mark.parametrize(
+    "user_agent",
+    ["Custom/1.0", "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0"],
+)
+def test_user_agent_metadata_needs_a_chrome_user_agent(user_agent: str) -> None:
+    assert user_agent_metadata(user_agent, brand=None, full_version="156.0.1.2") is None
 
 
 def test_profile_preserves_caller_accept_header() -> None:

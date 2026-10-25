@@ -39,7 +39,7 @@ from urllib.parse import urlsplit
 from webskrap import cdp_dom
 from webskrap.cdp import CDPBrowser, CDPConnection, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import BrowserProfile, ResourcePolicy, SessionConfig
+from webskrap.models import BrowserProfile, ResourcePolicy, SessionConfig, user_agent_metadata
 
 #: CDP resource types each policy blocks.
 BLOCKED_TYPES: dict[ResourcePolicy, tuple[str, ...]] = {
@@ -70,14 +70,39 @@ async def prepare_page(page: CDPPage, config: SessionConfig, profile: BrowserPro
     """Apply ``config`` and ``profile`` to a fresh page before it navigates."""
     await page.enable_events()
     page.default_timeout_s = config.default_timeout_ms / 1000
-    for method, params in config.emulation_commands(profile):
+    commands = await _emulation(page.connection, config, profile)
+    for method, params in commands:
         await page.send(method, params)
     await _prepare_document(page, config)
     await _route(page, config)
-    if config.emulation_commands(profile) or _routes(config) or _document_switches(config):
+    if commands or _routes(config) or _document_switches(config):
         await cdp_dom.start_auto_attach(
-            page, _on_attached(page.connection, page.default_timeout_s, config, profile)
+            page, _on_attached(page.connection, page.default_timeout_s, config, commands)
         )
+
+
+#: The brand each channel's browser reports next to ``Chromium``.
+_CHANNEL_BRANDS: dict[str | None, str] = {"chrome": "Google Chrome", "msedge": "Microsoft Edge"}
+
+
+async def _emulation(
+    connection: CDPConnection, config: SessionConfig, profile: BrowserProfile
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return ``config``'s emulation commands, with client hints for a profile UA.
+
+    The hints need the running browser's version, so ``Browser.getVersion``
+    is asked only when a user agent is overridden.
+    """
+    metadata = None
+    if config.profile_mode == "full" and profile.user_agent:
+        version = await connection.send("Browser.getVersion")
+        full_version = str(version.get("product", "")).rpartition("/")[2]
+        metadata = user_agent_metadata(
+            profile.user_agent,
+            brand=_CHANNEL_BRANDS.get(config.channel),
+            full_version=full_version,
+        )
+    return config.emulation_commands(profile, user_agent_metadata=metadata)
 
 
 async def prepare_browser(
@@ -88,11 +113,12 @@ async def prepare_browser(
     They are browser targets, so a page's auto-attach does not report them.
     Each one waits for the debugger until it is set up.
     """
-    if not config.emulation_commands(profile) and not _routes(config):
-        return
     connection = browser.connection
+    commands = await _emulation(connection, config, profile)
+    if not commands and not _routes(config):
+        return
     timeout_s = config.default_timeout_ms / 1000
-    handler = _on_attached(connection, timeout_s, config, profile)
+    handler = _on_attached(connection, timeout_s, config, commands)
     connection.on("Target.attachedToTarget", handler, session_id=None)
     await connection.send(
         "Target.setAutoAttach",
@@ -106,16 +132,22 @@ async def prepare_browser(
 
 
 def _on_attached(
-    connection: CDPConnection, timeout_s: float, config: SessionConfig, profile: BrowserProfile
+    connection: CDPConnection,
+    timeout_s: float,
+    config: SessionConfig,
+    commands: list[tuple[str, dict[str, Any]]],
 ) -> Callable[[dict[str, Any]], None]:
-    """Return a ``Target.attachedToTarget`` handler that sets up and resumes targets."""
+    """Return a ``Target.attachedToTarget`` handler that sets up and resumes targets.
+
+    ``commands`` are the page's emulation commands, from :func:`_emulation`.
+    """
     tasks: set[asyncio.Task[None]] = set()
 
     def attached(params: dict[str, Any]) -> None:
         info = params.get("targetInfo", {})
         child = CDPPage(connection, params["sessionId"], info.get("targetId", ""))
         child.default_timeout_s = timeout_s
-        task = asyncio.create_task(_prepare_target(child, info.get("type"), config, profile))
+        task = asyncio.create_task(_prepare_target(child, info.get("type"), config, commands))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 
@@ -123,7 +155,10 @@ def _on_attached(
 
 
 async def _prepare_target(
-    child: CDPPage, kind: str | None, config: SessionConfig, profile: BrowserProfile
+    child: CDPPage,
+    kind: str | None,
+    config: SessionConfig,
+    commands: list[tuple[str, dict[str, Any]]],
 ) -> None:
     """Set up one attached iframe or worker, then let it run.
 
@@ -136,15 +171,15 @@ async def _prepare_target(
             if kind == "iframe":
                 await _prepare_document(child, config)
                 await _route(child, config)
-                handler = _on_attached(child.connection, child.default_timeout_s, config, profile)
+                handler = _on_attached(child.connection, child.default_timeout_s, config, commands)
                 await cdp_dom.start_auto_attach(child, handler)
             elif kind in ("shared_worker", "service_worker"):
                 await _route(child, config)
         with suppress(WebSkrapError):
             skipped = _NOT_ON_WORKERS if kind in _WORKER_TYPES else _TOP_LEVEL_ONLY
-            for method, command in config.emulation_commands(profile):
+            for method, params in commands:
                 if method not in skipped:
-                    await child.send(method, command)
+                    await child.send(method, params)
     finally:
         with suppress(WebSkrapError):
             await child.send("Runtime.runIfWaitingForDebugger")

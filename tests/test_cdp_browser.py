@@ -6,7 +6,7 @@ import asyncio
 import tempfile
 import threading
 from collections.abc import Iterator
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,7 @@ from test_browser_integration import _Handler
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
 from webskrap.cdp import find_executable, launch
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import FetchResult
+from webskrap.models import BrowserProfile, FetchResult, user_agent_metadata
 
 pytestmark = pytest.mark.browser
 
@@ -238,3 +238,72 @@ async def test_blocked_service_workers_cannot_register(
                 break
             await asyncio.sleep(0.1)
         assert state == outcome
+
+
+class _HintsHandler(BaseHTTPRequestHandler):
+    """Asks for high-entropy client hints and records the hint headers."""
+
+    seen: list[dict[str, str]] = []
+
+    def do_GET(self) -> None:
+        self.seen.append({k.lower(): v for k, v in self.headers.items()})
+        body = b"<html><body>hints</body></html>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Accept-CH", "Sec-CH-UA-Full-Version-List, Sec-CH-UA-Model")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: object) -> None:
+        pass
+
+
+async def test_full_profile_user_agent_comes_with_matching_client_hints(
+    config: SessionConfig,
+) -> None:
+    _HintsHandler.seen = []
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _HintsHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    user_agent = (
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/149.0.0.0 Mobile Safari/537.36"
+    )
+    profile = BrowserProfile(name="hints", user_agent=user_agent)
+    try:
+        async with WebSkrapClient(
+            default_config=config.model_copy(update={"profile_mode": "full"})
+        ) as client:
+            session = await client.session("hints", profile=profile)
+            page = await session.new_page()
+            url = f"http://127.0.0.1:{httpd.server_port}/"
+            await page.goto(url, wait_until="load", timeout_s=20)
+            await page.goto(url + "again", wait_until="load", timeout_s=20)
+            hints = await page.evaluate(
+                """async () => ({
+                    low: navigator.userAgentData.toJSON(),
+                    high: await navigator.userAgentData.getHighEntropyValues(
+                        ['model', 'platformVersion', 'uaFullVersion']),
+                })"""
+            )
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=3)
+        httpd.server_close()
+
+    expected = user_agent_metadata(user_agent, brand=None, full_version="")
+    assert expected is not None
+    assert hints["low"] == {
+        "brands": expected["brands"],
+        "mobile": True,
+        "platform": "Android",
+    }
+    assert (hints["high"]["model"], hints["high"]["platformVersion"]) == ("Pixel 7", "13.0.0")
+    assert hints["high"]["uaFullVersion"] == "149.0.0.0"
+    headers = _HintsHandler.seen[-1]
+    assert headers["user-agent"] == user_agent
+    assert headers["sec-ch-ua-mobile"] == "?1"
+    assert headers["sec-ch-ua-platform"] == '"Android"'
+    assert headers["sec-ch-ua-model"] == '"Pixel 7"'
+    assert '"Chromium";v="149"' in headers["sec-ch-ua"]

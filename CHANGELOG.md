@@ -17,6 +17,10 @@ history, so they summarize each release rather than list every change.
 
 ### Fixed
 
+- With `profile_mode="full"`, a profile user agent now comes with matching
+  client hints: `navigator.userAgentData` and the `Sec-CH-UA` headers. Before,
+  the brands and platform were empty and no `Sec-CH-UA` header was sent,
+  which no real Chrome does.
 - `profile_mode` `locale` and `full` now apply to cross-site iframes and to
   workers. Before, with `full`, a cross-site iframe reported the browser's own
   user agent, timezone and languages. Iframes still report the real screen

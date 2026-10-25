@@ -9,6 +9,7 @@ CDP commands, which is where their per-field comments matter.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from enum import StrEnum
 from pathlib import Path
@@ -468,11 +469,16 @@ class SessionConfig(BaseModel):
         """
         return self.profile_mode == "locale" and sys.platform.startswith("linux")
 
-    def emulation_commands(self, profile: BrowserProfile) -> list[tuple[str, dict[str, Any]]]:
+    def emulation_commands(
+        self, profile: BrowserProfile, *, user_agent_metadata: dict[str, Any] | None = None
+    ) -> list[tuple[str, dict[str, Any]]]:
         """Return the CDP commands that apply ``profile`` to one page.
 
         Empty for ``profile_mode="native"``. The commands are page-scoped, so
         every new page of a session runs them before it navigates.
+        ``user_agent_metadata`` (see :func:`user_agent_metadata`) goes with
+        the user-agent override. Without it, Chromium reports empty client
+        hints for an overridden user agent and sends no ``Sec-CH-UA``.
         """
         if self.profile_mode == "native":
             return []
@@ -494,15 +500,13 @@ class SessionConfig(BaseModel):
             )
             commands.append(("Emulation.setTouchEmulationEnabled", {"enabled": profile.has_touch}))
             if profile.user_agent:
-                commands.append(
-                    (
-                        "Emulation.setUserAgentOverride",
-                        {
-                            "userAgent": profile.user_agent,
-                            "acceptLanguage": profile.accept_language(),
-                        },
-                    )
-                )
+                override: dict[str, Any] = {
+                    "userAgent": profile.user_agent,
+                    "acceptLanguage": profile.accept_language(),
+                }
+                if user_agent_metadata is not None:
+                    override["userAgentMetadata"] = user_agent_metadata
+                commands.append(("Emulation.setUserAgentOverride", override))
         if full or not self.uses_native_profile():
             commands.append(("Emulation.setLocaleOverride", {"locale": profile.locale}))
             commands.append(("Emulation.setTimezoneOverride", {"timezoneId": profile.timezone_id}))
@@ -860,4 +864,94 @@ def shape_search_result(result: SearchResult) -> dict[str, Any]:
         "hits_truncated": result.hits_total > len(result.hits),
         "elapsed_ms": round(result.timings.get("elapsed_ms", 0.0), 1),
         "cookie_notice_declined": result.cookie_notice_declined,
+    }
+
+
+# Chromium's GREASE brand (components/embedder_support/user_agent_utils.cc),
+# seeded by the major version, so the brand list matches what that version of
+# Chrome sends.
+_GREASE_CHARS = (" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_")
+_GREASE_VERSIONS = ("8", "99", "24")
+_BRAND_ORDERS = ((0, 1, 2), (0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0))
+
+
+def _brand_list(major: int, brand: str | None, versions: tuple[str, str]) -> list[dict[str, str]]:
+    """Return the brand list Chromium ``major`` sends, in its order.
+
+    ``versions`` holds the GREASE brand's and the real brands' version text.
+    """
+    grease_name = (
+        f"Not{_GREASE_CHARS[major % len(_GREASE_CHARS)]}A"
+        f"{_GREASE_CHARS[(major + 1) % len(_GREASE_CHARS)]}Brand"
+    )
+    grease = {"brand": grease_name, "version": versions[0]}
+    chromium = {"brand": "Chromium", "version": versions[1]}
+    if brand is None:
+        return [grease, chromium] if major % 2 == 0 else [chromium, grease]
+    ordered: list[dict[str, str]] = [{}, {}, {}]
+    order = _BRAND_ORDERS[major % len(_BRAND_ORDERS)]
+    entries = (grease, chromium, {"brand": brand, "version": versions[1]})
+    for slot, entry in zip(order, entries, strict=True):
+        ordered[slot] = entry
+    return ordered
+
+
+def _three_parts(version: str) -> str:
+    parts = [part for part in re.split(r"[._]", version) if part]
+    return ".".join((parts + ["0", "0", "0"])[:3])
+
+
+def user_agent_metadata(
+    user_agent: str, *, brand: str | None, full_version: str
+) -> dict[str, Any] | None:
+    """Return CDP ``userAgentMetadata`` that agrees with ``user_agent``.
+
+    Platform, platform version, model and mobile come from the user-agent
+    string; brands follow Chromium's GREASE rules for its ``Chrome/`` major
+    version. ``brand`` is the browser's own brand (``Google Chrome``,
+    ``Microsoft Edge``, or None for Chromium), so the emulated hints claim
+    no other browser than the one running. ``full_version`` is the running
+    browser's version; it is used when its major version matches, and
+    ``<major>.0.0.0`` otherwise.
+
+    Returns None for a user agent with no ``Chrome/`` token or no known
+    platform: the browser cannot claim to be one with no client hints.
+    """
+    chrome = re.search(r"Chrome/(\d+)\.", user_agent)
+    if chrome is None:
+        return None
+    major = int(chrome[1])
+    full = full_version if full_version.split(".")[0] == str(major) else f"{major}.0.0.0"
+    mobile = " Mobile" in user_agent
+    architecture, bitness, model = "x86", "64", ""
+    if android := re.search(r"Android (\d[\d.]*)(?:; ([^;)]+))?", user_agent):
+        platform, platform_version = "Android", _three_parts(android[1])
+        architecture, bitness = "", ""
+        # "K" is the reduced user agent's placeholder for an unknown model.
+        model = "" if (android[2] or "K").strip() == "K" else android[2].strip()
+    elif "Windows NT" in user_agent:
+        platform, platform_version = "Windows", "10.0.0"
+    elif mac := re.search(r"Mac OS X (\d+[_.\d]*)", user_agent):
+        platform, platform_version = "macOS", _three_parts(mac[1])
+    elif "CrOS" in user_agent:
+        platform, platform_version = "Chrome OS", ""
+    elif "Linux" in user_agent:
+        platform, platform_version = "Linux", ""
+    else:
+        return None
+    grease_version = _GREASE_VERSIONS[major % len(_GREASE_VERSIONS)]
+    return {
+        "brands": _brand_list(major, brand, (grease_version, str(major))),
+        "fullVersionList": _brand_list(major, brand, (f"{grease_version}.0.0.0", full)),
+        # Deprecated in CDP, but Chromium fills uaFullVersion from it, or from
+        # the running browser when it is absent.
+        "fullVersion": full,
+        "platform": platform,
+        "platformVersion": platform_version,
+        "architecture": architecture,
+        "model": model,
+        "mobile": mobile,
+        "bitness": bitness,
+        "wow64": False,
+        "formFactors": ["Mobile"] if mobile else ["Desktop"],
     }

@@ -97,6 +97,16 @@ from `headless_screen`. `profile_mode="full"` also emulates the viewport,
 screen, device scale, touch and user agent, as WebSkrap 2.x did; each override
 is a surface that a page can cross-check.
 
+A profile user agent comes with client hints that agree with it:
+`navigator.userAgentData` and the `Sec-CH-UA` headers carry its platform,
+platform version, model, mobile flag and Chrome version. The brand list
+follows Chromium's rules for that version. It names only the browser that
+runs: `Google Chrome` for the `chrome` channel, `Microsoft Edge` for `msedge`,
+and no brand for Chromium. The full version is the browser's own when the
+user agent has the same Chrome major version. Otherwise it is
+`<major>.0.0.0`, so keep the two the same. A user agent without a `Chrome/`
+token gets no client hints.
+
 The overrides also reach cross-site iframes and workers. Each one starts
 paused, gets the profile, and then runs. Two limits remain:
 

@@ -133,6 +133,12 @@ core. `src/webskrap/cdp_setup.py` prepares every page before it navigates:
 - `Fetch`: only when a resource policy blocks resource types (then only for
   those types), or when proxy credentials are set. Credentials go only to
   challenges whose source is the proxy.
+- `Emulation.setUserAgentOverride` carries `userAgentMetadata` built from the
+  profile user agent (`models.user_agent_metadata`). Measured before: with a
+  profile user agent, `navigator.userAgentData` had empty brands and platform,
+  and requests had no `Sec-CH-UA` headers. The GREASE brand and the brand
+  order use Chromium's algorithm seeded by the major version; it matches
+  real Chrome 120 and 124 headers and Chrome for Testing 156.
 - `Target.setAutoAttach` with `waitForDebuggerOnStart`: only when one of the
   above has work to do. Each cross-site iframe and worker starts paused and
   gets the same setup. Then `Runtime.runIfWaitingForDebugger` lets it run.
