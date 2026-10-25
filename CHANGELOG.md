@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-25
+
 WebSkrap 3.0 drives Chromium only through its own CDP client. Read
 `docs/migration-3.0.md` before you upgrade.
 
@@ -824,7 +826,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/kacigaya/webskrap/compare/v2.15.0...v3.0.0
 [2.15.0]: https://github.com/kacigaya/webskrap/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/kacigaya/webskrap/compare/v2.13.3...v2.14.0
 [2.13.3]: https://github.com/kacigaya/webskrap/compare/v2.13.2...v2.13.3
