@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Changed
+
+- `scripts/driver_parity.py` reads DataDome's `/captcha/` iframe and reports
+  `captcha` (the slider) or `blocked` (the hard block) instead of a neutral
+  `datadome` verdict. Persistent-session runs (`--via session`) still report
+  `datadome`.
+
 ### Security
 
 - Hide complete URL credentials in errors, including multiple `@` characters

@@ -35,7 +35,7 @@ from random import SystemRandom
 from typing import Any
 from uuid import uuid4
 
-from webskrap import SessionConfig, WebSkrapClient, browser_session
+from webskrap import SessionConfig, WebSkrapClient, browser_session, cdp_dom
 from webskrap.browser_session import sandbox_enabled
 from webskrap.cdp import CDPPage, find_executable, launch
 from webskrap.challenges import _CHALLENGE_SCRIPT
@@ -75,7 +75,9 @@ _RECAPTCHA_CHECK = """(() => {
 # DataDome serves its slider captcha and its "access restricted" block from
 # the same /captcha/ iframe, and both can carry t=fe, so the page cannot tell
 # them apart: an explicit t=bv is reported as blocked, anything else as
-# "datadome" for the screenshot to settle. Nothing here solves a captcha.
+# "datadome". The iframe's own document can (see _DATADOME_KIND); when it is
+# readable, "datadome" becomes "captcha" or "blocked". Nothing here solves a
+# captcha.
 _DATADOME_CHECK = """(() => {
   for (const frame of document.querySelectorAll('iframe[src]')) {
     let url;
@@ -89,9 +91,18 @@ _DATADOME_CHECK = """(() => {
   return { state: 'passed', detail: document.title.trim().slice(0, 60) };
 })()"""
 
+# Runs inside the cross-site /captcha/ iframe. DataDome marks its response page
+# with dd-response-page--captcha (the slider) or dd-response-page--hard-block.
+_DATADOME_KIND = """(() => {
+  const marked = document.querySelector('[class*="dd-response-page--"]');
+  const kind = marked && [...marked.classList].find((c) => c.startsWith('dd-response-page--'));
+  return kind ? kind.slice('dd-response-page--'.length) : null;
+})()"""
+_DATADOME_KINDS = {"captcha": "captcha", "hard-block": "blocked"}
+
 # Verdicts that can still change while the page settles: a DataDome device
 # check can turn into the real page, so these end a run only after SETTLE_S.
-_SETTLING = {"datadome", "blocked"}
+_SETTLING = {"datadome", "captcha", "blocked"}
 SETTLE_S = 8.0
 
 TARGETS: dict[str, tuple[str, str]] = {
@@ -120,6 +131,9 @@ class Page:
     evaluate: Evaluate
     screenshot: Screenshot
     mouse: Mouse
+    #: Returns DataDome's response page kind from its iframe, or None when the
+    #: path cannot read that iframe.
+    datadome_kind: Callable[[], Awaitable[str | None]] | None = None
 
 
 # Finds the Turnstile widget: the parent of its response input, or else the
@@ -192,7 +206,13 @@ def _page(page: CDPPage) -> Page:
         )
 
     # Isolated worlds: the page cannot see the checks, and they need no globals.
-    return Page(page.evaluate, screenshot, mouse)
+    async def datadome_kind() -> str | None:
+        for frame in await cdp_dom.frames(page):
+            if "captcha-delivery.com/" in frame.url:
+                return await frame.page.evaluate(_DATADOME_KIND)
+        return None
+
+    return Page(page.evaluate, screenshot, mouse, datadome_kind)
 
 
 @asynccontextmanager
@@ -320,8 +340,12 @@ async def run_once(
                 # A navigation can destroy the context mid-check; poll again.
                 with contextlib.suppress(Exception):
                     verdict = await page.evaluate(check)
+                    if verdict.get("state") == "datadome" and page.datadome_kind is not None:
+                        kind = _DATADOME_KINDS.get(await page.datadome_kind() or "")
+                        if kind is not None:
+                            verdict = {"state": kind, "detail": f"DataDome {kind}"}
                 state = verdict.get("state")
-                challenged = challenged or state in ("challenge", "datadome")
+                challenged = challenged or state in ("challenge", "datadome", "captcha")
                 if state == "passed":
                     break
                 if click and not clicked and state == "challenge":
@@ -350,7 +374,7 @@ async def run_once(
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").partition("\n")[0])
     parser.add_argument("--runs", type=int, default=3, help="Runs per path, mode and target.")
     parser.add_argument("--wait", type=float, default=30, help="Seconds to poll each run.")
     parser.add_argument(
@@ -418,7 +442,7 @@ async def main() -> None:
                         flush=True,
                     )
 
-    print("\nPassed runs per target and mode (DataDome pages counted separately):")
+    print("\nPassed runs per target and mode (DataDome captcha and other pages counted apart):")
     for target in targets:
         for mode in modes:
             parts = []
@@ -428,8 +452,11 @@ async def main() -> None:
                     for r in results
                     if (r["driver"], r["mode"], r["target"]) == (driver, mode, target)
                 ]
-                datadome = states.count("datadome")
-                extra = f" +{datadome} datadome" if datadome else ""
+                extra = "".join(
+                    f" +{states.count(state)} {state}"
+                    for state in ("captcha", "datadome")
+                    if states.count(state)
+                )
                 parts.append(f"{driver} {states.count('passed')}/{args.runs}{extra}")
             line = "  ".join(parts)
             print(f"  {target:13} {mode:15} {line}")

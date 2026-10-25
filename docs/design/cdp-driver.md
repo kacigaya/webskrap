@@ -180,6 +180,8 @@ in headless mode, and the slider captcha with a headed browser. Both come
 from the same `/captcha/` iframe with `t=fe`, so the iframe URL cannot tell
 them apart; an earlier version of the parity script counted every run as a
 captcha and is corrected. The captcha is not solved.
+Since 3.0.1 the script reads the iframe's own document instead: DataDome
+marks it `dd-response-page--captcha` or `dd-response-page--hard-block`.
 
 Cloudflare needs the "Verify you are human" checkbox clicked; waiting alone
 never clears it. `--click` moves both drivers along the same curved path
