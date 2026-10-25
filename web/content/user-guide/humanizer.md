@@ -49,6 +49,19 @@ If the mouse wheel cannot move the target into view, for example inside an
 inner scroll container the cursor is not over, a direct scroll finishes the
 job.
 
+If the target loses its bounding box, the humanizer scrolls it into view,
+waits 300–600 ms, and measures it once more. An empty box after that attempt
+raises a `usage` error.
+
+The cursor ends at the click point. The random offset stays within the target,
+up to 12 CSS pixels horizontally and 10 vertically. Before pressing, the
+humanizer pauses for 200–500 ms and checks the target again. It refuses the
+click if the target becomes hidden, disabled, or no longer receives input at
+that point. This also catches changes caused by hover handlers.
+
+There is no fixed delay after a click. Wait for the expected page change in
+your flow.
+
 ## Typing
 
 ```python

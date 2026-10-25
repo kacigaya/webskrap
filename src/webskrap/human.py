@@ -44,8 +44,8 @@ def click_point(
     if position is not None:
         return box["x"] + position["x"], box["y"] + position["y"]
 
-    jitter_x = min(box["width"] * 0.2, 6)
-    jitter_y = min(box["height"] * 0.2, 6)
+    jitter_x = min(box["width"] * 0.2, 12)
+    jitter_y = min(box["height"] * 0.2, 10)
     return (
         box["x"] + box["width"] / 2 + uniform(-jitter_x, jitter_x),
         box["y"] + box["height"] / 2 + uniform(-jitter_y, jitter_y),
