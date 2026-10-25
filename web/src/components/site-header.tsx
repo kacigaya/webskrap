@@ -68,7 +68,7 @@ export function SiteHeader({
             className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Image
-              src={asset("/webskrap-logo.png")}
+              src={asset("/webskrap-logo.svg")}
               alt=""
               width={642}
               height={686}

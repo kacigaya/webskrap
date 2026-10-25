@@ -117,7 +117,7 @@ export default function Home() {
         {/* Hero */}
         <section className="mx-auto flex w-full max-w-5xl flex-col items-center px-6 py-24 text-center">
           <Image
-            src={asset("/webskrap-logo.png")}
+            src={asset("/webskrap-logo.svg")}
             alt=""
             width={642}
             height={686}
