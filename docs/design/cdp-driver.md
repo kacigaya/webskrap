@@ -133,6 +133,14 @@ core. `src/webskrap/cdp_setup.py` prepares every page before it navigates:
 - `Fetch`: only when a resource policy blocks resource types (then only for
   those types), or when proxy credentials are set. Credentials go only to
   challenges whose source is the proxy.
+- With proxy credentials, every request stays paused, not only the requests
+  until the first challenge is answered. Measured in 3.1 on loopback, 300
+  script requests through a password proxy: a median load of 2296 and
+  2327 ms against 2188 and 2187 ms without a password, about 0.4 ms per
+  request. After the first answer Chromium reuses the cached credentials
+  for frames and workers too, so pausing less would work, but then a new
+  challenge (a proxy restart, another realm) would meet no handler and fail
+  the request. Revisit if a real proxy shows a larger cost.
 - `Emulation.setUserAgentOverride` carries `userAgentMetadata` built from the
   profile user agent (`models.user_agent_metadata`). Measured before: with a
   profile user agent, `navigator.userAgentData` had empty brands and platform,
