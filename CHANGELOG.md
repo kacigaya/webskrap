@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-26
+
 ### Added
 
 - `blocked` now covers provider block pages: Cloudflare's own error pages
@@ -927,7 +929,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/kacigaya/webskrap/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/kacigaya/webskrap/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/kacigaya/webskrap/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/kacigaya/webskrap/compare/v2.15.0...v3.0.0
