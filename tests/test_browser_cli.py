@@ -620,3 +620,32 @@ def test_ps_command_reports_missing_pid() -> None:
     command = browser_session._ps_command(os.getpid())
     assert command is not None
     assert b"python" in command.lower()
+
+
+def test_tab_commands_map_to_tab_actions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_tabs(name: str, action: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((action, kwargs))
+        tabs = [
+            {"index": 0, "url": "https://a.test/", "title": "A", "current": False},
+            {"index": 1, "url": "about:blank", "title": "", "current": True},
+        ]
+        return {"tabs": tabs}
+
+    monkeypatch.setattr(browser_session, "tabs", fake_tabs)
+
+    listed = runner.invoke(cli.app, ["browser", "tab-list"], env=_env(tmp_path))
+    for argv in (["tab-new", "https://b.test/"], ["tab-select", "1"], ["tab-close"]):
+        result = runner.invoke(cli.app, ["browser", *argv, "--format", "json"], env=_env(tmp_path))
+        assert result.exit_code == 0, result.output
+
+    assert listed.exit_code == 0, listed.output
+    assert "  0  A  https://a.test/" in listed.output
+    assert "* 1  (no title)  about:blank" in listed.output
+    assert calls == [
+        ("list", {"index": None, "url": None}),
+        ("new", {"index": None, "url": "https://b.test/"}),
+        ("select", {"index": 1, "url": None}),
+        ("close", {"index": None, "url": None}),
+    ]

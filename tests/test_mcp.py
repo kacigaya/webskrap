@@ -311,6 +311,7 @@ def test_browser_tools_are_registered() -> None:
         "browser_eval",
         "browser_close",
         "browser_list",
+        "browser_tabs",
     } <= names
 
 
@@ -585,7 +586,7 @@ def test_server_instructions_carry_the_tool_choice_rules() -> None:
     assert "Prefer it over fetch" in instructions
     assert "search: find URLs" in instructions
     assert "No Google" in instructions
-    assert "one page per session" in instructions
+    assert "browser_tabs" in instructions
     assert "next_text_offset" in instructions
 
 
@@ -946,3 +947,20 @@ async def test_concurrent_first_calls_on_one_session_share_the_fallback(monkeypa
     assert results == ["page", "page", "page"]
     assert launched == ["chrome", "msedge", "chromium"]
     await runtime.close()
+
+
+def test_browser_tabs_validates_the_url_and_passes_through(monkeypatch: Any) -> None:
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def fake_tabs(name: str, action: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((name, action, kwargs))
+        return {"tabs": []}
+
+    monkeypatch.setattr(browser_session, "tabs", fake_tabs)
+
+    asyncio.run(mcp_server.browser_tabs("select", index=2))
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_tabs("new", url="http://127.0.0.1/"))
+
+    assert calls == [("default", "select", {"index": 2, "url": None})]
+    assert caught.value.code is ErrorCode.USAGE  # private hosts are refused before any tab opens

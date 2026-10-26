@@ -20,7 +20,16 @@ from test_cdp_browser import _CDPHandler
 
 from webskrap import browser_session
 from webskrap.cdp import _WEBSOCKET_GUID, WebSocketTransport, _mask
-from webskrap.cdp_session import PAGE_ORDER_FILE, _ordered_pages, _poll, devtools_path, key_events
+from webskrap.cdp_session import (
+    PAGE_ORDER_FILE,
+    TAB_SELECTION_FILE,
+    _ordered_pages,
+    _poll,
+    _select,
+    current_page,
+    devtools_path,
+    key_events,
+)
 from webskrap.errors import ErrorCode, WebSkrapError
 
 
@@ -149,6 +158,38 @@ def test_page_order_keeps_creation_order_across_connections(tmp_path: Path) -> N
         assert order.stat().st_mode & 0o777 == 0o600
     order.write_text("not json")
     assert _ordered_pages(order, ["x"]) == ["x"]
+
+
+def test_current_page_follows_selection_then_newer_pages(tmp_path: Path) -> None:
+    assert current_page(tmp_path, []) is None
+    assert current_page(tmp_path, ["a", "b"]) == "b"  # newest, with no selection
+    _select(tmp_path, "a", ["a", "b"])
+    assert current_page(tmp_path, ["a", "b"]) == "a"
+    # A page opened after the selection (a popup) wins until it closes.
+    assert current_page(tmp_path, ["a", "b", "c"]) == "c"
+    assert current_page(tmp_path, ["a", "b"]) == "a"
+    # A closed selection falls back to the newest page.
+    assert current_page(tmp_path, ["b"]) == "b"
+    (tmp_path / TAB_SELECTION_FILE).write_text("not json")
+    assert current_page(tmp_path, ["a", "b"]) == "b"
+
+
+@pytest.mark.parametrize(
+    ("action", "index", "url"),
+    [
+        pytest.param("open", None, None, id="unknown-action"),
+        pytest.param("select", None, None, id="select-needs-index"),
+        pytest.param("list", 0, None, id="list-takes-no-index"),
+        pytest.param("new", 1, None, id="new-takes-no-index"),
+        pytest.param("close", 0, "https://example.com", id="url-only-for-new"),
+    ],
+)
+async def test_tab_arguments_are_checked_before_attaching(
+    action: str, index: int | None, url: str | None
+) -> None:
+    with pytest.raises(WebSkrapError) as error:
+        await browser_session.tabs("never-opened", action, index=index, url=url)
+    assert error.value.code is ErrorCode.USAGE
 
 
 async def test_poll_stops_a_stalled_check_at_the_deadline() -> None:
@@ -682,3 +723,61 @@ def test_cdp_session_snapshot_walks_into_iframes(
     assert "Same:true" in results["clicked"] and "Cross:true" in results["clicked"]
     assert "value:typed" in results["filled"]
     assert results["missing"] is ErrorCode.STALE_REF
+
+
+@pytest.mark.browser
+def test_cdp_session_tabs(persistent_session_env: Path, session_server: str) -> None:
+    name = "cdp-tabs"
+
+    async def exercise() -> dict[str, Any]:
+        await browser_session.open_session(name)
+        results: dict[str, Any] = {}
+
+        async def run(action: Any) -> Any:
+            return await browser_session.run_page_action(name, action, timeout_ms=20_000)
+
+        async def tabs(action: str, **kwargs: Any) -> list[dict[str, Any]]:
+            return (await browser_session.tabs(name, action, **kwargs))["tabs"]
+
+        # No command has recorded the tab order yet; the new tab still sorts last.
+        results["fresh"] = await tabs("new")
+        await tabs("close")
+        await run(lambda page: browser_session.goto(page, f"{session_server}/session", "load"))
+        results["new"] = await browser_session.tabs(name, "new", url=f"{session_server}/session-2")
+        results["on_new"] = await run(browser_session.page_state)
+        results["selected"] = await tabs("select", index=0)
+        results["on_first"] = await run(browser_session.page_state)
+        # A popup becomes current, and closing it returns to the selection.
+        await run(lambda page: browser_session.evaluate(page, "window.open('/session-2?popup')"))
+        results["popup"] = await tabs("list")
+        results["closed_popup"] = await tabs("close")
+        results["closed_second"] = await tabs("close", index=1)
+        with pytest.raises(WebSkrapError) as missing:
+            await tabs("select", index=5)
+        results["missing"] = missing.value.code
+        return results
+
+    try:
+        results = asyncio.run(exercise())
+    finally:
+        browser_session.close_session(name, delete_data=True)
+
+    def current(listing: list[dict[str, Any]]) -> list[int]:
+        return [tab["index"] for tab in listing if tab["current"]]
+
+    assert [tab["url"].removeprefix(session_server) for tab in results["new"]["tabs"]] == [
+        "/session",
+        "/session-2",
+    ]
+    assert len(results["fresh"]) == 2 and current(results["fresh"]) == [1]
+    assert results["new"]["status"] == 200
+    assert current(results["new"]["tabs"]) == [1]
+    assert results["on_new"]["url"].endswith("/session-2")
+    assert current(results["selected"]) == [0]
+    assert results["on_first"]["url"].endswith("/session")
+    assert len(results["popup"]) == 3 and current(results["popup"]) == [2]
+    assert len(results["closed_popup"]) == 2 and current(results["closed_popup"]) == [0]
+    assert [tab["url"].removeprefix(session_server) for tab in results["closed_second"]] == [
+        "/session"
+    ]
+    assert results["missing"] is ErrorCode.USAGE

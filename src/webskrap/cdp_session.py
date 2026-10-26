@@ -115,6 +115,8 @@ _POLL_S = 0.1
 T = TypeVar("T")
 #: Session-directory file with page target ids in creation order.
 PAGE_ORDER_FILE = "cdp-pages.json"
+#: Session-directory file with the selected tab and the pages known then.
+TAB_SELECTION_FILE = "cdp-tab.json"
 # networkidle has no live event to subscribe to after the fact; this quiet
 # window matches the 500 ms Chromium's own networkIdle lifecycle event uses.
 _NETWORK_QUIET_S = 0.5
@@ -158,24 +160,49 @@ def _ordered_pages(order_file: Path, current: list[str]) -> list[str]:
     ordered = [target for target in known if target in current]
     ordered += [target for target in current if target not in ordered]
     if ordered != known:
-        temp = order_file.with_suffix(".tmp")
-        # Owner-only like the rest of the session directory; ids only, no data.
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(ordered, handle)
-        os.replace(temp, order_file)
+        _write_ids(order_file, ordered)
     return ordered
 
 
-@asynccontextmanager
-async def attach(
-    name: str, user_data_dir: Path, port: int, *, timeout_ms: float
-) -> AsyncIterator[CDPPage]:
-    """Attach to the session browser's newest page and detach on exit.
+def _write_ids(path: Path, data: object) -> None:
+    temp = path.with_suffix(".tmp")
+    # Owner-only like the rest of the session directory; ids only, no data.
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(data, handle)
+    os.replace(temp, path)
 
-    Uses the most recently opened page, as Patchright uses
-    ``context.pages[-1]`` (see :func:`_ordered_pages`), and creates a blank
-    page when none is open. The browser keeps running.
+
+def current_page(directory: Path, pages: list[str]) -> str | None:
+    """Return the page commands act on, from ``pages`` in creation order.
+
+    That is the newest page opened after the last tab selection, such as a
+    popup or a new tab; else the selected tab while it is open; else the
+    newest page, as Patchright's ``context.pages[-1]``.
+    """
+    try:
+        selection = json.loads((directory / TAB_SELECTION_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        selection = None
+    if not isinstance(selection, dict):
+        return pages[-1] if pages else None
+    known = selection.get("known")
+    newer = [page for page in pages if not isinstance(known, list) or page not in known]
+    if newer:
+        return newer[-1]
+    target = selection.get("target")
+    return target if target in pages else (pages[-1] if pages else None)
+
+
+def _select(directory: Path, target: str, pages: list[str]) -> None:
+    _write_ids(directory / TAB_SELECTION_FILE, {"target": target, "known": pages})
+
+
+@asynccontextmanager
+async def connect(
+    name: str, user_data_dir: Path, port: int, *, timeout_ms: float
+) -> AsyncIterator[CDPConnection]:
+    """Open a browser-level connection to the session browser.
 
     Raises:
         WebSkrapError: ``session_unreachable`` when nothing answers on the
@@ -196,6 +223,25 @@ async def attach(
     connection.default_timeout_s = timeout_ms / 1000
     connection.start()
     try:
+        yield connection
+    finally:
+        await connection.close()
+
+
+@asynccontextmanager
+async def attach(
+    name: str, user_data_dir: Path, port: int, *, timeout_ms: float
+) -> AsyncIterator[CDPPage]:
+    """Attach to the session browser's current page and detach on exit.
+
+    Uses :func:`current_page`, and creates a blank page when none is open.
+    The browser keeps running.
+
+    Raises:
+        WebSkrapError: ``session_unreachable`` when nothing answers on the
+            session's port.
+    """
+    async with connect(name, user_data_dir, port, timeout_ms=timeout_ms) as connection:
         order_file = user_data_dir.parent / PAGE_ORDER_FILE
         # Discovery first reports every existing target in no set order, so
         # creations count only from after its reply: pages this command opens
@@ -215,9 +261,8 @@ async def attach(
             order_file,
             [info["targetId"] for info in targets["targetInfos"] if info["type"] == "page"],
         )
-        if pages:
-            target_id = pages[-1]
-        else:
+        target_id = current_page(user_data_dir.parent, pages)
+        if target_id is None:
             target_id = (await connection.send("Target.createTarget", {"url": "about:blank"}))[
                 "targetId"
             ]
@@ -235,8 +280,87 @@ async def attach(
                 await connection.send(
                     "Target.detachFromTarget", {"sessionId": attached["sessionId"]}, timeout_s=2
                 )
-    finally:
-        await connection.close()
+
+
+async def _tabs(connection: CDPConnection, directory: Path) -> list[dict[str, Any]]:
+    infos = (await connection.send("Target.getTargets"))["targetInfos"]
+    pages = {info["targetId"]: info for info in infos if info["type"] == "page"}
+    return [pages[target] for target in _ordered_pages(directory / PAGE_ORDER_FILE, list(pages))]
+
+
+def _listing(directory: Path, tabs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    current = current_page(directory, [tab["targetId"] for tab in tabs])
+    return [
+        {
+            "index": index,
+            "url": tab.get("url", ""),
+            "title": tab.get("title", ""),
+            "current": tab["targetId"] == current,
+        }
+        for index, tab in enumerate(tabs)
+    ]
+
+
+def _tab_at(tabs: list[dict[str, Any]], index: int) -> str:
+    if not 0 <= index < len(tabs):
+        msg = f"no tab {index}: the session has {len(tabs)}. Run: webskrap browser tab-list"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    return str(tabs[index]["targetId"])
+
+
+async def list_tabs(connection: CDPConnection, directory: Path) -> list[dict[str, Any]]:
+    """Return ``[{"index", "url", "title", "current"}]`` in creation order."""
+    return _listing(directory, await _tabs(connection, directory))
+
+
+async def new_tab(connection: CDPConnection, directory: Path) -> list[dict[str, Any]]:
+    """Open a blank tab, make it current, and return the tab list."""
+    # Record the open tabs first, so the new one sorts last even when no
+    # command has written the order yet.
+    await _tabs(connection, directory)
+    created = await connection.send("Target.createTarget", {"url": "about:blank"})
+    tabs = await _tabs(connection, directory)
+    _select(directory, created["targetId"], [tab["targetId"] for tab in tabs])
+    return _listing(directory, tabs)
+
+
+async def select_tab(
+    connection: CDPConnection, directory: Path, index: int
+) -> list[dict[str, Any]]:
+    """Make tab ``index`` current and bring it to the front.
+
+    Raises:
+        WebSkrapError: ``usage`` when no tab has that index.
+    """
+    tabs = await _tabs(connection, directory)
+    target = _tab_at(tabs, index)
+    await connection.send("Target.activateTarget", {"targetId": target})
+    _select(directory, target, [tab["targetId"] for tab in tabs])
+    return _listing(directory, tabs)
+
+
+async def close_tab(
+    connection: CDPConnection, directory: Path, index: int | None
+) -> list[dict[str, Any]]:
+    """Close tab ``index``, or the current tab, and return the tabs left.
+
+    Closing the current tab makes the newest remaining tab current.
+
+    Raises:
+        WebSkrapError: ``usage`` when no tab has that index.
+    """
+    tabs = await _tabs(connection, directory)
+    if index is None:
+        target = current_page(directory, [tab["targetId"] for tab in tabs])
+        if target is None:
+            return []
+    else:
+        target = _tab_at(tabs, index)
+    await connection.send("Target.closeTarget", {"targetId": target})
+    # The target can stay listed for a moment after closeTarget returns.
+    left = [tab for tab in tabs if tab["targetId"] != target]
+    _ordered_pages(directory / PAGE_ORDER_FILE, [tab["targetId"] for tab in left])
+    return _listing(directory, left)
 
 
 async def page_state(page: CDPPage) -> dict[str, Any]:

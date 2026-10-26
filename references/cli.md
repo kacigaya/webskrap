@@ -99,8 +99,10 @@ calls, and `WEBSKRAP_CHROMIUM_SANDBOX=0` for a host. Document that disabling it
 leaves a compromised renderer uncontained. Never pass `--no-sandbox` (or its
 companions) through `--launch-arg`: those flags are blocked.
 
-Current limitations are one page per session, Chrome for Testing only, no tabs,
-network mocking, tracing, or video, and history navigation that reloads.
+Commands act on the current tab. `tab-list`, `tab-new [url]`,
+`tab-select <index>` and `tab-close [index]` manage tabs; a popup or a new tab
+becomes current. Current limitations are Chrome for Testing only, no network
+mocking, tracing, or video, and history navigation that reloads.
 
 ## Vision and coordinate input
 

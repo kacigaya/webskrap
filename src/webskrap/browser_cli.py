@@ -260,6 +260,61 @@ def list_command(format: FormatOption = "human") -> None:
     console.print(table)
 
 
+def _tab_command(
+    session: str,
+    action: str,
+    output_format: OutputFormat,
+    *,
+    index: int | None = None,
+    url: str | None = None,
+) -> None:
+    payload = _run(browser_session.tabs(session, action, index=index, url=url), output_format)
+    if output_format == "json":
+        print_json(payload)
+        return
+    for tab in payload["tabs"]:
+        marker = "*" if tab["current"] else " "
+        console.print(f"{marker} {tab['index']}  {tab['title'] or '(no title)'}  {tab['url']}")
+
+
+@browser_app.command("tab-list")
+def tab_list_command(session: SessionOption = "default", format: FormatOption = "human") -> None:
+    """List the session's tabs; * marks the one commands act on."""
+    _tab_command(session, "list", parse_output_format(format))
+
+
+@browser_app.command("tab-new")
+def tab_new_command(
+    url: Annotated[str | None, typer.Argument(help="URL to load in the new tab.")] = None,
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Open a tab and make it current."""
+    _tab_command(session, "new", parse_output_format(format), url=url)
+
+
+@browser_app.command("tab-select")
+def tab_select_command(
+    index: Annotated[int, typer.Argument(min=0, help="Tab index from tab-list.")],
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Make a tab current, so later commands act on it."""
+    _tab_command(session, "select", parse_output_format(format), index=index)
+
+
+@browser_app.command("tab-close")
+def tab_close_command(
+    index: Annotated[
+        int | None, typer.Argument(min=0, help="Tab index from tab-list; default current.")
+    ] = None,
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Close a tab; the newest tab left becomes current."""
+    _tab_command(session, "close", parse_output_format(format), index=index)
+
+
 @browser_app.command("goto")
 def goto_command(
     url: Annotated[str, typer.Argument(help="URL to navigate to.")],

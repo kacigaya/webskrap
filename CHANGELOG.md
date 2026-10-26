@@ -21,6 +21,10 @@ history, so they summarize each release rather than list every change.
   in memory and answers the proxy while the browser runs. They are never
   written to disk or put on a command line. `browser list` marks these
   sessions with `(auth)`.
+- Tabs in persistent sessions: `webskrap browser tab-list`, `tab-new [url]`,
+  `tab-select <index>` and `tab-close [index]`, and the MCP tool
+  `browser_tabs`. Other commands act on the current tab. A popup or a new tab
+  becomes current, as before.
 
 ### Fixed
 

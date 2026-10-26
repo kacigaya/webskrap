@@ -59,7 +59,11 @@ IP, not a retry.
 6. `browser_close()` -- the profile survives, so the next open is still logged in.
    `delete_data=true` throws the cookies and logins away.
 
-One page per session, no tabs, headless only over MCP.
+Headless only over MCP. Every tool acts on the session's current tab.
+`browser_tabs(action="list")` shows the tabs; `new` (with an optional `url`)
+opens one, `select` with an `index` makes an older one current, and `close`
+closes the current one or the one at `index`. A popup becomes current until
+it closes.
 
 ## Vision and coordinate input
 
@@ -118,6 +122,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_screenshot` | `url`, `title`, `path` |
 | `browser_close` | `closed` |
 | `browser_list` | `sessions` |
+| `browser_tabs` | `tabs` (`index`, `url`, `title`, `current`); `new` with a `url` adds `status`, `url`, `title` |
 
 ## Cost
 

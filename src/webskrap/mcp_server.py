@@ -99,7 +99,7 @@ Choose a tool
   browser_wait_for, then browser_close. Do not re-fetch to drive a flow.
 
 In a browser session
-- Headless only over MCP, one page per session, no tabs. Shared with the browser CLI.
+- Headless only over MCP. Shared with the browser CLI. browser_tabs picks the tab.
 - browser_snapshot gives [ref=eN] handles; snapshot again after DOM changes.
 - browser_text reads text without building an accessibility tree.
 - Visual layouts/canvas: browser_view returns an inline PNG and metadata,
@@ -597,6 +597,31 @@ async def browser_open(
             )
         )
     return payload
+
+
+@mcp.tool(title="Manage browser tabs", annotations=_hints(read_only=False, open_world=True))
+async def browser_tabs(
+    action: str = "list",
+    session: str = "default",
+    index: int | None = None,
+    url: str | None = None,
+) -> dict[str, Any]:
+    """List, open, select or close the session's tabs.
+
+    Other browser_* tools act on the current tab. A popup or a new tab
+    becomes current; select makes an older tab current again.
+
+    Args:
+        action: list, new, select, or close.
+        session: Browser session name.
+        index: Tab index from list, counted from 0 in opening order. Needed
+            for select; close without it closes the current tab.
+        url: For new only: the URL to load in the new tab.
+    """
+    with _tool_errors():
+        if url is not None:
+            url = await validate_mcp_url(url)
+        return await browser_session.tabs(session, action, index=index, url=url)
 
 
 @mcp.tool(title="Navigate the page", annotations=_hints(read_only=False, open_world=True))

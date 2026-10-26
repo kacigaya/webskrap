@@ -66,6 +66,7 @@ python -m webskrap.mcp_server
 | `browser_eval` | Evaluate JavaScript and return the result. |
 | `browser_close` | Close a session (`delete_data` removes its profile). |
 | `browser_list` | List sessions and whether each is running. |
+| `browser_tabs` | List, open, select, or close tabs. Other tools act on the current tab. |
 
 Both fetch tools return `status`, `final_url`, `title`, `ok`, `headers`, and the
 page content in `text` (capped by `max_chars`, with `text_length` and
@@ -275,8 +276,8 @@ not a tool argument, so a page cannot talk the model into weakening renderer
 isolation. Session profiles under `~/.webskrap/browser/<name>/` are created
 `0700` on POSIX.
 
-Limitations, the same as the CLI: one page per session, bundled Chromium only,
-and no tools for tabs, network mocking, tracing, or video. MCP sessions are
+Limitations, the same as the CLI: bundled Chromium only, and no tools for
+network mocking, tracing, or video. MCP sessions are
 always headless. The CLI additionally offers `back`, `forward`, `reload`, and
 headed mode.
 

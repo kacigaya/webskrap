@@ -362,9 +362,21 @@ Reopening a running session with a different proxy or policy fails with a
 it without `--proxy` reuses it as it is. `webskrap browser list` shows each
 running session's proxy, with `(auth)` when the helper answers it.
 
-Deliberate limitations versus the official Playwright CLI: one page per
-session (no tab commands), Chrome for Testing only, and no commands for network
-mocking, tracing, or video. `back` and `forward` always reload the page,
+Commands act on the session's current tab. Manage tabs with these commands:
+
+```bash
+webskrap browser tab-list              # * marks the current tab
+webskrap browser tab-new https://example.com
+webskrap browser tab-select 0          # index from tab-list, in opening order
+webskrap browser tab-close             # the current tab, or pass an index
+```
+
+A popup or a new tab becomes current. When it closes, the tab selected before
+it is current again. When the current tab closes, the newest tab left is
+current.
+
+Deliberate limitations versus the official Playwright CLI: Chrome for Testing
+only, and no commands for network mocking, tracing, or video. `back` and `forward` always reload the page,
 because the back/forward cache is disabled to keep history navigation
 deterministic.
 

@@ -78,6 +78,9 @@ SANDBOX_FAILURE_MARKERS = (
     "--no-sandbox",
 )
 
+#: Actions :func:`tabs` accepts.
+TAB_ACTIONS = ("list", "new", "select", "close")
+
 # name -> (Locator method, value arity: "none" | "one" | "many")
 ELEMENT_ACTIONS: dict[str, tuple[str, str]] = {
     "click": ("click", "none"),
@@ -924,18 +927,8 @@ def list_sessions() -> list[dict[str, Any]]:
     return sessions
 
 
-async def run_page_action(
-    name: str,
-    action: Callable[[SessionPage], Awaitable[T]],
-    *,
-    timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
-) -> T:
-    """Connect to the session's browser, run ``action`` on the current page.
-
-    Attaches over WebSkrap's own WebSocket client (:func:`cdp_session.attach`)
-    to the newest page, as each CLI command and MCP call is a new connection.
-    Sessions opened by WebSkrap 2.x, with either driver, attach the same way.
-    """
+def _open_state(name: str) -> tuple[Path, dict[str, Any]]:
+    """Return an open session's directory and state, or raise why it cannot act."""
     directory = session_dir(name)
     state = read_state(directory)
     if state is None:
@@ -949,10 +942,83 @@ async def run_page_action(
             "Run: webskrap browser close, then webskrap browser open"
         )
         raise WebSkrapError(msg, code=ErrorCode.SESSION_UNREACHABLE)
+    return directory, state
+
+
+async def run_page_action(
+    name: str,
+    action: Callable[[SessionPage], Awaitable[T]],
+    *,
+    timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
+) -> T:
+    """Connect to the session's browser, run ``action`` on the current page.
+
+    Attaches over WebSkrap's own WebSocket client (:func:`cdp_session.attach`)
+    to the current tab (:func:`cdp_session.current_page`), as each CLI
+    command and MCP call is a new connection. Sessions opened by WebSkrap
+    2.x, with either driver, attach the same way.
+    """
+    directory, state = _open_state(name)
     async with cdp_session.attach(
         name, directory / "user-data", state["port"], timeout_ms=timeout_ms
     ) as page:
         return await action(page)
+
+
+async def tabs(
+    name: str,
+    action: str,
+    *,
+    index: int | None = None,
+    url: str | None = None,
+    timeout_ms: float = DEFAULT_NAVIGATION_TIMEOUT_MS,
+) -> dict[str, Any]:
+    """List, open, select or close the session's tabs.
+
+    ``action`` is ``list``, ``new`` (then ``url`` is loaded in the new tab),
+    ``select`` (needs ``index``) or ``close`` (``index``, or the current tab).
+    Indexes count from 0 in the order the tabs opened. Later commands act on
+    the current tab.
+
+    Returns:
+        ``{"tabs": [{"index", "url", "title", "current"}]}``; ``new`` with a
+        ``url`` adds the load's ``status``, ``url`` and ``title``.
+
+    Raises:
+        WebSkrapError: ``usage`` for an unknown action, a missing or unknown
+            index, or a ``url`` outside ``new``.
+    """
+    if action not in TAB_ACTIONS:
+        msg = f"unknown tab action '{action}': use one of {', '.join(TAB_ACTIONS)}"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    if action == "select" and index is None:
+        raise WebSkrapError("'select' needs a tab index", code=ErrorCode.USAGE)
+    if action in {"list", "new"} and index is not None:
+        raise WebSkrapError(f"'{action}' takes no tab index", code=ErrorCode.USAGE)
+    if url is not None and action != "new":
+        raise WebSkrapError("only 'new' takes a url", code=ErrorCode.USAGE)
+    directory, state = _open_state(name)
+    user_data = directory / "user-data"
+    async with cdp_session.connect(
+        name, user_data, state["port"], timeout_ms=timeout_ms
+    ) as connection:
+        if action == "list":
+            listing = await cdp_session.list_tabs(connection, directory)
+        elif action == "new":
+            listing = await cdp_session.new_tab(connection, directory)
+        elif action == "select" and index is not None:
+            listing = await cdp_session.select_tab(connection, directory, index)
+        else:
+            listing = await cdp_session.close_tab(connection, directory, index)
+    if url is None:
+        return {"tabs": listing}
+    loaded = await run_page_action(
+        name, lambda page: goto(page, url, "load"), timeout_ms=timeout_ms
+    )
+    async with cdp_session.connect(
+        name, user_data, state["port"], timeout_ms=timeout_ms
+    ) as connection:
+        return {"tabs": await cdp_session.list_tabs(connection, directory), **loaded}
 
 
 def element_arguments(action: str, values: list[str]) -> list[Any]:
