@@ -560,10 +560,17 @@ async def view(page: CDPPage) -> BrowserView:
     )
 
 
-async def screenshot(page: CDPPage, path: Path, *, full_page: bool) -> None:
-    """Write a PNG of the viewport, or the whole page, to ``path``."""
-    image = await page.screenshot(full_page=full_page)
+async def screenshot(
+    page: CDPPage, path: Path, *, full_page: bool, target: str | None = None
+) -> dict[str, float] | None:
+    """Write a PNG of the viewport, the whole page, or one element to ``path``.
+
+    Returns the element's clip when ``target`` is set, else None.
+    """
+    clip = await cdp_dom.element_clip(page, target) if target is not None else None
+    image = await page.screenshot(full_page=full_page, clip=clip)
     await asyncio.to_thread(path.write_bytes, image)
+    return clip
 
 
 #: Non-character keys: CDP ``key``, ``code``, Windows virtual key code, text.

@@ -774,6 +774,35 @@ async def _box(element: _Element, *, recover: bool = False) -> dict[str, float]:
     return box
 
 
+async def element_clip(page: CDPPage, target: str) -> dict[str, float]:
+    """Return ``target``'s bounding box in document CSS pixels, for a screenshot clip.
+
+    ``target`` is a CSS selector (main frame) or a snapshot ref, including
+    iframe refs. It must resolve to one visible element, which is scrolled
+    into view first. An element inside an iframe is measured in the top-level
+    page, so the clip shows only what its frame shows.
+
+    Raises:
+        WebSkrapError: ``stale_ref``, ``usage`` (ambiguous or invalid
+            selector) or ``timeout``, as for :func:`element_action`.
+    """
+    async with _object_group(page) as group:
+        element = await _actionable(page, target, group, page.default_timeout_s, enabled=False)
+        if element.frame_id is not None:
+            await _scroll_frame_element(element)
+        else:
+            await element.call(_SCROLL_FUNCTION)
+        box = await _box(element)
+    metrics = await page.send("Page.getLayoutMetrics")
+    viewport = metrics.get("cssVisualViewport") or metrics["visualViewport"]
+    return {
+        "x": box["x"] + element.offset[0] + viewport["pageX"],
+        "y": box["y"] + element.offset[1] + viewport["pageY"],
+        "width": box["width"],
+        "height": box["height"],
+    }
+
+
 async def _move(page: CDPPage, x: float, y: float) -> None:
     await page.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
 

@@ -588,10 +588,19 @@ class CDPPage:
         )
         return params.get("loaderId", loader_id)
 
-    async def screenshot(self, *, full_page: bool = False) -> bytes:
-        """Return a PNG of the viewport, or of the whole page when ``full_page``."""
+    async def screenshot(
+        self, *, full_page: bool = False, clip: dict[str, float] | None = None
+    ) -> bytes:
+        """Return a PNG of the viewport, the whole page, or a ``clip`` of it.
+
+        ``clip`` is ``{"x", "y", "width", "height"}`` in CSS pixels from the
+        document's top-left; it may extend past the viewport.
+        """
         params: dict[str, Any] = {"format": "png"}
-        if full_page:
+        if clip is not None:
+            params["captureBeyondViewport"] = True
+            params["clip"] = {**clip, "scale": 1}
+        elif full_page:
             metrics = await self.send("Page.getLayoutMetrics")
             size = metrics.get("cssContentSize") or metrics["contentSize"]
             params["captureBeyondViewport"] = True

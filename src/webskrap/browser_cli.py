@@ -539,15 +539,24 @@ def screenshot_command(
     full_page: Annotated[
         bool, typer.Option("--full-page", help="Capture the full scrollable page.")
     ] = False,
+    target: Annotated[
+        str | None,
+        typer.Option(
+            "--target",
+            help="Snapshot ref (e15, f12345e15) or CSS selector: capture only that element.",
+        ),
+    ] = None,
     format: FormatOption = "human",
 ) -> None:
-    """Screenshot the current page."""
+    """Screenshot the current page, or one element of it."""
     output_format = parse_output_format(format)
-    target = path or Path(f"webskrap-{uuid4().hex}.png")
+    destination = path or Path(f"webskrap-{uuid4().hex}.png")
 
     async def action(page: SessionPage) -> dict[str, Any]:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        return await browser_session.screenshot(page, target, full_page=full_page)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        return await browser_session.screenshot(
+            page, destination, full_page=full_page, target=target
+        )
 
     result = _run_page_command(session, action, output_format)
     if output_format == "json":

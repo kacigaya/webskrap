@@ -1242,10 +1242,26 @@ async def press(page: CDPPage, key: str) -> dict[str, Any]:
     return await page_state(page)
 
 
-async def screenshot(page: CDPPage, path: Path, *, full_page: bool) -> dict[str, Any]:
-    """Write a PNG to ``path``; return the page state plus ``path``."""
-    await cdp_session.screenshot(page, path, full_page=full_page)
-    return {**await page_state(page), "path": str(path)}
+async def screenshot(
+    page: CDPPage, path: Path, *, full_page: bool, target: str | None = None
+) -> dict[str, Any]:
+    """Write a PNG to ``path``; return the page state plus ``path``.
+
+    ``target`` (a CSS selector or snapshot ref, iframe refs included)
+    captures only that element's bounding box, reported as ``clip``.
+
+    Raises:
+        WebSkrapError: ``usage`` when ``target`` is combined with ``full_page``.
+    """
+    if target is not None and not target.strip():
+        raise WebSkrapError("target cannot be blank", code=ErrorCode.USAGE)
+    if target is not None and full_page:
+        raise WebSkrapError("pass either a target or full_page, not both", code=ErrorCode.USAGE)
+    clip = await cdp_session.screenshot(page, path, full_page=full_page, target=target)
+    result = {**await page_state(page), "path": str(path)}
+    if clip is not None:
+        result["clip"] = clip
+    return result
 
 
 async def snapshot(page: CDPPage, *, depth: int | None = None) -> dict[str, Any]:

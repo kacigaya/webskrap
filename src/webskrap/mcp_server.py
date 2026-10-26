@@ -828,6 +828,7 @@ async def browser_screenshot(
     path: str | None = None,
     session: str = "default",
     full_page: bool = False,
+    target: str | None = None,
 ) -> dict[str, Any]:
     """Screenshot the session's current page to a PNG file.
 
@@ -840,14 +841,22 @@ async def browser_screenshot(
             subdirectories are allowed and created. Auto-generated when omitted.
         session: Browser session name.
         full_page: Capture the full scrollable page.
+        target: Snapshot ref (e.g. "e15", or "f12345e15" inside an iframe) or
+            CSS selector: capture only that element's bounding box, reported
+            as clip. Not combined with full_page.
     """
     # Resolved before connecting to the browser so a rejected path fails fast,
     # and outside `run` so no page action happens for a path that is refused.
     with _tool_errors():
-        target = resolve_output_path(path)
+        if target is not None and full_page:
+            msg = "pass either a target or full_page, not both"
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
+        destination = resolve_output_path(path)
 
     async def run(page: SessionPage) -> dict[str, Any]:
-        return await browser_session.screenshot(page, target, full_page=full_page)
+        return await browser_session.screenshot(
+            page, destination, full_page=full_page, target=target
+        )
 
     return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
 
