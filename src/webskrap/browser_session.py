@@ -1212,9 +1212,16 @@ async def insert_text(page: CDPPage, text: str) -> dict[str, Any]:
     return await cdp_session.insert_text(page, text)
 
 
-async def goto(page: CDPPage, url: str, wait_until: WaitUntil) -> dict[str, Any]:
-    """Navigate ``page`` to ``url`` and return its status and state."""
-    return await cdp_session.goto(page, url, wait_until)
+async def goto(
+    page: CDPPage, url: str, wait_until: WaitUntil, *, decline_cookies: bool = False
+) -> dict[str, Any]:
+    """Navigate ``page`` to ``url`` and return its status and state.
+
+    ``blocked`` reports a recognized challenge or block page (or None)
+    without raising. With ``decline_cookies``, a consent notice is dismissed
+    and ``cookie_notice_declined`` reports the strategy, as fetch does.
+    """
+    return await cdp_session.goto(page, url, wait_until, decline_cookies=decline_cookies)
 
 
 #: History commands :func:`history` accepts, named after the 2.x Playwright methods.

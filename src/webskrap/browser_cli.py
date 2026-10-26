@@ -100,6 +100,13 @@ def _emit_state(state: dict[str, Any], output_format: OutputFormat) -> None:
         console.print(f"[bold]Status:[/bold] {status}")
     console.print(f"[bold]URL:[/bold] {state['url']}")
     console.print(f"[bold]Title:[/bold] {state['title']}")
+    if "cookie_notice_declined" in state:
+        declined = state["cookie_notice_declined"] or "no notice found"
+        console.print(f"[bold]Cookie notice:[/bold] {declined}")
+    if blocked := state.get("blocked"):
+        stderr_console.print(
+            f"[yellow]blocked:[/yellow] {blocked['provider']} {blocked['kind']}. {blocked['hint']}"
+        )
 
 
 @browser_app.command("open")
@@ -142,6 +149,12 @@ def open_command(
         bool,
         typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
     ] = False,
+    decline_cookies: Annotated[
+        bool,
+        typer.Option(
+            "--decline-cookies", help="With a URL, click a cookie consent notice's reject control."
+        ),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -182,7 +195,9 @@ def open_command(
         payload.update(
             _run_page_command(
                 session,
-                lambda page: browser_session.goto(page, url, "load"),
+                lambda page: browser_session.goto(
+                    page, url, "load", decline_cookies=decline_cookies
+                ),
                 output_format,
                 timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
@@ -324,14 +339,24 @@ def goto_command(
         typer.Option("--wait-until", help="commit, domcontentloaded, load, or networkidle."),
     ] = "load",
     timeout_ms: ActionTimeoutOption = DEFAULT_NAVIGATION_TIMEOUT_MS,
+    decline_cookies: Annotated[
+        bool,
+        typer.Option("--decline-cookies", help="Click a cookie consent notice's reject control."),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
-    """Navigate the current page."""
+    """Navigate the current page.
+
+    A known challenge or block page is reported, not raised: the page stays
+    open, and JSON output carries it in "blocked".
+    """
     output_format = parse_output_format(format)
     parsed_wait_until = parse_cli_value(wait_until, parse_wait_until)
     state = _run_page_command(
         session,
-        lambda page: browser_session.goto(page, url, parsed_wait_until),
+        lambda page: browser_session.goto(
+            page, url, parsed_wait_until, decline_cookies=decline_cookies
+        ),
         output_format,
         timeout_ms=timeout_ms,
     )

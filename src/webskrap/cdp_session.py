@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from webskrap import cdp_dom, challenges, consent
 from webskrap.cdp import CDPConnection, CDPError, CDPPage, WebSocketTransport
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import ElementState, LoadState
@@ -33,6 +34,10 @@ if TYPE_CHECKING:
     from webskrap.browser_session import BrowserView, Viewport
 
 _STATE_SCRIPT = "({ url: location.href, title: document.title })"
+#: How long a browser navigation waits for a consent notice. Longer than the
+#: fetch default (2 s): some CMPs inject their notice 7 s after load. The wait
+#: ends as soon as a notice shows, so only opted-in pages without one pay it.
+DECLINE_TIMEOUT_MS = 10_000
 _VIEWPORT_SCRIPT = (
     "({ width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY, "
     "dpr: devicePixelRatio })"
@@ -369,15 +374,36 @@ async def page_state(page: CDPPage) -> dict[str, Any]:
     return {"url": state["url"], "title": state["title"]}
 
 
-async def goto(page: CDPPage, url: str, wait_until: str) -> dict[str, Any]:
-    """Navigate and return ``{"status", "url", "title"}``."""
+async def goto(
+    page: CDPPage, url: str, wait_until: str, *, decline_cookies: bool = False
+) -> dict[str, Any]:
+    """Navigate and return ``{"status", "url", "title", "blocked"}``.
+
+    Uses the fetch tools' challenge and block detection, including the wait
+    for a self-clearing interstitial. A detected page is reported in
+    ``blocked`` rather than raised, so the session stays usable for a person
+    to look at. With ``decline_cookies``, a consent notice is dismissed and
+    ``cookie_notice_declined`` names the strategy that clicked, or is None.
+    """
     url = validate_url(url)
-    response = await page.goto(url, wait_until=wait_until, timeout_s=page.default_timeout_s)
-    status = response.get("status")
-    return {
-        "status": int(status) if isinstance(status, int | float) else None,
-        **await page_state(page),
-    }
+    timeout_s = page.default_timeout_s
+    deadline = time.monotonic() + timeout_s
+    documents = challenges.record_documents(page)
+    try:
+        response = await page.goto(url, wait_until=wait_until, timeout_s=timeout_s)
+        response = await challenges.settle(
+            page, documents, response, wait_until=wait_until, deadline=deadline
+        )
+    finally:
+        documents.stop()
+    status = challenges.response_status(response)
+    found = await challenges.detect(page, challenges.response_headers(response), status)
+    result: dict[str, Any] = {"status": status}
+    if decline_cookies:
+        result["cookie_notice_declined"] = (
+            None if found else await consent.decline_cookies(page, timeout_ms=DECLINE_TIMEOUT_MS)
+        )
+    return {**result, **await page_state(page), "blocked": found.payload() if found else None}
 
 
 async def history(page: CDPPage, method: str) -> dict[str, Any]:

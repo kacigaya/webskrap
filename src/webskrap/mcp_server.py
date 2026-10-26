@@ -553,6 +553,7 @@ async def browser_open(
     session: str = "default",
     webrtc_ip_handling_policy: str | None = None,
     fake_media_devices: bool = False,
+    decline_cookies: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent headless browser session.
 
@@ -578,6 +579,11 @@ async def browser_open(
             addresses out of WebRTC candidates. Fixed at launch; reopening a
             running session with a different policy is refused.
         fake_media_devices: Supply Chromium's synthetic camera and microphone.
+        decline_cookies: With url, click a consent notice's reject control;
+            cookie_notice_declined reports the strategy or null.
+
+    With url, the result has blocked: null, or {code, provider, kind, hint}
+    when a known challenge or block page loaded instead.
     """
     with _tool_errors():
         if url is not None:
@@ -592,7 +598,9 @@ async def browser_open(
         payload.update(
             await _browser_action(
                 session,
-                lambda page: browser_session.goto(page, url, "load"),
+                lambda page: browser_session.goto(
+                    page, url, "load", decline_cookies=decline_cookies
+                ),
                 browser_session.DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
         )
@@ -630,21 +638,29 @@ async def browser_goto(
     session: str = "default",
     wait_until: str = "load",
     timeout_ms: float = 30_000,
+    decline_cookies: bool = False,
 ) -> dict[str, Any]:
     """Navigate the session's current page to a URL.
+
+    The result has blocked: null, or {code, provider, kind, hint} when a known
+    challenge or block page loaded instead. The page stays open either way.
 
     Args:
         url: The URL to navigate to.
         session: Browser session name.
         wait_until: commit, domcontentloaded, load, or networkidle.
         timeout_ms: Navigation timeout in milliseconds.
+        decline_cookies: Click a consent notice's reject control after the
+            load; cookie_notice_declined reports the strategy or null.
     """
     parsed_wait_until = parse_wait_until(wait_until)
     with _tool_errors():
         url = await validate_mcp_url(url)
     return await _browser_action(
         session,
-        lambda page: browser_session.goto(page, url, parsed_wait_until),
+        lambda page: browser_session.goto(
+            page, url, parsed_wait_until, decline_cookies=decline_cookies
+        ),
         timeout_ms,
     )
 
