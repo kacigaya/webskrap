@@ -5,6 +5,7 @@ import contextlib
 import shutil
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -143,8 +144,77 @@ setTimeout(() => {
 </body></html>"""
 
 
+# Clears itself as Akamai's sec-cpt page does: its script sets a cookie and reloads.
+INTERSTITIAL_PAGE = b"""<html><body><div id="sec-if-cpt-container" style="display:none"></div>
+<script>setTimeout(() => { document.cookie = 'passed=1; path=/'; location.reload(); }, 300);
+</script></body></html>"""
+
+# Reloads before DOMContentLoaded: the slow script holds the parser until the
+# reload has replaced the document.
+EARLY_RELOAD_PAGE = b"""<html><head><script>
+document.cookie = 'early=1; path=/'; location.reload();
+</script><script src="/slow.js"></script></head><body>First</body></html>"""
+
+BLOCKS = Path(__file__).parent / "fixtures" / "blocks"
+
+
 class _Handler(BaseHTTPRequestHandler):
+    server_name = "BaseHTTP"
+
+    def version_string(self) -> str:
+        return self.server_name
+
+    def _passed_page(self, cookie: str, title: bytes) -> bool:
+        if cookie not in self.headers.get("Cookie", ""):
+            return False
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<html><title>" + title + b"</title><body>Real page</body></html>")
+        return True
+
     def do_GET(self) -> None:
+        if self.path == "/interstitial":
+            if not self._passed_page("passed=1", b"Passed"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(INTERSTITIAL_PAGE)
+            return
+
+        if self.path == "/waf-challenge":
+            if not self._passed_page("passed=1", b"Passed"):
+                self.send_response(202)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("x-amzn-waf-action", "challenge")
+                self.end_headers()
+                self.wfile.write(INTERSTITIAL_PAGE.replace(b"sec-if-cpt-container", b"x"))
+            return
+
+        if self.path == "/early-reload":
+            if not self._passed_page("early=1", b"Reloaded"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(EARLY_RELOAD_PAGE)
+            return
+
+        if self.path == "/slow.js":
+            time.sleep(3)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/javascript")
+            self.end_headers()
+            return
+
+        if self.path == "/cf-block":
+            self.server_name = "cloudflare"
+            self.send_response(403)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("cf-ray", "0123456789abcdef-CDG")
+            self.end_headers()
+            self.wfile.write((BLOCKS / "cloudflare-custom-block.html").read_bytes())
+            return
+
         if self.path == "/cf-challenge":
             self.send_response(200)
             self.send_header("cf-mitigated", "challenge")
@@ -286,6 +356,36 @@ async def test_fetch_challenge_readiness_and_http_errors(test_server, sandbox_su
         assert result.status == 403
         assert not result.ok
         assert result.text == "Forbidden"
+
+
+async def test_fetch_waits_out_self_clearing_interstitials(test_server, sandbox_supported):
+    config = SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
+    async with WebSkrapClient(default_config=config) as client:
+        for path in ("interstitial", "waf-challenge"):
+            session = await client.session(path)
+            result = await session.fetch(f"{test_server}/{path}", text_only=True)
+            # The reloaded document's response, not the interstitial's 202.
+            assert (result.status, result.title, result.text) == (200, "Passed", "Real page")
+
+
+async def test_fetch_follows_a_reload_before_domcontentloaded(test_server, sandbox_supported):
+    config = SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("early")
+        result = await session.fetch(f"{test_server}/early-reload", timeout_ms=10_000)
+    assert (result.status, result.title) == (200, "Reloaded")
+
+
+async def test_fetch_reports_a_provider_block_page(test_server, sandbox_supported):
+    config = SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("block")
+        with pytest.raises(WebSkrapError) as error:
+            await session.fetch(f"{test_server}/cf-block")
+    assert error.value.code is ErrorCode.BLOCKED
+    assert str(error.value) == (
+        "Cloudflare blocked this client instead of serving the requested page"
+    )
 
 
 @pytest.mark.asyncio

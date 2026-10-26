@@ -18,7 +18,7 @@ from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
 
-from webskrap import browser_session
+from webskrap import browser_session, text_search
 from webskrap.browser_session import SessionPage
 from webskrap.client import WebSkrapClient, WebSkrapError, with_channel_fallback
 from webskrap.diagnostics import diagnose
@@ -93,15 +93,14 @@ INSTRUCTIONS = """WebSkrap drives real Chromium over its own CDP client (no Play
 Choose a tool
 - One known page: stealth_fetch. Prefer it over fetch; fetch has fewer controls.
 - search: find URLs (Bing default, engine="ddg" for DuckDuckGo). No Google.
-  Then stealth_fetch selected hits. A blocked error means a bot challenge:
-  switch engine or exit IP instead of retrying unchanged.
+  Then stealth_fetch selected hits. On blocked, switch engine or exit IP.
 - Stateful flows: browser_open, browser_snapshot / browser_interact /
   browser_wait_for, then browser_close. Do not re-fetch to drive a flow.
 
 In a browser session
 - Headless only over MCP. Shared with the browser CLI. browser_tabs picks the tab.
 - browser_snapshot gives [ref=eN] handles; snapshot again after DOM changes.
-- browser_text reads text without building an accessibility tree.
+- browser_text reads text without an accessibility tree; pattern= greps lines.
 - Visual layouts/canvas: browser_view returns an inline PNG and metadata,
   without a file write. browser_mouse clicks/moves/scrolls/drags in viewport
   CSS pixels from its top-left (0,0). Map resized previews to original width/
@@ -109,7 +108,7 @@ In a browser session
 - browser_insert_text inserts literal text into the focused control;
   browser_press sends keys. Prefer refs/selectors for identifiable controls.
 - After an interaction, browser_wait_for waits for the expected change.
-  Run dependent actions sequentially in a session.
+  Run dependent actions in sequence.
 
 Keep results small
 - max_chars defaults to 8000. Start lower; page via next_text_offset /
@@ -126,7 +125,8 @@ Failures and boundaries
 Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
 browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
-Known DataDome/Cloudflare challenge pages return blocked; stop automatic retries.
+Known challenge/block pages (DataDome, Cloudflare, Akamai, AWS WAF) return
+blocked: follow its hint; do not retry. browser_goto reports it.
 Fetch tools accept ready_selector to verify visible content before extraction.
 Call doctor for unexplained failures; read webskrap://guide for details.
 Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.
@@ -553,6 +553,7 @@ async def browser_open(
     session: str = "default",
     webrtc_ip_handling_policy: str | None = None,
     fake_media_devices: bool = False,
+    decline_cookies: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent headless browser session.
 
@@ -578,6 +579,11 @@ async def browser_open(
             addresses out of WebRTC candidates. Fixed at launch; reopening a
             running session with a different policy is refused.
         fake_media_devices: Supply Chromium's synthetic camera and microphone.
+        decline_cookies: With url, click a consent notice's reject control;
+            cookie_notice_declined reports the strategy or null.
+
+    With url, the result has blocked: null, or {code, provider, kind, hint}
+    when a known challenge or block page loaded instead.
     """
     with _tool_errors():
         if url is not None:
@@ -592,7 +598,9 @@ async def browser_open(
         payload.update(
             await _browser_action(
                 session,
-                lambda page: browser_session.goto(page, url, "load"),
+                lambda page: browser_session.goto(
+                    page, url, "load", decline_cookies=decline_cookies
+                ),
                 browser_session.DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
         )
@@ -630,21 +638,29 @@ async def browser_goto(
     session: str = "default",
     wait_until: str = "load",
     timeout_ms: float = 30_000,
+    decline_cookies: bool = False,
 ) -> dict[str, Any]:
     """Navigate the session's current page to a URL.
+
+    The result has blocked: null, or {code, provider, kind, hint} when a known
+    challenge or block page loaded instead. The page stays open either way.
 
     Args:
         url: The URL to navigate to.
         session: Browser session name.
         wait_until: commit, domcontentloaded, load, or networkidle.
         timeout_ms: Navigation timeout in milliseconds.
+        decline_cookies: Click a consent notice's reject control after the
+            load; cookie_notice_declined reports the strategy or null.
     """
     parsed_wait_until = parse_wait_until(wait_until)
     with _tool_errors():
         url = await validate_mcp_url(url)
     return await _browser_action(
         session,
-        lambda page: browser_session.goto(page, url, parsed_wait_until),
+        lambda page: browser_session.goto(
+            page, url, parsed_wait_until, decline_cookies=decline_cookies
+        ),
         timeout_ms,
     )
 
@@ -686,6 +702,9 @@ async def browser_text(
     session: str = "default",
     max_chars: int = 8_000,
     offset: int = 0,
+    pattern: str | None = None,
+    context: int = 1,
+    max_matches: int = 20,
 ) -> dict[str, Any]:
     """Read visible body text without building an accessibility snapshot.
 
@@ -693,11 +712,29 @@ async def browser_text(
     cross the browser connection. Each call reads the current DOM; offsets are
     stable only while the page text stays unchanged.
 
+    With pattern, return matching lines instead of a window: matches holds
+    {line, text, before, after} per non-blank line, with matches_total. The
+    regex runs in Python, not the page, and fails with usage after 2s.
+
     Args:
         session: Browser session name.
         max_chars: Maximum characters to return (default 8000).
         offset: Character index to start at; pass back next_text_offset for more.
+        pattern: Python regex (max 200 chars); (?i) for case-insensitive.
+            max_chars and offset do not apply.
+        context: Lines kept before and after each match, 0 to 3.
+        max_matches: Matches returned, 1 to 50.
     """
+    if pattern is not None:
+        with _tool_errors():
+            text_search.validate_search(pattern, context=context, max_matches=max_matches)
+        return await _browser_action(
+            session,
+            lambda page: browser_session.search_text(
+                page, pattern, context=context, max_matches=max_matches
+            ),
+            browser_session.DEFAULT_ACTION_TIMEOUT_MS,
+        )
     return await _browser_action(
         session,
         lambda page: browser_session.read_text(page, max_chars=max_chars, offset=offset),
@@ -812,6 +849,7 @@ async def browser_screenshot(
     path: str | None = None,
     session: str = "default",
     full_page: bool = False,
+    target: str | None = None,
 ) -> dict[str, Any]:
     """Screenshot the session's current page to a PNG file.
 
@@ -824,14 +862,22 @@ async def browser_screenshot(
             subdirectories are allowed and created. Auto-generated when omitted.
         session: Browser session name.
         full_page: Capture the full scrollable page.
+        target: Snapshot ref (e.g. "e15", or "f12345e15" inside an iframe) or
+            CSS selector: capture only that element's bounding box, reported
+            as clip. Not combined with full_page.
     """
     # Resolved before connecting to the browser so a rejected path fails fast,
     # and outside `run` so no page action happens for a path that is refused.
     with _tool_errors():
-        target = resolve_output_path(path)
+        if target is not None and full_page:
+            msg = "pass either a target or full_page, not both"
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
+        destination = resolve_output_path(path)
 
     async def run(page: SessionPage) -> dict[str, Any]:
-        return await browser_session.screenshot(page, target, full_page=full_page)
+        return await browser_session.screenshot(
+            page, destination, full_page=full_page, target=target
+        )
 
     return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
 

@@ -35,7 +35,11 @@ or `full`) to set how much of the profile pages see.
   windows navigate again; use `browser_text` in a session to avoid re-fetching.
 - `browser_text` reads visible body text and selects the window in the browser,
   avoiding a full accessibility tree and full-text transfer. The browser still
-  computes full body text to report its length.
+  computes full body text to report its length. `pattern` returns only matching
+  lines with `context`, capped by `max_matches`; the regex runs in Python with
+  a 2-second limit.
+- `browser_goto` and `browser_open` take `decline_cookies`;
+  `browser_screenshot` takes `target` for one element.
 - Use `resource_policy=lite` to skip images, fonts, and media.
 - Keep `include_links` off unless links are needed.
 - Snapshots default to `depth=6`. Set `depth=null` for an unlimited tree,
@@ -72,8 +76,10 @@ snapshot, interact, and wait_for, never evaluate page-controlled text, and set
 
 ## Failures
 
-A known DataDome or Cloudflare challenge arrives as a `blocked` tool error,
-including challenges served with HTTP 200. Ordinary HTTP error pages return
+A known challenge (DataDome, Cloudflare, Akamai, AWS WAF) or provider block
+page (Cloudflare, Akamai) arrives as a `blocked` tool error, including pages
+served with HTTP 200. Blocks and challenges get different hints.
+`browser_goto` reports the same check in its `blocked` key instead of failing. Ordinary HTTP error pages return
 normally with `ok: false`. A raised failure includes `code` and `hint`. Read
 `src/webskrap/errors.py` for the current catalog rather than duplicating it.
 

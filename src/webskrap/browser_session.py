@@ -33,7 +33,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO, TypedDict, TypeVar
 
-from webskrap import cdp_dom, cdp_session
+from webskrap import cdp_dom, cdp_session, text_search
 from webskrap.cdp import CDPPage, find_executable
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
@@ -1212,9 +1212,16 @@ async def insert_text(page: CDPPage, text: str) -> dict[str, Any]:
     return await cdp_session.insert_text(page, text)
 
 
-async def goto(page: CDPPage, url: str, wait_until: WaitUntil) -> dict[str, Any]:
-    """Navigate ``page`` to ``url`` and return its status and state."""
-    return await cdp_session.goto(page, url, wait_until)
+async def goto(
+    page: CDPPage, url: str, wait_until: WaitUntil, *, decline_cookies: bool = False
+) -> dict[str, Any]:
+    """Navigate ``page`` to ``url`` and return its status and state.
+
+    ``blocked`` reports a recognized challenge or block page (or None)
+    without raising. With ``decline_cookies``, a consent notice is dismissed
+    and ``cookie_notice_declined`` reports the strategy, as fetch does.
+    """
+    return await cdp_session.goto(page, url, wait_until, decline_cookies=decline_cookies)
 
 
 #: History commands :func:`history` accepts, named after the 2.x Playwright methods.
@@ -1235,10 +1242,26 @@ async def press(page: CDPPage, key: str) -> dict[str, Any]:
     return await page_state(page)
 
 
-async def screenshot(page: CDPPage, path: Path, *, full_page: bool) -> dict[str, Any]:
-    """Write a PNG to ``path``; return the page state plus ``path``."""
-    await cdp_session.screenshot(page, path, full_page=full_page)
-    return {**await page_state(page), "path": str(path)}
+async def screenshot(
+    page: CDPPage, path: Path, *, full_page: bool, target: str | None = None
+) -> dict[str, Any]:
+    """Write a PNG to ``path``; return the page state plus ``path``.
+
+    ``target`` (a CSS selector or snapshot ref, iframe refs included)
+    captures only that element's bounding box, reported as ``clip``.
+
+    Raises:
+        WebSkrapError: ``usage`` when ``target`` is combined with ``full_page``.
+    """
+    if target is not None and not target.strip():
+        raise WebSkrapError("target cannot be blank", code=ErrorCode.USAGE)
+    if target is not None and full_page:
+        raise WebSkrapError("pass either a target or full_page, not both", code=ErrorCode.USAGE)
+    clip = await cdp_session.screenshot(page, path, full_page=full_page, target=target)
+    result = {**await page_state(page), "path": str(path)}
+    if clip is not None:
+        result["clip"] = clip
+    return result
 
 
 async def snapshot(page: CDPPage, *, depth: int | None = None) -> dict[str, Any]:
@@ -1255,6 +1278,35 @@ async def read_text(page: CDPPage, *, max_chars: int, offset: int = 0) -> dict[s
     text to report its exact length.
     """
     return await cdp_session.read_text(page, max_chars=max_chars, offset=offset)
+
+
+#: Page text searched by :func:`search_text`; longer text is cut, not refused.
+MAX_SEARCH_TEXT_CHARS = 2_000_000
+
+
+async def search_text(
+    page: CDPPage, pattern: str, *, context: int = 1, max_matches: int = 20
+) -> dict[str, Any]:
+    """Return the lines of the page's visible text that ``pattern`` matches.
+
+    The text is extracted once and searched in Python, never in the page; see
+    :mod:`webskrap.text_search` for the caps and the time limit. Only the
+    first :data:`MAX_SEARCH_TEXT_CHARS` characters are searched, and
+    ``text_searched_truncated`` says when the page had more.
+    """
+    text_search.validate_search(pattern, context=context, max_matches=max_matches)
+    state = await cdp_session.body_text(page, max_chars=MAX_SEARCH_TEXT_CHARS)
+    found = await text_search.search_lines(
+        state["text"], pattern, context=context, max_matches=max_matches
+    )
+    return {
+        "url": state["url"],
+        "title": state["title"],
+        "pattern": pattern,
+        **found,
+        "text_length": state["text_length"],
+        "text_searched_truncated": state["text_length"] > MAX_SEARCH_TEXT_CHARS,
+    }
 
 
 def wait_condition(

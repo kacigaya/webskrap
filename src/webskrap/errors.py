@@ -38,7 +38,7 @@ class ErrorCode(StrEnum):
     SANDBOX = "sandbox"
     #: A path was refused by the output or profile confinement rules.
     PATH_REJECTED = "path_rejected"
-    #: The site answered with a bot challenge or CAPTCHA instead of content.
+    #: The site answered with a bot challenge, CAPTCHA or block page instead of content.
     BLOCKED = "blocked"
     #: Anything not yet classified.
     INTERNAL = "internal"
@@ -79,9 +79,9 @@ RECOVERY_HINTS: dict[ErrorCode, str] = {
         "WEBSKRAP_OUTPUT_DIR / WEBSKRAP_MCP_PROFILE_DIR."
     ),
     ErrorCode.BLOCKED: (
-        "The site served a bot challenge instead of content. Try another engine or exit IP "
-        "(proxy), reuse a persistent user_data_dir, or run headed. WebSkrap does not solve "
-        "CAPTCHAs."
+        "The site served a bot challenge or block page instead of content. Try another "
+        "engine or exit IP (proxy), virtual_display=True, a persistent user_data_dir, or "
+        "headed mode. WebSkrap does not solve CAPTCHAs."
     ),
     ErrorCode.INTERNAL: "Unexpected failure. Re-run with `webskrap doctor` to check the install.",
 }
@@ -152,16 +152,29 @@ class WebSkrapError(RuntimeError):
     gives them the same vocabulary.
     """
 
-    def __init__(self, message: str, *, code: ErrorCode | None = None) -> None:
+    def __init__(
+        self, message: str, *, code: ErrorCode | None = None, hint: str | None = None
+    ) -> None:
         """Record ``message``, optionally tagged with an explicit ``code``.
 
         Args:
             message: Human-readable, single-line description.
             code: Failure kind. Leave unset to have :func:`classify` derive one
                 from the message.
+            hint: Recovery hint that replaces the code's default, for a raise
+                site that knows more than the code says. Must hold no
+                page-controlled text.
         """
         super().__init__(message)
         self.code = code
+        self.hint = hint
+
+
+def recovery_hint(exc: BaseException) -> str:
+    """Return the raise site's own hint for ``exc``, or its code's default."""
+    if isinstance(exc, WebSkrapError) and exc.hint:
+        return exc.hint
+    return RECOVERY_HINTS[classify(exc)]
 
 
 def classify(exc: BaseException) -> ErrorCode:
@@ -260,7 +273,7 @@ def error_payload(exc: BaseException) -> dict[str, str | bool]:
         "ok": False,
         "error": first_line(exc),
         "code": str(code),
-        "hint": RECOVERY_HINTS[code],
+        "hint": recovery_hint(exc),
     }
 
 
@@ -273,7 +286,7 @@ def tool_message(exc: BaseException) -> str:
     without a second round trip.
     """
     code = classify(exc)
-    return f"{first_line(exc)} [code: {code}] {RECOVERY_HINTS[code]}"
+    return f"{first_line(exc)} [code: {code}] {recovery_hint(exc)}"
 
 
 def exit_code(exc: BaseException) -> int:

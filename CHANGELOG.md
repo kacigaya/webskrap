@@ -9,6 +9,46 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `blocked` now covers provider block pages: Cloudflare's own error pages
+  (codes 1005-1010, 1012, 1015, 1020), site-styled Cloudflare 403 pages that
+  show the response's Ray ID, and Akamai edge pages (HTTP 400 or 403 from
+  `AkamaiGHost` with a reference number). Challenges now also include Akamai's
+  sec-cpt page and the AWS WAF challenge and CAPTCHA actions.
+- `blocked` errors carry a kind-specific hint: change the exit IP for a
+  block, try headed mode or a persistent profile for a challenge. On Linux
+  with Xvfb, both name `virtual_display=True` first. `WebSkrapError.hint`
+  holds it for Python callers.
+- `decline_cookies` for MCP `browser_open` and `browser_goto`, and
+  `--decline-cookies` for `webskrap browser open` and `goto`. The result
+  reports `cookie_notice_declined`, as fetches do.
+- `browser_goto` (and `browser_open` with a URL) reports a challenge or block
+  page in a new `blocked` key, without raising.
+- Element screenshots: `target` for MCP `browser_screenshot` and `--target`
+  for `webskrap browser screenshot` take a selector or snapshot ref, iframe
+  refs included, and capture only that element. An element inside an iframe
+  is cut to the iframe's content box. MCP output stays confined to
+  `./webskrap-output`.
+- `browser_text` takes `pattern`, `context` and `max_matches` to return only
+  matching lines. The regex runs in a child Python process that is killed
+  after 2 seconds, so a backtracking pattern cannot hang the server.
+
+### Fixed
+
+- A page that reloads itself before reaching the requested load state (for
+  example, behind a Cloudflare JS check under `virtual_display`) no longer
+  times out. Navigation follows the replacement document and reports its
+  response.
+- Self-clearing interstitials (Akamai sec-cpt, AWS WAF challenge) are waited
+  out for up to 15 seconds. Fetches used to read the interstitial and could
+  report it as `ok: true` with HTTP 202.
+- `search` runs the same provider challenge check as `fetch`, including the
+  interstitial wait.
+- Closing a tab waits until Chromium stops listing it. The next browser
+  command could otherwise attach to the closed tab and fail with "No target
+  with given id".
+
 ## [3.1.0] - 2026-10-26
 
 ### Added

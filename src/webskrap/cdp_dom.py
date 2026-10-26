@@ -774,6 +774,60 @@ async def _box(element: _Element, *, recover: bool = False) -> dict[str, float]:
     return box
 
 
+async def element_clip(page: CDPPage, target: str) -> dict[str, float]:
+    """Return ``target``'s bounding box in document CSS pixels, for a screenshot clip.
+
+    ``target`` is a CSS selector (main frame) or a snapshot ref, including
+    iframe refs. It must resolve to one visible element, which is scrolled
+    into view first. An element inside an iframe is measured in the top-level
+    page and cut to its ``<iframe>``'s content box, so the clip shows only
+    what that frame shows. Frames further up are not intersected.
+
+    Raises:
+        WebSkrapError: ``stale_ref``, ``usage`` (ambiguous or invalid
+            selector, or an element outside its frame's visible area) or
+            ``timeout``, as for :func:`element_action`.
+    """
+    async with _object_group(page) as group:
+        element = await _actionable(page, target, group, page.default_timeout_s, enabled=False)
+        if element.frame_id is not None:
+            await _scroll_frame_element(element)
+        else:
+            await element.call(_SCROLL_FUNCTION)
+        box = await _box(element)
+    left, top = box["x"] + element.offset[0], box["y"] + element.offset[1]
+    right, bottom = left + box["width"], top + box["height"]
+    if element.frame_id is not None:
+        frame_left, frame_top, frame_right, frame_bottom = await _frame_bounds(element)
+        left, top = max(left, frame_left), max(top, frame_top)
+        right, bottom = min(right, frame_right), min(bottom, frame_bottom)
+        if right <= left or bottom <= top:
+            msg = f"{target} lies outside its frame's visible area"
+            raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    metrics = await page.send("Page.getLayoutMetrics")
+    viewport = metrics.get("cssVisualViewport") or metrics["visualViewport"]
+    return {
+        "x": left + viewport["pageX"],
+        "y": top + viewport["pageY"],
+        "width": right - left,
+        "height": bottom - top,
+    }
+
+
+async def _frame_bounds(element: _Element) -> tuple[float, float, float, float]:
+    """Return the top-level viewport box of ``element``'s ``<iframe>`` content area."""
+    for frame in await frames(element.input_page):
+        if frame.page.target_id != element.frame_id or frame.owner is None:
+            continue
+        session_id, backend_id = frame.owner
+        reporter = CDPPage(element.input_page.connection, session_id, frame.page.target_id)
+        model = await reporter.send("DOM.getBoxModel", {"backendNodeId": backend_id})
+        content = model["model"]["content"]
+        width, height = content[2] - content[0], content[5] - content[1]
+        return frame.offset_x, frame.offset_y, frame.offset_x + width, frame.offset_y + height
+    raise _stale(element.description)
+
+
 async def _move(page: CDPPage, x: float, y: float) -> None:
     await page.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
 

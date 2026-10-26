@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<!-- A site's own Cloudflare WAF block template, cut down.
+     Ray ID, client IP and time are redacted; 192.0.2.1 is a documentation address. -->
+<html lang="fr"><head><meta charset="UTF-8"><title>Accès bloqué</title></head>
+<body>
+<div class="box">
+  <div class="error-title">Accès bloqué</div>
+  <div class="error-message">Désactivez vos extensions de navigateur et réessayez.</div>
+  <form id="reportForm">
+    <input type="text" id="fieldTo" value="blockreport@example.test" readonly>
+    <input type="text" id="fieldRayId" value="0123456789abcdef" readonly>
+    <input type="text" id="fieldIp" value="192.0.2.1" readonly>
+  </form>
+  <div class="tech-line">RayID 0123456789abcdef · IP 192.0.2.1 · www.example.test</div>
+</div>
+</body></html>

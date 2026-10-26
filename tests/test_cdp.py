@@ -342,3 +342,40 @@ async def test_goto_waits_for_the_response_only_within_its_deadline() -> None:
     finally:
         fake.cancel()
         await connection.close()
+
+
+async def test_goto_follows_a_document_that_replaces_itself_before_loading() -> None:
+    connection, reader, writer = _connection()
+    page = CDPPage(connection, "S1", "F1")
+
+    def event(method: str, params: dict[str, Any]) -> None:
+        _feed(reader, {"method": method, "sessionId": "S1", "params": params})
+
+    async def browser() -> None:
+        answered = 0
+        while True:
+            while len(writer.sent) <= answered:
+                await asyncio.sleep(0)
+            message = writer.sent[answered]
+            answered += 1
+            result = (
+                {"frameId": "F1", "loaderId": "L1"} if message["method"] == "Page.navigate" else {}
+            )
+            _feed(reader, {"id": message["id"], "result": result})
+            if message["method"] == "Page.navigate":
+                # L1 commits, reloads itself before DOMContentLoaded, and L2 loads.
+                event("Page.frameNavigated", {"frame": {"id": "F1", "loaderId": "L1"}})
+                event("Page.frameNavigated", {"frame": {"id": "F1", "loaderId": "L2"}})
+                for loader, status in (("L1", 403), ("L2", 200)):
+                    response = {"status": status, "headers": {}}
+                    params = {"loaderId": loader, "type": "Document", "response": response}
+                    event("Network.responseReceived", params)
+                event("Page.lifecycleEvent", {"frameId": "F1", "loaderId": "L2", "name": "load"})
+
+    fake = asyncio.create_task(browser())
+    try:
+        response = await page.goto("https://example.test", wait_until="load", timeout_s=2.0)
+        assert response["status"] == 200
+    finally:
+        fake.cancel()
+        await connection.close()

@@ -964,3 +964,14 @@ def test_browser_tabs_validates_the_url_and_passes_through(monkeypatch: Any) -> 
 
     assert calls == [("default", "select", {"index": 2, "url": None})]
     assert caught.value.code is ErrorCode.USAGE  # private hosts are refused before any tab opens
+
+
+def test_browser_screenshot_rejects_a_target_with_full_page(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    with pytest.raises(WebSkrapError, match=r"\[code: usage\]"):
+        asyncio.run(mcp_server.browser_screenshot(target="#go", full_page=True))
+    assert not (tmp_path / "out").exists()

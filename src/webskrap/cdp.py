@@ -503,14 +503,18 @@ class CDPPage:
         Navigation and the load wait share one ``timeout_s`` budget, as in
         Playwright's ``goto``. The returned CDP ``Response`` object is empty
         for loads without a network response (``about:``, ``data:``, same
-        document).
+        document). A main-frame document that replaces itself before reaching
+        ``wait_until`` (a script reload or redirect) is followed, and the
+        response is the replacement's.
 
         Raises:
             WebSkrapError: ``navigation`` for a network error, ``timeout``
                 when the load state is not reached in time.
         """
         await self.enable_events()
-        events = self.record("Page.lifecycleEvent", "Network.responseReceived")
+        events = self.record(
+            "Page.lifecycleEvent", "Page.frameNavigated", "Network.responseReceived"
+        )
         deadline = time.monotonic() + timeout_s
         try:
             navigation = await self.send("Page.navigate", {"url": url}, timeout_s=timeout_s)
@@ -520,7 +524,7 @@ class CDPPage:
             loader_id = navigation.get("loaderId")
             if not loader_id:
                 return {}
-            await self.wait_lifecycle(events, loader_id, wait_until, deadline, url)
+            loader_id = await self.wait_lifecycle(events, loader_id, wait_until, deadline, url)
             try:
                 document = await events.wait(
                     lambda method, params: (
@@ -547,30 +551,56 @@ class CDPPage:
         wait_until: str,
         deadline: float,
         url: str,
-    ) -> None:
+    ) -> str | None:
         """Wait for ``wait_until`` in the main frame, on ``loader_id`` or any loader.
 
         ``events`` must have been recording ``Page.lifecycleEvent`` since
-        before the navigation started.
+        before the navigation started. When it also records
+        ``Page.frameNavigated``, a main-frame document that commits after
+        ``loader_id`` counts too: a page that reloads itself before its first
+        document reaches ``wait_until`` would otherwise never get there.
+
+        Returns:
+            The loader that reached ``wait_until``.
         """
         name = LIFECYCLE_EVENTS.get(wait_until)
         if name is None:
-            return
-        await events.wait(
-            lambda method, params: (
+            return loader_id
+        loaders = {loader_id}
+
+        def reached(method: str, params: dict[str, Any]) -> bool:
+            if method == "Page.frameNavigated":
+                frame = params.get("frame", {})
+                if loader_id is not None and frame.get("id") == self.target_id:
+                    loaders.add(frame.get("loaderId"))
+                return False
+            return (
                 method == "Page.lifecycleEvent"
                 and params.get("frameId") == self.target_id
-                and (loader_id is None or params.get("loaderId") == loader_id)
+                and (loader_id is None or params.get("loaderId") in loaders)
                 and params.get("name") == name
-            ),
+            )
+
+        params = await events.wait(
+            reached,
             timeout_s=max(0.0, deadline - time.monotonic()),
             what=f"{wait_until} on {url}",
         )
+        return params.get("loaderId", loader_id)
 
-    async def screenshot(self, *, full_page: bool = False) -> bytes:
-        """Return a PNG of the viewport, or of the whole page when ``full_page``."""
+    async def screenshot(
+        self, *, full_page: bool = False, clip: dict[str, float] | None = None
+    ) -> bytes:
+        """Return a PNG of the viewport, the whole page, or a ``clip`` of it.
+
+        ``clip`` is ``{"x", "y", "width", "height"}`` in CSS pixels from the
+        document's top-left; it may extend past the viewport.
+        """
         params: dict[str, Any] = {"format": "png"}
-        if full_page:
+        if clip is not None:
+            params["captureBeyondViewport"] = True
+            params["clip"] = {**clip, "scale": 1}
+        elif full_page:
             metrics = await self.send("Page.getLayoutMetrics")
             size = metrics.get("cssContentSize") or metrics["contentSize"]
             params["captureBeyondViewport"] = True

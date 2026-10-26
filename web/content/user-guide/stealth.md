@@ -33,13 +33,37 @@ system Chrome binary may not cover downloaded Chromium. Restore sandbox support
 instead of changing fingerprint options. WebSkrap does not disable the sandbox
 automatically.
 
-Fetches raise `blocked` for known DataDome and Cloudflare challenge pages,
-including HTTP 200 challenges. Stop automatic retries on that outcome. Pass
-`ready_selector` to require a visible content element before extraction; a
+Known challenge and block pages raise `blocked`, including HTTP 200 pages:
+
+- Challenges: DataDome, Cloudflare "Just a moment", Akamai's sec-cpt page, and
+  AWS WAF's challenge or CAPTCHA action (`x-amzn-waf-action`).
+- Blocks: Cloudflare's own error pages for codes 1005-1010, 1012, 1015 and
+  1020, a site-styled Cloudflare 403 page that shows the response's Ray ID,
+  and an Akamai edge page (`server: AkamaiGHost`, HTTP 400 or 403) with an
+  Akamai reference number.
+
+The Akamai sec-cpt page and the AWS WAF challenge action reload the page from
+their own script. WebSkrap waits up to 15 seconds for that reload and then
+reads the real page; it reports `blocked` only if the interstitial stays. A
+plain 403, 404 or 202 without these provider markers is not a block: it
+returns `ok: false` or `ok: true` as usual. The localized title of a block
+page is never a signal.
+
+The hint depends on the kind. For a block, change the exit IP or try
+`virtual_display=True`. For a challenge, try `virtual_display=True`, headed
+mode, or a persistent `user_data_dir`. On Linux with Xvfb installed, the hint
+names `virtual_display=True` first. Errors carry no page text, IP addresses,
+Ray IDs or reference IDs. Detection cannot identify every challenge or
+guarantee that later interactions will succeed. Stop automatic retries on
+`blocked`.
+
+Some sites challenge a datacenter exit IP whatever the browser does. For
+example, a deal forum behind Cloudflare still challenged `virtual_display=True`
+from a cloud VM. There, only a residential or mobile exit IP helps. WebSkrap
+does not solve CAPTCHAs.
+
+Pass `ready_selector` to require a visible content element before extraction; a
 successful HTTP status alone does not establish that the intended page loaded.
-Detection uses known provider markers and headers, not a complete challenge
-catalog. It does not solve CAPTCHAs or distinguish fingerprint causes from
-network reputation.
 
 ## Browser channel
 

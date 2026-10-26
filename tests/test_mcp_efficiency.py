@@ -7,7 +7,7 @@ from conftest import set_page_content
 
 from webskrap import browser_session, mcp_server
 from webskrap.cdp import find_executable, launch
-from webskrap.client import LINKS_SCRIPT
+from webskrap.client import LINKS_SCRIPT, WebSkrapError
 from webskrap.models import FetchResult, text_window
 
 
@@ -191,3 +191,30 @@ async def test_fetch_default_cap_and_explicit_override(monkeypatch, tool) -> Non
     result = await tool("https://example.test", max_chars=24000)
     assert len(result["text"]) == 24000
     assert result["text_truncated"] is False
+
+
+async def test_browser_text_pattern_greps_through_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = object()
+    captured = {}
+
+    async def search_text(actual_page, pattern, **kwargs):
+        assert actual_page is page
+        captured.update(kwargs, pattern=pattern)
+        return {"matches": []}
+
+    async def action(session, callback, timeout_ms):
+        return await callback(page)
+
+    monkeypatch.setattr(browser_session, "search_text", search_text)
+    monkeypatch.setattr(mcp_server, "_browser_action", action)
+    result = await mcp_server.browser_text("reading", pattern="Price", context=2, max_matches=5)
+    assert result == {"matches": []}
+    assert captured == {"pattern": "Price", "context": 2, "max_matches": 5}
+
+
+async def test_browser_text_rejects_a_bad_pattern_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_server, "_browser_action", None)  # must not be reached
+    with pytest.raises(WebSkrapError, match=r"invalid pattern.*\[code: usage\]"):
+        await mcp_server.browser_text(pattern="(")

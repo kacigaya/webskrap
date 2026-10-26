@@ -18,8 +18,8 @@ class _Page:
     async def goto(self, url: str, **kwargs):
         return self.response
 
-    async def evaluate(self, script: str):
-        return self.provider
+    async def evaluate(self, script: str, arg=None):
+        return {"provider": self.provider, "kind": "challenge"} if self.provider else None
 
 
 def test_live_gpu_defaults_to_auto(monkeypatch: pytest.MonkeyPatch) -> None:

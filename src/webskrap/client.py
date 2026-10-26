@@ -24,7 +24,13 @@ from anyio import CancelScope
 
 from webskrap import cdp_dom, cdp_setup
 from webskrap.cdp import CDPBrowser, CDPError, CDPPage, find_executable, launch
-from webskrap.challenges import raise_for_challenge
+from webskrap.challenges import (
+    raise_for_challenge,
+    record_documents,
+    response_headers,
+    response_status,
+    settle,
+)
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.consent import decline_cookies as _decline_cookies
 from webskrap.display import VirtualDisplay
@@ -357,18 +363,24 @@ class WebSkrapSession:
         started = time.perf_counter()
         timeout_s = (timeout_ms or self.config.navigation_timeout_ms) / 1000
         page = await self.new_page()
+        documents = record_documents(page)
         try:
+            deadline = time.monotonic() + timeout_s
             response = await page.goto(url, wait_until=wait_until, timeout_s=timeout_s)
-            headers = {
-                str(key).lower(): str(value) for key, value in response.get("headers", {}).items()
-            }
-            await raise_for_challenge(page, headers)
+            response = await settle(
+                page, documents, response, wait_until=wait_until, deadline=deadline
+            )
+            headers = response_headers(response)
+            status = response_status(response)
+            await raise_for_challenge(page, headers, status)
             declined = await self._decline_after_navigation(
                 page, wait_until, decline_cookies=decline_cookies
             )
             if ready_selector is not None:
-                await _wait_visible(page, ready_selector, timeout_s=timeout_s, headers=headers)
-            await raise_for_challenge(page, headers)
+                await _wait_visible(
+                    page, ready_selector, timeout_s=timeout_s, headers=headers, status=status
+                )
+            await raise_for_challenge(page, headers, status)
             state = await page.evaluate(_STATE_SCRIPT)
             text = state["text"] if text_only else await page.evaluate(_CONTENT_SCRIPT)
             links, links_total = await _collect_links(
@@ -377,7 +389,6 @@ class WebSkrapSession:
             )
             screenshot_path = await _maybe_screenshot(page, screenshot)
             cookies = await self.cookies()
-            status = _status(response)
             return FetchResult(
                 url=url,
                 final_url=state["url"],
@@ -394,6 +405,7 @@ class WebSkrapSession:
                 links_total=links_total,
             )
         finally:
+            documents.stop()
             with CancelScope(shield=True):
                 await self.close_page(page)
 
@@ -432,7 +444,9 @@ class WebSkrapSession:
         started = time.perf_counter()
         timeout_s = (timeout_ms or self.config.navigation_timeout_ms) / 1000
         page = await self.new_page()
+        documents = record_documents(page)
         try:
+            deadline = time.monotonic() + timeout_s
             response = await page.goto(url, wait_until="domcontentloaded", timeout_s=timeout_s)
             # Bing answers a cookie-less session with a head-only interstitial
             # whose script navigates to the real page, and reading at
@@ -440,14 +454,20 @@ class WebSkrapSession:
             # challenge page renders something in the body, so wait for that;
             # the wait survives the interstitial's navigation.
             await _wait_attached(page, "body > *", timeout_s=timeout_s)
+            # The same provider check as fetch, before the engine's own markers.
+            response = await settle(
+                page, documents, response, wait_until="domcontentloaded", deadline=deadline
+            )
+            await raise_for_challenge(page, response_headers(response), response_status(response))
             declined = await self._decline_after_navigation(page, "domcontentloaded")
             html = await page.evaluate(_CONTENT_SCRIPT)
             final_url = (await page.evaluate(_STATE_SCRIPT))["url"]
         finally:
+            documents.stop()
             with CancelScope(shield=True):
                 await self.close_page(page)
         hits = parse_results(engine, html)
-        status = _status(response)
+        status = response_status(response)
         return SearchResult(
             query=query,
             engine=engine,
@@ -599,11 +619,6 @@ class _PageTimeout:
 
     def __exit__(self, *_: object) -> None:
         self.page.default_timeout_s = self.previous
-
-
-def _status(response: dict[str, Any]) -> int | None:
-    status = response.get("status")
-    return int(status) if isinstance(status, int | float) else None
 
 
 class WebSkrapClient:
@@ -1018,7 +1033,7 @@ def require_lavapipe() -> None:
 
 
 async def _wait_visible(
-    page: CDPPage, target: str, *, timeout_s: float, headers: dict[str, str]
+    page: CDPPage, target: str, *, timeout_s: float, headers: dict[str, str], status: int | None
 ) -> None:
     """Wait for ``target`` (CSS or ref) to be visible; check for a challenge on timeout."""
     deadline = time.monotonic() + timeout_s
@@ -1028,7 +1043,7 @@ async def _wait_visible(
                 return
         if time.monotonic() >= deadline:
             # A challenge can replace the page while readiness is pending.
-            await raise_for_challenge(page, headers)
+            await raise_for_challenge(page, headers, status)
             msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {target} to be visible"
             raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
         await asyncio.sleep(_POLL_S)

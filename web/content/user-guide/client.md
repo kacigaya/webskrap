@@ -79,8 +79,9 @@ The readiness wait starts after consent dismissal and gets its own `timeout_ms`
 budget, or the configured navigation timeout. A missing selector raises a
 timeout; a blank selector is a usage error. `session.fetch()` accepts it too.
 
-Known DataDome and Cloudflare challenge pages raise `WebSkrapError` with code
-`blocked`, including challenges served with HTTP 200. They are checked before
+Known challenge pages (DataDome, Cloudflare, Akamai, AWS WAF) and provider block pages (Cloudflare, Akamai) raise `WebSkrapError` with code
+`blocked`, including pages served with HTTP 200. `error.hint`
+says what to try for that kind. They are checked before
 consent and extraction, and after a readiness timeout. Ordinary HTTP error pages
 still return `ok=False`. Detection uses known provider markers and headers and
 does not identify every challenge or solve verification widgets.
