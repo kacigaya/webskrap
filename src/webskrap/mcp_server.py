@@ -18,7 +18,7 @@ from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
 
-from webskrap import browser_session
+from webskrap import browser_session, text_search
 from webskrap.browser_session import SessionPage
 from webskrap.client import WebSkrapClient, WebSkrapError, with_channel_fallback
 from webskrap.diagnostics import diagnose
@@ -702,6 +702,9 @@ async def browser_text(
     session: str = "default",
     max_chars: int = 8_000,
     offset: int = 0,
+    pattern: str | None = None,
+    context: int = 1,
+    max_matches: int = 20,
 ) -> dict[str, Any]:
     """Read visible body text without building an accessibility snapshot.
 
@@ -709,11 +712,29 @@ async def browser_text(
     cross the browser connection. Each call reads the current DOM; offsets are
     stable only while the page text stays unchanged.
 
+    With pattern, return matching lines instead of a window: matches holds
+    {line, text, before, after} per non-blank line, with matches_total. The
+    regex runs in Python, not the page, and fails with usage after 2s.
+
     Args:
         session: Browser session name.
         max_chars: Maximum characters to return (default 8000).
         offset: Character index to start at; pass back next_text_offset for more.
+        pattern: Python regex (max 200 chars); (?i) for case-insensitive.
+            max_chars and offset do not apply.
+        context: Lines kept before and after each match, 0 to 3.
+        max_matches: Matches returned, 1 to 50.
     """
+    if pattern is not None:
+        with _tool_errors():
+            text_search.validate_search(pattern, context=context, max_matches=max_matches)
+        return await _browser_action(
+            session,
+            lambda page: browser_session.search_text(
+                page, pattern, context=context, max_matches=max_matches
+            ),
+            browser_session.DEFAULT_ACTION_TIMEOUT_MS,
+        )
     return await _browser_action(
         session,
         lambda page: browser_session.read_text(page, max_chars=max_chars, offset=offset),

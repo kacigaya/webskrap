@@ -33,7 +33,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO, TypedDict, TypeVar
 
-from webskrap import cdp_dom, cdp_session
+from webskrap import cdp_dom, cdp_session, text_search
 from webskrap.cdp import CDPPage, find_executable
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
@@ -1278,6 +1278,35 @@ async def read_text(page: CDPPage, *, max_chars: int, offset: int = 0) -> dict[s
     text to report its exact length.
     """
     return await cdp_session.read_text(page, max_chars=max_chars, offset=offset)
+
+
+#: Page text searched by :func:`search_text`; longer text is cut, not refused.
+MAX_SEARCH_TEXT_CHARS = 2_000_000
+
+
+async def search_text(
+    page: CDPPage, pattern: str, *, context: int = 1, max_matches: int = 20
+) -> dict[str, Any]:
+    """Return the lines of the page's visible text that ``pattern`` matches.
+
+    The text is extracted once and searched in Python, never in the page; see
+    :mod:`webskrap.text_search` for the caps and the time limit. Only the
+    first :data:`MAX_SEARCH_TEXT_CHARS` characters are searched, and
+    ``text_searched_truncated`` says when the page had more.
+    """
+    text_search.validate_search(pattern, context=context, max_matches=max_matches)
+    state = await cdp_session.body_text(page, max_chars=MAX_SEARCH_TEXT_CHARS)
+    found = await text_search.search_lines(
+        state["text"], pattern, context=context, max_matches=max_matches
+    )
+    return {
+        "url": state["url"],
+        "title": state["title"],
+        "pattern": pattern,
+        **found,
+        "text_length": state["text_length"],
+        "text_searched_truncated": state["text_length"] > MAX_SEARCH_TEXT_CHARS,
+    }
 
 
 def wait_condition(

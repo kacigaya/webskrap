@@ -781,3 +781,89 @@ def test_cdp_session_tabs(persistent_session_env: Path, session_server: str) -> 
         "/session"
     ]
     assert results["missing"] is ErrorCode.USAGE
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    width, height = struct.unpack(">II", path.read_bytes()[16:24])
+    return width, height
+
+
+@pytest.mark.browser
+def test_cdp_session_navigation_reports_and_reads(
+    persistent_session_env: Path, session_server: str, tmp_path: Path
+) -> None:
+    name = "cdp-report"
+
+    async def exercise() -> dict[str, Any]:
+        await browser_session.open_session(name)
+        results: dict[str, Any] = {}
+
+        async def run(action: Any) -> Any:
+            return await browser_session.run_page_action(name, action, timeout_ms=20_000)
+
+        results["consent"] = await run(
+            lambda page: browser_session.goto(
+                page, f"{session_server}/cmp-banner", "load", decline_cookies=True
+            )
+        )
+        results["plain"] = await run(
+            lambda page: browser_session.goto(page, f"{session_server}/session", "load")
+        )
+        results["blocked"] = await run(
+            lambda page: browser_session.goto(page, f"{session_server}/cf-block", "load")
+        )
+        await run(lambda page: browser_session.goto(page, f"{session_server}/form", "load"))
+        results["grep"] = await run(
+            lambda page: browser_session.search_text(page, "(?i)agree|send", context=1)
+        )
+        results["dpr"] = await run(lambda page: browser_session.evaluate(page, "devicePixelRatio"))
+        results["button"] = await run(
+            lambda page: browser_session.screenshot(
+                page, tmp_path / "go.png", full_page=False, target="#go"
+            )
+        )
+        await run(lambda page: browser_session.goto(page, f"{session_server}/frames", "load"))
+        tree = (await run(browser_session.snapshot))["snapshot"]
+        results["frame"] = await run(
+            lambda page: browser_session.screenshot(
+                page,
+                tmp_path / "frame.png",
+                full_page=False,
+                target=_ref(tree, '- button "Cross button"'),
+            )
+        )
+        with pytest.raises(WebSkrapError) as both:
+            await run(
+                lambda page: browser_session.screenshot(
+                    page, tmp_path / "x.png", full_page=True, target="h1"
+                )
+            )
+        results["both"] = both.value.code
+        return results
+
+    try:
+        results = asyncio.run(exercise())
+    finally:
+        browser_session.close_session(name, delete_data=True)
+
+    assert results["consent"]["cookie_notice_declined"] == "cmp"
+    assert results["consent"]["blocked"] is None
+    assert "cookie_notice_declined" not in results["plain"]
+    blocked = results["blocked"]
+    assert blocked["status"] == 403
+    assert blocked["blocked"]["provider"] == "Cloudflare"
+    assert blocked["blocked"]["kind"] == "block"
+    assert "0123456789abcdef" not in json.dumps(blocked["blocked"])
+    grep = results["grep"]
+    # innerText keeps inline controls on one line: "Name  Agree", then "Send".
+    texts = [match["text"] for match in grep["matches"]]
+    assert grep["matches_total"] == len(texts) >= 2
+    assert "Agree" in texts[0] and any("Send" in text for text in texts[1:])
+    assert grep["matches"][0]["after"] and len(grep["matches"][0]["after"]) == 1
+    scale = results["dpr"]
+    for key, path in (("button", tmp_path / "go.png"), ("frame", tmp_path / "frame.png")):
+        clip = results[key]["clip"]
+        width, height = _png_size(path)
+        assert abs(width - clip["width"] * scale) <= 1, key
+        assert abs(height - clip["height"] * scale) <= 1, key
+    assert results["both"] is ErrorCode.USAGE

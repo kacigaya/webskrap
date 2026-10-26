@@ -458,6 +458,17 @@ async def read_text(page: CDPPage, *, max_chars: int, offset: int = 0) -> dict[s
     return {"url": state["url"], **window}
 
 
+async def body_text(page: CDPPage, *, max_chars: int) -> dict[str, Any]:
+    """Return ``{"url", "title", "text", "text_length"}`` with text cut at ``max_chars``."""
+    state = await page.evaluate(
+        "(limit) => { const text = document.body ? document.body.innerText : '';"
+        " return { url: location.href, title: document.title,"
+        " text: text.slice(0, limit), text_length: text.length }; }",
+        max(0, max_chars),
+    )
+    return dict(state)
+
+
 async def evaluate(page: CDPPage, expression: str) -> Any:
     """Evaluate ``expression`` in the page's own world, as Patchright's eval does.
 
