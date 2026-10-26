@@ -9,6 +9,11 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Removed
+
+- `scripts/driver_parity.py` no longer offers `--click`. The script only
+  measures whether a target challenges each driver.
+
 ## [3.2.0] - 2026-10-26
 
 ### Added

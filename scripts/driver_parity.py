@@ -31,7 +31,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from random import SystemRandom
 from typing import Any
 from uuid import uuid4
 
@@ -43,8 +42,6 @@ from webskrap.display import VirtualDisplay
 from webskrap.profiles import get_profile
 
 REPORT = Path(".webskrap/reports/driver-parity.json")
-# Cursor jitter only; system entropy keeps the scanner quiet, as in human.py.
-_rng = SystemRandom()
 
 # A page passes when no known challenge is on it and its title is not a
 # challenge or block title.
@@ -120,8 +117,6 @@ TARGETS: dict[str, tuple[str, str]] = {
 Evaluate = Callable[[str], Awaitable[Any]]
 #: Writes a PNG of the page's viewport to the given path.
 Screenshot = Callable[[Path], Awaitable[None]]
-#: Sends one mouse event: ("move" | "down" | "up", x, y) in viewport CSS pixels.
-Mouse = Callable[[str, float, float], Awaitable[None]]
 
 
 @dataclass
@@ -130,49 +125,9 @@ class Page:
 
     evaluate: Evaluate
     screenshot: Screenshot
-    mouse: Mouse
     #: Returns DataDome's response page kind from its iframe, or None when the
     #: path cannot read that iframe.
     datadome_kind: Callable[[], Awaitable[str | None]] | None = None
-
-
-# Finds the Turnstile widget: the parent of its response input, or else the
-# first widget-high box. The host can span the content width while the 300 px
-# iframe sits at its left edge, so only the height is checked. Returns the
-# host's viewport rectangle.
-_TURNSTILE_BOX = """(() => {
-  const fits = (r) => r.width >= 250 && r.height >= 55 && r.height <= 80;
-  const input = document.querySelector('input[name="cf-turnstile-response"]');
-  const candidates = [input && input.parentElement, ...document.querySelectorAll('div')];
-  for (const element of candidates) {
-    if (!element) continue;
-    const r = element.getBoundingClientRect();
-    if (fits(r)) return { x: r.left, y: r.top, w: r.width, h: r.height };
-  }
-  return null;
-})()"""
-
-
-async def human_click(mouse: Mouse, x: float, y: float) -> None:
-    """Move along an eased, jittered curve to (x, y), then press and release.
-
-    Both paths get the same cursor path through CDP input events, so the
-    comparison measures the browser setup, not the cursor model.
-    """
-    start_x, start_y = x + _rng.uniform(250, 450), y + _rng.uniform(150, 300)
-    control_x, control_y = (start_x + x) / 2 + _rng.uniform(-80, 80), start_y - 60
-    steps = _rng.randint(22, 32)
-    for step in range(1, steps + 1):
-        t = step / steps
-        t = t * t * (3 - 2 * t)  # ease in and out
-        px = (1 - t) ** 2 * start_x + 2 * (1 - t) * t * control_x + t * t * x
-        py = (1 - t) ** 2 * start_y + 2 * (1 - t) * t * control_y + t * t * y
-        await mouse("move", px + _rng.uniform(-0.8, 0.8), py + _rng.uniform(-0.8, 0.8))
-        await asyncio.sleep(_rng.uniform(0.008, 0.022))
-    await asyncio.sleep(_rng.uniform(0.12, 0.3))
-    await mouse("down", x, y)
-    await asyncio.sleep(_rng.uniform(0.06, 0.12))
-    await mouse("up", x, y)
 
 
 def _config(mode: str) -> SessionConfig:
@@ -189,22 +144,6 @@ def _page(page: CDPPage) -> Page:
         shot = await page.send("Page.captureScreenshot", {"format": "png"})
         path.write_bytes(base64.b64decode(shot["data"]))
 
-    async def mouse(kind: str, x: float, y: float) -> None:
-        # A held left button reports buttons=1 until it is released.
-        event = {"move": "mouseMoved", "down": "mousePressed", "up": "mouseReleased"}[kind]
-        pressed = kind == "down"
-        await page.send(
-            "Input.dispatchMouseEvent",
-            {
-                "type": event,
-                "x": x,
-                "y": y,
-                "button": "none" if kind == "move" else "left",
-                "buttons": 1 if pressed else 0,
-                "clickCount": 0 if kind == "move" else 1,
-            },
-        )
-
     # Isolated worlds: the page cannot see the checks, and they need no globals.
     async def datadome_kind() -> str | None:
         for frame in await cdp_dom.frames(page):
@@ -212,7 +151,7 @@ def _page(page: CDPPage) -> Page:
                 return await frame.page.evaluate(_DATADOME_KIND)
         return None
 
-    return Page(page.evaluate, screenshot, mouse, datadome_kind)
+    return Page(page.evaluate, screenshot, datadome_kind)
 
 
 @asynccontextmanager
@@ -257,7 +196,7 @@ def _via_session() -> Callable[[str, str], AbstractAsyncContextManager[Page]]:
     """Run a target through a persistent session, as `webskrap browser` does.
 
     Every call attaches anew, like each CLI command or MCP tool call. Sessions
-    run headless or headed; a virtual display and clicks are not offered.
+    run headless or headed; a virtual display is not offered.
     """
 
     @asynccontextmanager
@@ -281,10 +220,7 @@ def _via_session() -> Callable[[str, str], AbstractAsyncContextManager[Page]]:
             async def screenshot(path: Path) -> None:
                 await act(lambda page: browser_session.screenshot(page, path, full_page=False))
 
-            async def mouse(_kind: str, _x: float, _y: float) -> None:
-                raise NotImplementedError("--click is not offered with --via session")
-
-            yield Page(evaluate, screenshot, mouse)
+            yield Page(evaluate, screenshot)
         finally:
             browser_session.close_session(name, delete_data=True)
 
@@ -293,29 +229,6 @@ def _via_session() -> Callable[[str, str], AbstractAsyncContextManager[Page]]:
 
 SESSION_DRIVERS = {"session": _via_session()}
 
-# The widget box renders before the checkbox inside its iframe does.
-WIDGET_SETTLE_S = 3.0
-
-
-async def _click_turnstile(page: Page, shot: Path | None) -> bool:
-    """Click the Turnstile checkbox once it shows; False while it is absent."""
-    box = None
-    with contextlib.suppress(Exception):
-        box = await page.evaluate(_TURNSTILE_BOX)
-    if not box:
-        await asyncio.sleep(1)
-        return False
-    await asyncio.sleep(WIDGET_SETTLE_S)
-    if shot is not None:
-        with contextlib.suppress(Exception):
-            shot.parent.mkdir(parents=True, exist_ok=True)
-            await page.screenshot(shot.with_name(f"{shot.stem}-before-click.png"))
-    # The checkbox sits near the widget's left edge, centered vertically.
-    x = box["x"] + 22 + _rng.uniform(-3, 3)
-    y = box["y"] + box["h"] / 2 + _rng.uniform(-3, 3)
-    await human_click(page.mouse, x, y)
-    return True
-
 
 async def run_once(
     driver: str,
@@ -323,7 +236,6 @@ async def run_once(
     target: str,
     wait_s: float,
     shot: Path | None = None,
-    click: bool = False,
     via: str = "launch",
 ) -> dict[str, Any]:
     url, check = TARGETS[target]
@@ -332,7 +244,6 @@ async def run_once(
     # A pass after a challenge means the challenge cleared; a pass without one
     # means the target never challenged this run.
     challenged = False
-    clicked = False
     try:
         drivers = SESSION_DRIVERS if via == "session" else DRIVERS
         async with drivers[driver](url, mode) as page:
@@ -348,9 +259,6 @@ async def run_once(
                 challenged = challenged or state in ("challenge", "datadome", "captcha")
                 if state == "passed":
                     break
-                if click and not clicked and state == "challenge":
-                    clicked = await _click_turnstile(page, shot)
-                    continue
                 if state in _SETTLING and time.monotonic() - started >= SETTLE_S:
                     break
                 await asyncio.sleep(1)
@@ -368,7 +276,6 @@ async def run_once(
         "target": target,
         "seconds": round(time.monotonic() - started, 1),
         "challenged": challenged,
-        "clicked": clicked,
         **verdict,
     }
 
@@ -391,19 +298,14 @@ async def main() -> None:
         help="Write a PNG of each run's last state to this directory.",
     )
     parser.add_argument(
-        "--click",
-        action="store_true",
-        help="Click a Cloudflare Turnstile checkbox when a challenge shows it.",
-    )
-    parser.add_argument(
         "--via",
         choices=("launch", "session"),
         default="launch",
         help="launch a browser per run, or go through a persistent session.",
     )
     args = parser.parse_args()
-    if args.via == "session" and (args.click or "virtual-display" in (args.mode or [])):
-        parser.error("--via session runs headless or headed, without --click")
+    if args.via == "session" and "virtual-display" in (args.mode or []):
+        parser.error("--via session runs headless or headed, not on a virtual display")
     modes = args.mode or (
         ["headless"] if args.via == "session" else ["headless", "virtual-display"]
     )
@@ -429,16 +331,13 @@ async def main() -> None:
                         if args.screenshots
                         else None
                     )
-                    result = await run_once(
-                        driver, mode, target, args.wait, shot, click=args.click, via=args.via
-                    )
+                    result = await run_once(driver, mode, target, args.wait, shot, via=args.via)
                     results.append(result)
                     cleared = result["challenged"] and result["state"] == "passed"
                     print(
                         f"{target:13} {mode:15} {driver:10} {result['state']:9} "
                         f"{result['seconds']:5}s {result['detail']}"
-                        f"{' (after challenge)' if cleared else ''}"
-                        f"{' [clicked]' if result['clicked'] else ''}",
+                        f"{' (after challenge)' if cleared else ''}",
                         flush=True,
                     )
 
