@@ -93,15 +93,14 @@ INSTRUCTIONS = """WebSkrap drives real Chromium over its own CDP client (no Play
 Choose a tool
 - One known page: stealth_fetch. Prefer it over fetch; fetch has fewer controls.
 - search: find URLs (Bing default, engine="ddg" for DuckDuckGo). No Google.
-  Then stealth_fetch selected hits. A blocked error means a bot challenge:
-  switch engine or exit IP instead of retrying unchanged.
+  Then stealth_fetch selected hits. On blocked, switch engine or exit IP.
 - Stateful flows: browser_open, browser_snapshot / browser_interact /
   browser_wait_for, then browser_close. Do not re-fetch to drive a flow.
 
 In a browser session
 - Headless only over MCP. Shared with the browser CLI. browser_tabs picks the tab.
 - browser_snapshot gives [ref=eN] handles; snapshot again after DOM changes.
-- browser_text reads text without building an accessibility tree.
+- browser_text reads text without an accessibility tree; pattern= greps lines.
 - Visual layouts/canvas: browser_view returns an inline PNG and metadata,
   without a file write. browser_mouse clicks/moves/scrolls/drags in viewport
   CSS pixels from its top-left (0,0). Map resized previews to original width/
@@ -109,7 +108,7 @@ In a browser session
 - browser_insert_text inserts literal text into the focused control;
   browser_press sends keys. Prefer refs/selectors for identifiable controls.
 - After an interaction, browser_wait_for waits for the expected change.
-  Run dependent actions sequentially in a session.
+  Run dependent actions in sequence.
 
 Keep results small
 - max_chars defaults to 8000. Start lower; page via next_text_offset /
@@ -126,7 +125,8 @@ Failures and boundaries
 Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
 browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
-Known DataDome/Cloudflare challenge pages return blocked; stop automatic retries.
+Known challenge/block pages (DataDome, Cloudflare, Akamai, AWS WAF) return
+blocked: follow its hint; do not retry. browser_goto reports it.
 Fetch tools accept ready_selector to verify visible content before extraction.
 Call doctor for unexplained failures; read webskrap://guide for details.
 Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.

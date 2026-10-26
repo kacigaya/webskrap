@@ -10,7 +10,7 @@ from anyio import CancelScope, sleep
 
 from webskrap import client as client_module
 from webskrap.cdp import CDPBrowser, CDPConnection, CDPPage
-from webskrap.challenges import _CHALLENGE_SCRIPT
+from webskrap.challenges import _DETECT_SCRIPT
 from webskrap.client import (
     _CONTENT_SCRIPT,
     _STATE_SCRIPT,
@@ -214,6 +214,10 @@ class _FakePage:
         self.requested: list[str] = []
         self.scripts: list[str] = []
         self.default_timeout_s = 30.0
+        self.target_id = "F1"
+
+    def record(self, *_methods: str) -> MagicMock:
+        return MagicMock(events=[])
 
     async def goto(self, url: str, *, wait_until: str, timeout_s: float) -> dict[str, Any]:
         self.requested.append(url)
@@ -221,11 +225,11 @@ class _FakePage:
 
     async def evaluate(self, script: str, arg: Any = None) -> Any:
         self.scripts.append(script)
-        if script == _CHALLENGE_SCRIPT:
+        if script == _DETECT_SCRIPT:
             answer = self.challenges.pop(0) if len(self.challenges) > 1 else self.challenges[0]
             if isinstance(answer, BaseException):
                 raise answer
-            return answer
+            return {"provider": answer, "kind": "challenge"} if answer else None
         if script == _STATE_SCRIPT:
             return {"url": self.requested[-1], "title": "Title", "text": self.text}
         if script == _CONTENT_SCRIPT:

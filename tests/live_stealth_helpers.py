@@ -84,7 +84,11 @@ async def goto_or_skip(page, url: str, **kwargs):
     # Known challenges are detection verdicts even when served with a 5xx.
     # Only skip a service error once the provider checks have ruled them out.
     response = await page.goto(url, **kwargs)
-    await raise_for_challenge(page, response.headers if response is not None else {})
+    await raise_for_challenge(
+        page,
+        response.headers if response is not None else {},
+        response.status if response is not None else None,
+    )
     if response is not None and response.status >= 500:
         pytest.skip(f"{url} returned HTTP {response.status}")
     return response
