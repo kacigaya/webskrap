@@ -22,7 +22,7 @@ export default function TermsPage() {
     <>
       <h1>Terms of use</h1>
       <p className="text-xs text-muted-foreground tabular-nums">
-        Last updated <time dateTime="2026-09-30">30 September 2026</time>
+        Last updated <time dateTime="2026-10-26">26 October 2026</time>
       </p>
       <h2>Scope</h2>
       <p>
@@ -44,8 +44,9 @@ export default function TermsPage() {
       <h2>Responsible use</h2>
       <p>
         WebSkrap automates a real browser. You alone decide which sites you
-        visit with it and what you do with the data. You are responsible for
-        complying with the laws and agreements that apply to you, including:
+        visit with it, how you configure it, and what you do with the data. You
+        are solely responsible for that use and for complying with the laws and
+        agreements that apply to you, including:
       </p>
       <ul>
         <li>
@@ -67,6 +68,15 @@ export default function TermsPage() {
         permitted collection. WebSkrap does not solve CAPTCHAs, and the
         maintainer does not endorse using it to evade a site’s decision to
         refuse automated traffic.
+      </p>
+      <h2>Your liability</h2>
+      <p>
+        You bear the consequences of your use of WebSkrap, including claims by
+        site operators, blocked access, and account suspensions. The operator
+        does not check, approve, or monitor how you use WebSkrap. To the extent
+        the law allows, you agree to hold the operator harmless from claims,
+        losses, and costs that result from your breach of these terms, of a
+        site’s terms, or of the law.
       </p>
       <h2>Benchmarks and documentation</h2>
       <p>
