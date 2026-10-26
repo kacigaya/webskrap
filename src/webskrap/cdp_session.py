@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from webskrap.browser_session import BrowserView, Viewport
 
 _STATE_SCRIPT = "({ url: location.href, title: document.title })"
+#: How long closing a tab waits for Chromium to stop listing it.
+CLOSE_TAB_TIMEOUT_MS = 5_000
 #: How long a browser navigation waits for a consent notice. Longer than the
 #: fetch default (2 s): some CMPs inject their notice 7 s after load. The wait
 #: ends as soon as a notice shows, so only opted-in pages without one pay it.
@@ -362,7 +364,15 @@ async def close_tab(
     else:
         target = _tab_at(tabs, index)
     await connection.send("Target.closeTarget", {"targetId": target})
-    # The target can stay listed for a moment after closeTarget returns.
+
+    # The target can stay listed for a moment after closeTarget returns, and
+    # the next command would then pick the closed tab as current and fail.
+    async def gone() -> bool:
+        listed = await connection.send("Target.getTargets")
+        return all(info["targetId"] != target for info in listed["targetInfos"])
+
+    with suppress(WebSkrapError):
+        await _poll(gone, CLOSE_TAB_TIMEOUT_MS, "the closed tab to go away")
     left = [tab for tab in tabs if tab["targetId"] != target]
     _ordered_pages(directory / PAGE_ORDER_FILE, [tab["targetId"] for tab in left])
     return _listing(directory, left)
