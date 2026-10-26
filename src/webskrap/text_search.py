@@ -76,13 +76,16 @@ async def _matching_lines(pattern: str, lines: list[str]) -> list[int]:
     try:
         output, _ = await asyncio.wait_for(process.communicate(job), PATTERN_TIMEOUT_S)
     except TimeoutError:
-        process.kill()
-        await process.wait()
         msg = (
             f"pattern took longer than {PATTERN_TIMEOUT_S:.0f}s; remove nested or "
             "overlapping quantifiers such as (a+)+"
         )
         raise WebSkrapError(msg, code=ErrorCode.USAGE) from None
+    finally:
+        # Also on cancellation: a backtracking match would otherwise keep running.
+        if process.returncode is None:
+            process.kill()
+            await asyncio.shield(process.wait())
     if process.returncode != 0:
         raise WebSkrapError("pattern search failed", code=ErrorCode.INTERNAL)
     return [int(index) for index in json.loads(output)]

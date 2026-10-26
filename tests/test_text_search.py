@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from webskrap import text_search
@@ -64,3 +66,22 @@ def test_unusable_requests_are_rejected(pattern, context, max_matches, message) 
         validate_search(pattern, context=context, max_matches=max_matches)
     assert error.value.code is ErrorCode.USAGE
     assert message in str(error.value)
+
+
+async def test_a_cancelled_search_kills_its_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    started: list[asyncio.subprocess.Process] = []
+    spawn = asyncio.create_subprocess_exec
+
+    async def capture(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", capture)
+    task = asyncio.create_task(search_lines("a" * 40 + "!", r"(a+)+$"))
+    while not started:
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert started[0].returncode is not None

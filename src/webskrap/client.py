@@ -444,7 +444,9 @@ class WebSkrapSession:
         started = time.perf_counter()
         timeout_s = (timeout_ms or self.config.navigation_timeout_ms) / 1000
         page = await self.new_page()
+        documents = record_documents(page)
         try:
+            deadline = time.monotonic() + timeout_s
             response = await page.goto(url, wait_until="domcontentloaded", timeout_s=timeout_s)
             # Bing answers a cookie-less session with a head-only interstitial
             # whose script navigates to the real page, and reading at
@@ -453,11 +455,15 @@ class WebSkrapSession:
             # the wait survives the interstitial's navigation.
             await _wait_attached(page, "body > *", timeout_s=timeout_s)
             # The same provider check as fetch, before the engine's own markers.
+            response = await settle(
+                page, documents, response, wait_until="domcontentloaded", deadline=deadline
+            )
             await raise_for_challenge(page, response_headers(response), response_status(response))
             declined = await self._decline_after_navigation(page, "domcontentloaded")
             html = await page.evaluate(_CONTENT_SCRIPT)
             final_url = (await page.evaluate(_STATE_SCRIPT))["url"]
         finally:
+            documents.stop()
             with CancelScope(shield=True):
                 await self.close_page(page)
         hits = parse_results(engine, html)

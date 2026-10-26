@@ -272,8 +272,10 @@ async def settle(
         still there, that is its own response, and :func:`detect` reports it.
     """
     limit = min(deadline, time.monotonic() + INTERSTITIAL_TIMEOUT_S)
-    current_loader, _ = _main_document(events, page.target_id)
-    current = response
+    # Start from the document on screen: it may already have replaced the one
+    # goto answered for, whose headers would keep reporting the interstitial.
+    current_loader, document = _main_document(events, page.target_id)
+    current = document if document is not None else response
     while True:
         try:
             found = await detect(page, response_headers(current), response_status(current))

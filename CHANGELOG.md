@@ -27,7 +27,8 @@ history, so they summarize each release rather than list every change.
   page in a new `blocked` key, without raising.
 - Element screenshots: `target` for MCP `browser_screenshot` and `--target`
   for `webskrap browser screenshot` take a selector or snapshot ref, iframe
-  refs included, and capture only that element. MCP output stays confined to
+  refs included, and capture only that element. An element inside an iframe
+  is cut to the iframe's content box. MCP output stays confined to
   `./webskrap-output`.
 - `browser_text` takes `pattern`, `context` and `max_matches` to return only
   matching lines. The regex runs in a child Python process that is killed
@@ -42,7 +43,11 @@ history, so they summarize each release rather than list every change.
 - Self-clearing interstitials (Akamai sec-cpt, AWS WAF challenge) are waited
   out for up to 15 seconds. Fetches used to read the interstitial and could
   report it as `ok: true` with HTTP 202.
-- `search` runs the same provider challenge check as `fetch`.
+- `search` runs the same provider challenge check as `fetch`, including the
+  interstitial wait.
+- Closing a tab waits until Chromium stops listing it. The next browser
+  command could otherwise attach to the closed tab and fail with "No target
+  with given id".
 
 ## [3.1.0] - 2026-10-26
 

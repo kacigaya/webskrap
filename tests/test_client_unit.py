@@ -468,6 +468,31 @@ async def test_search_reports_a_challenge_page_as_blocked(monkeypatch) -> None:
     assert excinfo.value.code is ErrorCode.BLOCKED
 
 
+async def test_search_reads_the_page_that_replaced_a_cleared_waf_challenge(monkeypatch) -> None:
+    _element_states(monkeypatch, "visible")
+    page = _search_page("bing.html")
+    challenge = {"status": 202, "headers": {"x-amzn-waf-action": "challenge"}}
+    real = {"status": 200, "headers": {"content-type": "text/html"}}
+    loaded = page.goto
+
+    async def goto(url: str, **kwargs: Any) -> dict[str, Any]:
+        await loaded(url, **kwargs)
+        return challenge
+
+    page.goto = goto  # type: ignore[method-assign]
+    page.record = lambda *_methods: MagicMock(  # type: ignore[method-assign]
+        events=[
+            ("Network.responseReceived", {"loaderId": "L2", "type": "Document", "response": real}),
+            ("Page.frameNavigated", {"frame": {"id": "F1", "loaderId": "L2"}}),
+        ]
+    )
+
+    result = await _session(page).search("example domain")
+
+    assert result.status == 200
+    assert result.hits_total == 3
+
+
 async def test_search_rejects_a_blank_query_before_opening_a_page() -> None:
     with pytest.raises(WebSkrapError) as excinfo:
         await _session().search("   ")

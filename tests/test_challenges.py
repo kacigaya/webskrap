@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -155,3 +156,24 @@ async def test_block_pages_need_provider_markers(
         envelope = str(error_payload(error.value))
         assert not any(secret in envelope for secret in FIXTURE_SECRETS)
         assert error.value.hint == blocked_hint(found.kind)
+
+
+async def test_settle_reads_a_reload_that_already_happened() -> None:
+    # goto answered for the AWS WAF interstitial, but by the time settle runs
+    # the real page has replaced it; its headers must win over the 202's.
+    page = MagicMock(spec=CDPPage)
+    page.target_id = "F1"
+    page.evaluate = AsyncMock(return_value=None)
+    challenge = {"status": 202, "headers": {"x-amzn-waf-action": "challenge"}}
+    real = {"status": 200, "headers": {"server": "Server"}}
+    events = MagicMock()
+    events.events = [
+        ("Network.responseReceived", {"loaderId": "L1", "type": "Document", "response": challenge}),
+        ("Page.frameNavigated", {"frame": {"id": "F1", "loaderId": "L1"}}),
+        ("Network.responseReceived", {"loaderId": "L2", "type": "Document", "response": real}),
+        ("Page.frameNavigated", {"frame": {"id": "F1", "loaderId": "L2"}}),
+    ]
+    settled = await challenges.settle(
+        page, events, challenge, wait_until="load", deadline=time.monotonic() + 5
+    )
+    assert settled is real

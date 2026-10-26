@@ -297,6 +297,15 @@ document.querySelector('input').addEventListener('input',
 </script></body></html>"""
 
 
+# An element four times wider than the iframe that shows it.
+WIDE_FRAMES_PAGE = b"""<html><title>Wide</title><body style="margin:0">
+<iframe title="Wide" src="/wide-inner" style="width:200px;height:100px;border:0"></iframe>
+</body></html>"""
+WIDE_FRAME_PAGE = b"""<html><body style="margin:0">
+<div role="img" aria-label="Wide box" style="width:800px;height:50px;background:red"></div>
+</body></html>"""
+
+
 class _SessionHandler(_CDPHandler):
     def do_GET(self) -> None:
         if self.path == "/frames" or self.path.startswith("/frame/"):
@@ -307,6 +316,13 @@ class _SessionHandler(_CDPHandler):
             self.send_header("Content-Type", "text/html")
             self.end_headers()
             self.wfile.write(body.replace("{name}", name).encode())
+            return
+        if self.path in ("/wide-frame", "/wide-inner"):
+            body = WIDE_FRAMES_PAGE if self.path == "/wide-frame" else WIDE_FRAME_PAGE
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
             return
         if self.path == "/form":
             self.send_response(200)
@@ -832,6 +848,16 @@ def test_cdp_session_navigation_reports_and_reads(
                 target=_ref(tree, '- button "Cross button"'),
             )
         )
+        await run(lambda page: browser_session.goto(page, f"{session_server}/wide-frame", "load"))
+        wide_tree = (await run(browser_session.snapshot))["snapshot"]
+        results["wide"] = await run(
+            lambda page: browser_session.screenshot(
+                page,
+                tmp_path / "wide.png",
+                full_page=False,
+                target=_ref(wide_tree, '- img "Wide box"'),
+            )
+        )
         with pytest.raises(WebSkrapError) as both:
             await run(
                 lambda page: browser_session.screenshot(
@@ -867,3 +893,6 @@ def test_cdp_session_navigation_reports_and_reads(
         assert abs(width - clip["width"] * scale) <= 1, key
         assert abs(height - clip["height"] * scale) <= 1, key
     assert results["both"] is ErrorCode.USAGE
+    # Cut to the iframe's content box, not the element's full width.
+    assert results["wide"]["clip"]["width"] == 200
+    assert results["wide"]["clip"]["height"] == 50
