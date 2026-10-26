@@ -60,8 +60,8 @@ webskrap fetch https://example.com --ready-selector '#content' --format json
 
 `--timeout-ms` applies separately to navigation and this readiness wait, which
 starts after consent dismissal. A missing selector exits 3 (`timeout`). Known
-DataDome and Cloudflare challenges exit 11 (`blocked`) without retrying, even
-when served with HTTP 200. Ordinary HTTP errors still return `ok: false`.
+challenge and block pages (DataDome, Cloudflare, Akamai, AWS WAF) exit 11
+(`blocked`) without retrying, even when served with HTTP 200. Ordinary HTTP errors still return `ok: false`.
 
 ## Search the web
 
@@ -226,6 +226,7 @@ webskrap browser click e15
 webskrap browser fill "input[name=q]" "chromium"
 webskrap browser press Enter
 webskrap browser screenshot page.png --full-page
+webskrap browser screenshot button.png --target e15   # one element
 webskrap browser close
 ```
 
@@ -246,6 +247,11 @@ Navigation uses `goto`, `back`, `forward`, and `reload`; `press` sends a key
 to the page, and `eval` runs JavaScript and prints the JSON result. All
 commands support `--format json` for scripting and agents, and fail with exit
 code 1 and a one-line error instead of a traceback.
+
+`open URL` and `goto` take `--decline-cookies` to click a consent notice's
+reject control. They also run the fetch tools' challenge and block check, but
+report a match instead of failing: the human output prints a `blocked:` line,
+and JSON output carries it in `blocked`. The page stays open.
 
 Sessions are named with `-s/--session` (default `default`) and listed with
 `webskrap browser list`. Each session stores its browser profile under

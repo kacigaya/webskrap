@@ -36,10 +36,34 @@ the browser's HTTP cache and does not intercept service-worker-owned requests.
 Pass `ready_selector="#content"` to either fetch tool when the requested content
 arrives later. It must become visible after consent dismissal; the wait uses
 `timeout_ms` separately from navigation and may vary between warm-session calls.
-Known DataDome and Cloudflare challenge pages return `blocked`, including HTTP 200
-challenges. Ordinary HTTP errors still return `ok: false`. Detection checks known
-provider markers and headers; it cannot identify every challenge or guarantee
-that later interactions will succeed. Stop automatic retries on `blocked`.
+Known challenge and block pages return `blocked`, including HTTP 200 pages:
+
+- Challenges: DataDome, Cloudflare "Just a moment", Akamai's sec-cpt page, and
+  AWS WAF's challenge or CAPTCHA action (`x-amzn-waf-action`).
+- Blocks: Cloudflare's own error pages for codes 1005-1010, 1012, 1015 and
+  1020, a site-styled Cloudflare 403 page that shows the response's Ray ID,
+  and an Akamai edge page (`server: AkamaiGHost`, HTTP 400 or 403) with an
+  Akamai reference number.
+
+The Akamai sec-cpt page and the AWS WAF challenge action reload the page from
+their own script. WebSkrap waits up to 15 seconds for that reload and then
+reads the real page; it reports `blocked` only if the interstitial stays. A
+plain 403, 404 or 202 without these provider markers is not a block: it
+returns `ok: false` or `ok: true` as usual. The localized title of a block
+page is never a signal.
+
+The hint depends on the kind. For a block, change the exit IP or try
+`virtual_display=True`. For a challenge, try `virtual_display=True`, headed
+mode, or a persistent `user_data_dir`. On Linux with Xvfb installed, the hint
+names `virtual_display=True` first. Errors carry no page text, IP addresses,
+Ray IDs or reference IDs. Detection cannot identify every challenge or
+guarantee that later interactions will succeed. Stop automatic retries on
+`blocked`.
+
+Some sites challenge a datacenter exit IP whatever the browser does. For
+example, a deal forum behind Cloudflare still challenged `virtual_display=True`
+from a cloud VM. There, only a residential or mobile exit IP helps. WebSkrap
+does not solve CAPTCHAs.
 
 `search` loads Bing's results page (`engine="bing"`, the default) or
 DuckDuckGo's HTML page (`engine="ddg"`) in the same stealth browser and
@@ -111,15 +135,15 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | --- | --- |
 | `fetch`, `stealth_fetch` | `url`, `final_url`, `status`, `ok`, `title`, `headers`, `text`, `text_length`, `text_offset`, `text_truncated`, `next_text_offset`, `links`, `links_total`, `links_truncated`, `elapsed_ms`, `cookie_notice_declined` |
 | `search` | `query`, `engine`, `url`, `final_url`, `status`, `ok`, `hits` (`title`, `url`, `snippet`), `hits_total`, `hits_truncated`, `elapsed_ms`, `cookie_notice_declined` |
-| `browser_open` | `session`, `pid`, `port`, `reused`, `chromium_sandbox` |
-| `browser_goto` | `status`, `url`, `title` |
-| `browser_text` | `url`, `title`, `text`, `text_length`, `text_offset`, `text_truncated`, `next_text_offset` |
+| `browser_open` | `session`, `pid`, `port`, `reused`, `chromium_sandbox`; with `url`, also the `browser_goto` keys |
+| `browser_goto` | `status`, `url`, `title`, `blocked` (null or `code`, `provider`, `kind`, `hint`), `cookie_notice_declined` with `decline_cookies=true` |
+| `browser_text` | `url`, `title`, `text`, `text_length`, `text_offset`, `text_truncated`, `next_text_offset`; with `pattern`: `matches` (`line`, `text`, `before`, `after`), `matches_total`, `matches_truncated`, `text_length` |
 | `browser_snapshot` | `url`, `title`, `snapshot`, `snapshot_length`, `snapshot_offset`, `snapshot_truncated`, `next_snapshot_offset` |
 | `browser_interact`, `browser_press`, `browser_mouse`, `browser_insert_text` | `url`, `title` |
 | `browser_wait_for` | `url`, `title`, `matched` |
 | `browser_eval` | `result`, `result_length`, `result_truncated`, and `result_json` when clipped |
 | `browser_view` | Inline PNG plus `url`, `title`, `width`, `height`, `scroll_x`, `scroll_y`, `coordinate_system`, `mime_type` |
-| `browser_screenshot` | `url`, `title`, `path` |
+| `browser_screenshot` | `url`, `title`, `path`, and `clip` with `target` |
 | `browser_close` | `closed` |
 | `browser_list` | `sessions` |
 | `browser_tabs` | `tabs` (`index`, `url`, `title`, `current`); `new` with a `url` adds `status`, `url`, `title` |
@@ -148,7 +172,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_launch` | Run `webskrap install`. Fetch and search already fall back from `chrome` to Edge and bundled Chromium. |
 | `sandbox` | Check user namespaces and AppArmor for the browser executable; restore sandbox support. |
 | `path_rejected` | Paths are relative to a confined root. |
-| `blocked` | The site served a bot challenge. Switch engine or exit IP; no CAPTCHA solving. |
+| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. No CAPTCHA solving. |
 | `usage` | Re-read the argument's documented values. |
 
 ## Limits

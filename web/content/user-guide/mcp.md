@@ -125,8 +125,14 @@ plus stealth options:
 }
 ```
 
-Both fetch tools check known DataDome and Cloudflare challenge pages and return
-a `blocked` tool error, including challenges served with HTTP 200. Ordinary
+Both fetch tools and `search` check for known challenge pages (DataDome,
+Cloudflare, Akamai, AWS WAF) and provider block pages (Cloudflare, Akamai), and
+return a `blocked` tool error, including pages served with HTTP 200. The hint
+differs for a block (change the exit IP or try `virtual_display=True`) and a
+challenge (try `virtual_display=True`, headed mode, or a persistent
+`user_data_dir`). See the [stealth guide](/docs/user-guide/stealth/) for the
+exact markers. `browser_goto` and `browser_open` with a `url` run the same
+check but report it in `blocked` instead of failing, so the page stays open. Ordinary
 HTTP error pages still return `ok: false`. With `ready_selector` set, a missing
 element returns `timeout`; if a known challenge replaced the page while waiting,
 the error is `blocked`. Detection does not identify every challenge or guarantee
@@ -209,7 +215,17 @@ A typical flow:
 Snapshots default to `depth=6`; pass `depth: null` for the full tree.
 Use `browser_text` for reading without element refs. It accepts `max_chars` and
 `offset`, and returns `next_text_offset` for paging through the current text.
-Offsets remain valid only while the text stays unchanged.
+Offsets remain valid only while the text stays unchanged. Pass `pattern` (a
+Python regex of up to 200 characters) to get only the matching non-blank lines,
+each with `context` lines around it (0 to 3) and at most `max_matches` (1 to
+50). The regex runs in Python, never in the page, and a pattern that takes
+longer than 2 seconds fails with `usage`.
+
+`browser_goto` and `browser_open` accept `decline_cookies: true` to click a
+consent notice's reject control (waiting up to 10 seconds for it) and report the strategy in
+`cookie_notice_declined`. `browser_screenshot` accepts `target`, a snapshot ref
+(iframe refs such as `f12345e15` included) or CSS selector, to capture only
+that element's bounding box; the result reports it as `clip`.
 
 Snapshots are truncated to `max_chars` (default 8000) and report
 `snapshot_truncated`; refs describe the current DOM, so take a fresh snapshot

@@ -30,8 +30,9 @@ long page. Do not re-fetch with an ever larger limit.
 
 Pass `--ready-selector '#content'` (CSS or a snapshot ref) to wait for visible content after consent
 dismissal. `--timeout-ms` applies separately to navigation and the readiness wait.
-A missing selector exits 3 (`timeout`). A known DataDome or Cloudflare challenge
-exits 11 (`blocked`) without retrying, including a challenge served with HTTP 200.
+A missing selector exits 3 (`timeout`). A known challenge or block page
+(DataDome, Cloudflare, Akamai, AWS WAF) exits 11 (`blocked`) without retrying,
+including one served with HTTP 200.
 Ordinary HTTP error pages still return a result with `ok: false`.
 
 `webskrap search` loads a results page through the same stealth path and
@@ -65,13 +66,14 @@ for an http or https proxy, set `WEBSKRAP_PROXY_USERNAME` and
 `WEBSKRAP_PROXY_PASSWORD`, and a helper process answers the proxy.
 
 ```bash
-webskrap browser open https://example.com
+webskrap browser open https://example.com --decline-cookies
 webskrap browser snapshot
 webskrap browser click e15
 webskrap browser fill "input[name=q]" "chromium"
 webskrap browser press Enter
 webskrap browser wait --text "Results"
 webskrap browser screenshot page.png --full-page
+webskrap browser screenshot button.png --target e15   # one element
 webskrap browser close
 ```
 
