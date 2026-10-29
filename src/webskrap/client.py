@@ -372,7 +372,7 @@ class WebSkrapSession:
             )
             headers = response_headers(response)
             status = response_status(response)
-            await raise_for_challenge(page, headers, status)
+            await raise_for_challenge(page, headers, status, deadline=deadline)
             declined = await self._decline_after_navigation(
                 page, wait_until, decline_cookies=decline_cookies
             )
@@ -380,7 +380,7 @@ class WebSkrapSession:
                 await _wait_visible(
                     page, ready_selector, timeout_s=timeout_s, headers=headers, status=status
                 )
-            await raise_for_challenge(page, headers, status)
+            await raise_for_challenge(page, headers, status, deadline=deadline)
             state = await page.evaluate(_STATE_SCRIPT)
             text = state["text"] if text_only else await page.evaluate(_CONTENT_SCRIPT)
             links, links_total = await _collect_links(
@@ -458,7 +458,9 @@ class WebSkrapSession:
             response = await settle(
                 page, documents, response, wait_until="domcontentloaded", deadline=deadline
             )
-            await raise_for_challenge(page, response_headers(response), response_status(response))
+            await raise_for_challenge(
+                page, response_headers(response), response_status(response), deadline=deadline
+            )
             declined = await self._decline_after_navigation(page, "domcontentloaded")
             html = await page.evaluate(_CONTENT_SCRIPT)
             final_url = (await page.evaluate(_STATE_SCRIPT))["url"]
@@ -982,7 +984,8 @@ async def _probe_headless_user_agent(executable: Path, config: SessionConfig) ->
     Returns None if the probe fails or the UA has no headless tell, leaving
     the native UA untouched.
     """
-    args = [] if config.chromium_sandbox else ["--no-sandbox"]
+    # The probe is a browser too: keep the proxy and caller's network flags.
+    args = config.browser_args()
     try:
         browser = await launch(executable, args=args, headless=True)
     except Exception:  # noqa: BLE001 - probe is best-effort
@@ -1043,7 +1046,7 @@ async def _wait_visible(
                 return
         if time.monotonic() >= deadline:
             # A challenge can replace the page while readiness is pending.
-            await raise_for_challenge(page, headers, status)
+            await raise_for_challenge(page, headers, status, deadline=deadline)
             msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {target} to be visible"
             raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
         await asyncio.sleep(_POLL_S)

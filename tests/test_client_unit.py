@@ -25,7 +25,7 @@ from webskrap.client import (
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
 from webskrap.human import bezier_path
-from webskrap.models import SearchEngine, SessionConfig
+from webskrap.models import ProxyConfig, SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
 
 SEARCH_FIXTURES = Path(__file__).parent / "fixtures" / "search"
@@ -77,6 +77,24 @@ async def test_ua_probe_rewrites_native_version_and_closes_without_sleep(monkeyp
     assert ua == "Mozilla/5.0 Chrome/140.0.1 Safari/537.36"
     browser.close.assert_awaited_once()
     sleep_mock.assert_not_awaited()
+
+
+async def test_ua_probe_keeps_the_session_proxy_and_network_flags(monkeypatch) -> None:
+    browser = _fake_browser("HeadlessChrome/156.0")
+    launch = AsyncMock(return_value=browser)
+    monkeypatch.setattr(client_module, "launch", launch)
+    config = SessionConfig(
+        chromium_sandbox=False,
+        proxy=ProxyConfig(server="http://127.0.0.1:18888", username="user", password="secret"),
+        launch_args=["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"],
+    )
+    assert await client_module._probe_headless_user_agent(EXECUTABLE, config) == "Chrome/156.0"
+    args = launch.call_args.kwargs["args"]
+    assert "--proxy-server=http://127.0.0.1:18888" in args
+    assert "--webrtc-ip-handling-policy=disable_non_proxied_udp" in args
+    assert "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1" in args
+    assert "secret" not in repr(launch.call_args)
+    browser.close.assert_awaited_once()
 
 
 class _Launcher:

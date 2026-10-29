@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +22,7 @@ from webskrap import (
     WebSkrapClient,
     browser_session,
     cdp_dom,
+    cdp_session,
 )
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import BrowserProfile
@@ -195,6 +197,80 @@ async def test_native_profile_leaves_child_targets_alone(sandbox_supported: bool
         session = await client.session("native")
         page = await session.new_page()
         assert page.iframe_targets is None
+
+
+@pytest.mark.parametrize("credentials", [False, True])
+@pytest.mark.parametrize("outcome", ["passed", "captcha", "block"])
+async def test_datadome_device_check_tracks_the_live_cross_site_frame(
+    proxy: str,
+    sandbox_supported: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    credentials: bool,
+    outcome: str,
+) -> None:
+    # All provider URLs are served by the local proxy. No real verification runs.
+    _Proxy.require_auth = credentials
+    monkeypatch.setitem(
+        PAGES,
+        "/dd-start",
+        """<title>Device check</title>
+<iframe src="http://geo.captcha-delivery.com/interstitial/"></iframe>
+<script>addEventListener('message', () => {
+  document.cookie = 'manual=done; path=/'; location.href = '/dd-done';
+});</script>""",
+    )
+    monkeypatch.setitem(PAGES, "/dd-done", "<title>Quote form</title><body>Ready</body>")
+    transition = (
+        "parent.postMessage('ready', '*')" if outcome == "passed" else "location.href = '/captcha/'"
+    )
+    monkeypatch.setitem(
+        PAGES, "/interstitial/", f"<script>setTimeout(() => {{ {transition}; }}, 300);</script>"
+    )
+    monkeypatch.setitem(
+        PAGES,
+        "/captcha/",
+        '<body data-dd-response-page="hard-block">Restricted</body>'
+        if outcome == "block"
+        else """<body><img src="/challenge.png"><button id="manual">Manual check</button>
+<script>document.querySelector('button').onclick = () => parent.postMessage('done', '*');
+</script></body>""",
+    )
+    config = SessionConfig(
+        chromium_sandbox=sandbox_supported,
+        decline_cookies=False,
+        proxy=ProxyConfig(
+            server=proxy,
+            username="user" if credentials else None,
+            password="secret" if credentials else None,
+        ),
+    )
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("device-check")
+        page = await session.new_page()
+        state = await cdp_session.goto(page, "http://site-a.test/dd-start", "load")
+        if outcome == "passed":
+            assert state["blocked"] is None
+            assert state["title"] == "Quote form"
+        else:
+            assert state["blocked"]["provider"] == "DataDome"
+            assert state["blocked"]["kind"] == ("block" if outcome == "block" else "challenge")
+            # The iframe navigated itself; its parent's src is still the old device check.
+            assert await page.evaluate("document.querySelector('iframe').getAttribute('src')") == (
+                "http://geo.captcha-delivery.com/interstitial/"
+            )
+        if outcome == "captcha":
+            assert any(r["url"].endswith("/challenge.png") for r in _Proxy.requests)
+            # Stand-in for a person's click on our local test fixture only.
+            tree = await cdp_dom.snapshot(page)
+            button = re.search(r'"Manual check" \[ref=(f\d+e\d+)\]', tree)
+            assert button is not None, tree
+            await cdp_dom.element_action(page, "click", button[1], [])
+            await cdp_session.wait_for(page, condition="text", text="Ready", timeout_ms=5_000)
+            assert (await cdp_session.page_state(page))["title"] == "Quote form"
+            assert "manual=done" in await page.evaluate("document.cookie")
+            assert (await cdp_session.goto(page, "http://site-a.test/dd-done", "load"))[
+                "blocked"
+            ] is None
 
 
 def test_persistent_session_answers_an_authenticated_proxy(

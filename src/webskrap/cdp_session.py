@@ -407,7 +407,9 @@ async def goto(
     finally:
         documents.stop()
     status = challenges.response_status(response)
-    found = await challenges.detect(page, challenges.response_headers(response), status)
+    found = await challenges.detect(
+        page, challenges.response_headers(response), status, deadline=deadline
+    )
     result: dict[str, Any] = {"status": status}
     if decline_cookies:
         result["cookie_notice_declined"] = (

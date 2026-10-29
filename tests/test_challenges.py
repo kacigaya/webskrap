@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -43,6 +44,28 @@ async def test_a_202_without_the_waf_header_is_left_to_the_page() -> None:
     assert await detect(page, {"server": "CloudFront"}, 202) is None
 
 
+async def test_datadome_frame_inspection_stops_at_the_navigation_deadline(monkeypatch) -> None:
+    page = MagicMock(spec=CDPPage)
+    page.default_timeout_s = 30
+    page.evaluate = AsyncMock(
+        return_value={"provider": "DataDome", "kind": "challenge", "reloads": True}
+    )
+    cancelled = asyncio.Event()
+
+    async def stalled_frames(_page):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr("webskrap.cdp_dom.frames", stalled_frames)
+    result = await asyncio.wait_for(
+        detect(page, {}, 403, deadline=time.monotonic() + 0.02), timeout=1
+    )
+    assert result == Detection("DataDome", "challenge", reloads=True)
+    assert cancelled.is_set()
+
+
 @pytest.mark.parametrize("xvfb", [True, False])
 def test_hints_tell_blocks_from_challenges(monkeypatch: pytest.MonkeyPatch, xvfb: bool) -> None:
     monkeypatch.setattr(challenges, "xvfb_available", lambda: xvfb)
@@ -78,6 +101,7 @@ def test_browser_payload_names_the_session_fix() -> None:
     ("html", "provider"),
     [
         ('<script src="https://ct.captcha-delivery.com/c.js"></script>', "DataDome"),
+        ('<script src="https://ct.captcha-delivery.com/i.js"></script>', "DataDome"),
         (
             '<iframe src="https://geo.captcha-delivery.com/captcha/?cid=secret"></iframe>',
             "DataDome",
@@ -93,6 +117,8 @@ def test_browser_payload_names_the_session_fix() -> None:
         ('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>', None),
         ('<script src="/cdn-cgi/challenge-platform/h/g/jsd/oneshot"></script>', None),
         ('<script src="https://ct.captcha-delivery.com.example.test/c.js"></script>', None),
+        ('<script src="https://ct.captcha-delivery.com.example.test/i.js"></script>', None),
+        ('<body data-dd-response-page="hard-block">An unrelated page</body>', None),
         ('<iframe src="https://geo.captcha-delivery.com.example.test/captcha/"></iframe>', None),
         ('<p>&lt;script src="https://ct.captcha-delivery.com/c.js"&gt;&lt;/script&gt;</p>', None),
     ],
@@ -112,6 +138,18 @@ async def test_active_dom_markers_are_narrow(html, provider, sandbox_supported) 
             assert "secret" not in str(error.value)
         else:
             await raise_for_challenge(page, {})
+
+
+@pytest.mark.browser
+async def test_datadome_device_check_can_be_detected_before_its_iframe_exists(
+    sandbox_supported: bool,
+) -> None:
+    async with WebSkrapClient(
+        default_config=SessionConfig(chromium_sandbox=sandbox_supported)
+    ) as client:
+        page = await (await client.session("device-check-marker")).new_page()
+        await set_page_content(page, '<script src="https://ct.captcha-delivery.com/i.js"></script>')
+        assert await detect(page, {}, 403) == Detection("DataDome", "challenge", reloads=True)
 
 
 @pytest.mark.browser

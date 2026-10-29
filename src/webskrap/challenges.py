@@ -28,6 +28,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
+from urllib.parse import urlsplit
 
 from webskrap.cdp import CDPError, CDPPage, EventRecorder
 from webskrap.errors import ErrorCode, WebSkrapError
@@ -128,19 +129,32 @@ def blocked_hint(kind: BlockKind) -> str:
 # 1012 (access denied), 1015 (rate limited) and 1020 (firewall rule).
 _DETECT_SCRIPT = r"""({status, ray, cloudflare, akamai}) => {
   const found = (provider, kind, reloads = false) => ({provider, kind, reloads});
+  const here = new URL(location.href);
+  if (here.hostname === 'geo.captcha-delivery.com'
+      && /^\/(captcha|interstitial)\//.test(here.pathname)) {
+    if (here.searchParams.get('t') === 'b'
+        || document.querySelector('[data-dd-response-page="hard-block"]'))
+      return found('DataDome', 'block');
+    return found('DataDome', 'challenge', here.pathname.startsWith('/interstitial/'));
+  }
+  let datadome = null;
   for (const element of document.querySelectorAll('script[src], iframe[src]')) {
     let url;
     try { url = new URL(element.getAttribute('src'), document.baseURI); }
     catch { continue; }
     if (element.tagName === 'SCRIPT' && url.hostname === 'ct.captcha-delivery.com'
-        && url.pathname === '/c.js') return found('DataDome', 'challenge');
+        && /^\/[ci]\.js$/.test(url.pathname))
+      datadome = found('DataDome', 'challenge', url.pathname === '/i.js');
     if (element.tagName === 'IFRAME' && url.hostname === 'geo.captcha-delivery.com'
-        && /^\/(captcha|interstitial)\//.test(url.pathname)) return found('DataDome', 'challenge');
+        && /^\/(captcha|interstitial)\//.test(url.pathname))
+      return found('DataDome', url.searchParams.get('t') === 'b' ? 'block' : 'challenge',
+        url.pathname.startsWith('/interstitial/'));
     if (element.tagName === 'SCRIPT'
         && url.pathname.startsWith('/cdn-cgi/challenge-platform/')
         && /^Just a moment[.!\s]*$/i.test(document.title.trim()))
       return found('Cloudflare', 'challenge');
   }
+  if (datadome) return datadome;
   if (document.getElementById('sec-if-cpt-container')) return found('Akamai', 'challenge', true);
   const text = document.body ? document.body.textContent : '';
   if (cloudflare && (status === 403 || status === 429)) {
@@ -171,7 +185,11 @@ def _cloudflare_ray(headers: Mapping[str, str]) -> str | None:
 
 
 async def detect(
-    page: ScriptRunner, headers: Mapping[str, str], status: int | None = None
+    page: ScriptRunner,
+    headers: Mapping[str, str],
+    status: int | None = None,
+    *,
+    deadline: float | None = None,
 ) -> Detection | None:
     """Return the challenge or block page ``page`` shows, or None.
 
@@ -199,11 +217,42 @@ async def detect(
     provider, kind = found.get("provider"), found.get("kind")
     if provider not in ("DataDome", "Cloudflare", "Akamai") or kind not in ("challenge", "block"):
         return None
-    return Detection(provider, kind, reloads=bool(found.get("reloads")))
+    detection = Detection(provider, kind, reloads=bool(found.get("reloads")))
+    if provider == "DataDome" and isinstance(page, CDPPage):
+        budget = page.default_timeout_s
+        if deadline is not None:
+            budget = max(0.0, min(budget, deadline - time.monotonic()))
+        with suppress(TimeoutError):
+            return await asyncio.wait_for(_datadome_frame(page, detection), budget)
+    return detection
+
+
+async def _datadome_frame(page: CDPPage, fallback: Detection) -> Detection:
+    """Read the active provider frame, whose URL can differ from its element's src."""
+    # Reuse the browser's frame handling, including out-of-process iframes.
+    from webskrap import cdp_dom
+
+    with suppress(WebSkrapError):
+        for frame in await cdp_dom.frames(page):
+            url = urlsplit(frame.url)
+            if url.hostname != "geo.captcha-delivery.com" or not url.path.startswith(
+                ("/captcha/", "/interstitial/")
+            ):
+                continue
+            found = await frame.page.evaluate(_DETECT_SCRIPT, {})
+            if isinstance(found, dict) and found.get("provider") == "DataDome":
+                kind = found.get("kind")
+                if kind in ("block", "challenge"):
+                    return Detection("DataDome", kind, reloads=bool(found.get("reloads")))
+    return fallback
 
 
 async def raise_for_challenge(
-    page: ScriptRunner, headers: Mapping[str, str], status: int | None = None
+    page: ScriptRunner,
+    headers: Mapping[str, str],
+    status: int | None = None,
+    *,
+    deadline: float | None = None,
 ) -> None:
     """Raise ``blocked`` for a recognized challenge or block page.
 
@@ -211,7 +260,7 @@ async def raise_for_challenge(
     The exception contains no page-controlled text, IPs, Ray IDs, reference
     IDs or session tokens; its hint depends on the kind.
     """
-    found = await detect(page, headers, status)
+    found = await detect(page, headers, status, deadline=deadline)
     if found is not None:
         raise found.error()
 
@@ -262,9 +311,9 @@ async def settle(
 ) -> dict[str, Any]:
     """Let a self-clearing interstitial reload into the requested page.
 
-    Akamai's sec-cpt page and AWS WAF's challenge action run their own script
-    and reload the URL, as they do in any browser; nothing here interacts with
-    them. Waits at most :data:`INTERSTITIAL_TIMEOUT_S` and never past
+    DataDome's device check, Akamai's sec-cpt page and AWS WAF's challenge run
+    their own script and reload the URL; nothing here interacts with them.
+    Waits at most :data:`INTERSTITIAL_TIMEOUT_S` and never past
     ``deadline``. ``events`` comes from :func:`record_documents`.
 
     Returns:
@@ -278,7 +327,9 @@ async def settle(
     current = document if document is not None else response
     while True:
         try:
-            found = await detect(page, response_headers(current), response_status(current))
+            found = await detect(
+                page, response_headers(current), response_status(current), deadline=limit
+            )
         except CDPError:
             found = Detection("", "challenge", reloads=True)  # the document is being replaced
         if found is None or not found.reloads or time.monotonic() >= limit:
