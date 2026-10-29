@@ -70,6 +70,36 @@ WINDOWS_UA = (
 
 
 @pytest.mark.parametrize(
+    ("system", "platform"),
+    [
+        ("Windows NT 10.0; Win64; x64", "Win32"),
+        ("Macintosh; Intel Mac OS X 10_15_7", "MacIntel"),
+        ("X11; Linux x86_64", "Linux x86_64"),
+        ("X11; Linux aarch64", "Linux aarch64"),
+        ("X11; CrOS x86_64 15699.0.0", "Linux x86_64"),
+    ],
+)
+def test_full_profile_keeps_legacy_platform_consistent_with_user_agent(system, platform) -> None:
+    profile = BrowserProfile(name="platform", user_agent=f"Mozilla/5.0 ({system}) Chrome/156.0")
+    commands = dict(SessionConfig(profile_mode="full").emulation_commands(profile))
+    assert commands["Emulation.setUserAgentOverride"]["platform"] == platform
+
+
+@pytest.mark.parametrize(
+    "user_agent",
+    [
+        "Custom/1.0",
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) Chrome/156.0 Mobile",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+    ],
+)
+def test_full_profile_does_not_guess_an_unknown_legacy_platform(user_agent) -> None:
+    profile = BrowserProfile(name="unknown-platform", user_agent=user_agent)
+    commands = dict(SessionConfig(profile_mode="full").emulation_commands(profile))
+    assert "platform" not in commands["Emulation.setUserAgentOverride"]
+
+
+@pytest.mark.parametrize(
     ("major", "brand", "header"),
     [
         # Sec-CH-UA values real browsers sent.

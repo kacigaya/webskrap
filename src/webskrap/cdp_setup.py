@@ -18,7 +18,8 @@ Chromium refuses the device-metrics override below top-level pages, so an
 iframe still reports the real screen size and pixel ratio. A shared worker
 keeps the browser's own ``navigator.userAgent``; it is read before the
 override arrives. ``mask_headless_user_agent`` sets the user agent for the
-whole browser.
+whole browser. Workers also keep their native ``navigator.platform``.
+Desktop full profiles resize the browser window to fit the requested viewport.
 
 Proxy credentials are answered only to challenges whose source is the proxy.
 A website asking for HTTP authentication gets the browser's default answer,
@@ -37,7 +38,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from webskrap import cdp_dom
-from webskrap.cdp import CDPBrowser, CDPConnection, CDPPage
+from webskrap.cdp import CDPBrowser, CDPConnection, CDPError, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import BrowserProfile, ResourcePolicy, SessionConfig, user_agent_metadata
 
@@ -70,6 +71,8 @@ async def prepare_page(page: CDPPage, config: SessionConfig, profile: BrowserPro
     """Apply ``config`` and ``profile`` to a fresh page before it navigates."""
     await page.enable_events()
     page.default_timeout_s = config.default_timeout_ms / 1000
+    if config.profile_mode == "full" and not profile.is_mobile:
+        await _fit_window(page, profile)
     commands = await _emulation(page.connection, config, profile)
     for method, params in commands:
         await page.send(method, params)
@@ -79,6 +82,24 @@ async def prepare_page(page: CDPPage, config: SessionConfig, profile: BrowserPro
         await cdp_dom.start_auto_attach(
             page, _on_attached(page.connection, page.default_timeout_s, config, commands)
         )
+
+
+async def _fit_window(page: CDPPage, profile: BrowserProfile) -> None:
+    """Fit a desktop viewport inside a real browser window before emulation."""
+    window = await page.connection.send("Browser.getWindowForTarget", {"targetId": page.target_id})
+    try:
+        await page.connection.send(
+            "Browser.setContentsSize",
+            {
+                "windowId": window["windowId"],
+                "width": profile.viewport.width,
+                "height": profile.viewport.height,
+            },
+        )
+    except CDPError as exc:
+        # Older Chromium versions lack this experimental browser command.
+        if not str(exc).startswith("CDP error -32601:"):
+            raise
 
 
 #: The brand each channel's browser reports next to ``Chromium``.

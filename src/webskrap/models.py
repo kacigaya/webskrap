@@ -504,6 +504,8 @@ class SessionConfig(BaseModel):
                     "userAgent": profile.user_agent,
                     "acceptLanguage": profile.accept_language(),
                 }
+                if platform := _user_agent_platform(profile.user_agent):
+                    override["platform"] = platform
                 if user_agent_metadata is not None:
                     override["userAgentMetadata"] = user_agent_metadata
                 commands.append(("Emulation.setUserAgentOverride", override))
@@ -899,6 +901,23 @@ def _brand_list(major: int, brand: str | None, versions: tuple[str, str]) -> lis
 def _three_parts(version: str) -> str:
     parts = [part for part in re.split(r"[._]", version) if part]
     return ".".join((parts + ["0", "0", "0"])[:3])
+
+
+def _user_agent_platform(user_agent: str) -> str | None:
+    """Return a legacy platform when the user agent identifies one.
+
+    Reduced Android user agents omit the CPU. Leave that platform alone
+    rather than guessing an architecture from a device name.
+    """
+    if "Windows NT" in user_agent:
+        return "Win32"
+    if "Macintosh" in user_agent and "Mac OS X" in user_agent:
+        return "MacIntel"
+    if linux := re.search(r"\bLinux (x86_64|i[3-6]86|aarch64|armv\d+l)\b", user_agent):
+        return f"Linux {linux[1]}"
+    if cros := re.search(r"\bCrOS (x86_64|i[3-6]86|aarch64|armv\d+l)\b", user_agent):
+        return f"Linux {cros[1]}"
+    return None
 
 
 def user_agent_metadata(

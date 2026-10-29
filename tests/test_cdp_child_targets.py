@@ -37,7 +37,8 @@ PNG = base64.b64decode(
 # the document writes the report into its own DOM, where an isolated world
 # reads it.
 IDENTITY = (
-    "({ua: navigator.userAgent, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,"
+    "({ua: navigator.userAgent, platform: navigator.platform,"
+    " tz: Intl.DateTimeFormat().resolvedOptions().timeZone,"
     " langs: navigator.languages.join(',')})"
 )
 DOCUMENT = """<img src="/{name}.png"><script>
@@ -160,12 +161,20 @@ async def test_lite_policy_covers_cross_site_frames_and_workers(
         assert all(request["authed"] == "True" for request in site[1:])
 
 
+@pytest.mark.parametrize(
+    ("system", "platform"),
+    [
+        ("X11; Linux x86_64", "Linux x86_64"),
+        ("Windows NT 10.0; Win64; x64", "Win32"),
+        ("Macintosh; Intel Mac OS X 10_15_7", "MacIntel"),
+    ],
+)
 async def test_full_profile_reaches_cross_site_frames_and_workers(
-    proxy: str, sandbox_supported: bool
+    proxy: str, sandbox_supported: bool, system: str, platform: str
 ) -> None:
     profile = BrowserProfile(
         name="child-targets",
-        user_agent="Mozilla/5.0 (X11; Linux x86_64) WebSkrapTest/1.0",
+        user_agent=f"Mozilla/5.0 ({system}) WebSkrapTest/1.0",
         locale="ja-JP",
         timezone_id="Asia/Tokyo",
         navigator_languages=["ja-JP", "ja"],
@@ -181,6 +190,7 @@ async def test_full_profile_reaches_cross_site_frames_and_workers(
     expected = {"ua": profile.user_agent, "tz": "Asia/Tokyo"}
     for url, report in reports.items():
         worker = json.loads(report["worker"])
+        assert report["document"]["platform"] == platform, url
         for seen in (report["document"], worker):
             assert {key: seen[key] for key in expected} == expected, url
             assert seen["langs"].startswith("ja-JP,ja"), url

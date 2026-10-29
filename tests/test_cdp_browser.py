@@ -163,6 +163,21 @@ async def test_fetch_does_not_enable_runtime_or_expose_webdriver(
     assert result.text == '{"touched":false,"webdriver":false}'
 
 
+async def test_full_desktop_profile_fits_the_real_browser_window(
+    server: str, config: SessionConfig
+) -> None:
+    config = config.model_copy(update={"profile_mode": "full", "headless_screen": None})
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("geometry")
+        page = await session.new_page()
+        await page.goto(server, wait_until="load", timeout_s=20)
+        geometry = await page.evaluate("({innerWidth,innerHeight,outerWidth,outerHeight})")
+        assert geometry["innerWidth"] == session.profile.viewport.width
+        assert geometry["innerHeight"] == session.profile.viewport.height
+        assert geometry["outerWidth"] >= geometry["innerWidth"]
+        assert geometry["outerHeight"] >= geometry["innerHeight"]
+
+
 async def test_lite_policy_blocks_images(server: str, config: SessionConfig) -> None:
     await fetch(f"{server}/image-page", config=config, wait_until="load")
     assert _CDPHandler.image_requests == 1
