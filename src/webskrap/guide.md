@@ -40,17 +40,33 @@ Known challenge and block pages return `blocked`, including HTTP 200 pages:
 
 - Challenges: DataDome, Cloudflare "Just a moment", Akamai's sec-cpt page, and
   AWS WAF's challenge or CAPTCHA action (`x-amzn-waf-action`).
-- Blocks: Cloudflare's own error pages for codes 1005-1010, 1012, 1015 and
+- Blocks: DataDome's hard-block page inside its provider frame, Cloudflare's
+  own error pages for codes 1005-1010, 1012, 1015 and
   1020, a site-styled Cloudflare 403 page that shows the response's Ray ID,
   and an Akamai edge page (`server: AkamaiGHost`, HTTP 400 or 403) with an
   Akamai reference number.
 
-The Akamai sec-cpt page and the AWS WAF challenge action reload the page from
-their own script. WebSkrap waits up to 15 seconds for that reload and then
-reads the real page; it reports `blocked` only if the interstitial stays. A
-plain 403, 404 or 202 without these provider markers is not a block: it
+DataDome device checks, the Akamai sec-cpt page, and the AWS WAF challenge
+action can reload the page from their own script. WebSkrap waits up to 15 seconds
+for that reload and then reads the real page. It reports `blocked` if a challenge
+or refusal remains. A plain 403, 404 or 202 without these provider markers is not a block: it
 returns `ok: false` or `ok: true` as usual. The localized title of a block
 page is never a signal.
+
+`profile_mode="native"` keeps the browser's own identity across documents and
+workers. On Linux, `virtual_display=True` runs that browser headed on Xvfb.
+This avoids headless-specific values without replacing JavaScript APIs.
+It does not guarantee that a site will accept the browser or its exit IP.
+
+`profile_mode="full"` emulates a device for layout and compatibility tests.
+For a recognized user-agent platform, it also sets the document's
+`navigator.platform`. Desktop profiles resize the browser window to fit the
+viewport where Chromium supports `Browser.setContentsSize`. Full emulation
+does not replace every host value: workers keep their native platform, shared
+workers keep their native user agent, and cross-process iframes keep their
+real screen and pixel ratio. Prefer native mode when these values must agree.
+`mask_headless_user_agent=True` changes the browser-wide UA but removes
+high-entropy client hints in Chromium. It is not equivalent to headed mode.
 
 The hint depends on the kind. For a block, change the exit IP or try
 `virtual_display=True`. For a challenge, try `virtual_display=True`, headed
@@ -59,6 +75,15 @@ names `virtual_display=True` first. Errors carry no page text, IP addresses,
 Ray IDs or reference IDs. Detection cannot identify every challenge or
 guarantee that later interactions will succeed. Stop automatic retries on
 `blocked`.
+
+DataDome detection reads the active cross-origin frame. That frame can move
+from a device check to a CAPTCHA or refusal while its parent's `src` stays
+unchanged. A refusal has no CAPTCHA to complete. For a manual challenge,
+use a headed persistent browser and keep its profile and proxy. Complete the
+CAPTCHA yourself on that display, then continue in the same session. A remote
+host needs a desktop connection; Xvfb alone does not provide one. Load all
+resources when a person must see a CAPTCHA. The `lite` and `documents`
+policies intentionally block resources that its widget can need.
 
 Some sites challenge a datacenter exit IP whatever the browser does. For
 example, a deal forum behind Cloudflare still challenged `virtual_display=True`

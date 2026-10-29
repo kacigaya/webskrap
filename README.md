@@ -48,8 +48,21 @@ asyncio.run(main())
 For deferred content, pass `ready_selector="#content"` to a Python fetch or
 `--ready-selector '#content'` to CLI `fetch`. Both MCP fetch tools accept
 `ready_selector` too. The selector must become visible after consent dismissal.
-Known challenge pages (DataDome, Cloudflare, Akamai, AWS WAF) and provider block pages (Cloudflare, Akamai) raise `blocked`;
-WebSkrap does not retry or solve them. Ordinary HTTP errors still return `ok=False`.
+Known challenge pages (DataDome, Cloudflare, Akamai, AWS WAF) and provider block
+pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
+checks that reload the page. It does not retry refusals or solve CAPTCHAs.
+Ordinary HTTP errors still return `ok=False`.
+
+For manual CAPTCHA completion, open a persistent browser with
+`webskrap browser open --headed --session manual --proxy http://localhost:8888 URL`.
+Complete the check in that browser. Keep the same session, profile, and proxy
+for later commands. On a remote host, use a desktop connection to its display.
+`virtual_display=True` alone does not provide a remote desktop.
+
+Keep `profile_mode="native"` for the browser's own identity. On Linux with Xvfb,
+`virtual_display=True` runs a headed browser without a visible desktop window.
+Full profile emulation is useful for device tests, but cannot replace every
+worker or iframe value. See the [identity limits](src/webskrap/guide.md).
 
 ## Search
 
