@@ -66,6 +66,30 @@ A temporary headed browser session and loopback VNC listener on port 15900 were 
 to prepare manual completion. Both were closed when manual completion was
 declined. Xvfb alone does not give remote access.
 
+### Reuse a solved session
+
+A persistent session keeps its cookies in its profile on disk
+(`~/.webskrap/browser/<session>/user-data`). The DataDome cookie from a
+manual solve stays there. No extra flag or export step is necessary.
+
+1. Open the session by the same name:
+   `webskrap browser open --session <name> --headed <url>`.
+2. Keep the same exit IP. The cookie belongs to the session that passed
+   the check.
+3. Do not use the profile headless. A headless visit can receive a new
+   challenge or a hard block, and DataDome can then replace the cookie.
+
+On 2026-10-30, a macOS run checked this on a DataDome website from a
+residential IP. A person solved the CAPTCHA once in a headed session. A
+reload then returned HTTP 200. The session was closed, and a new browser
+process opened the same profile. A direct load of the protected page
+returned HTTP 200 again, without a challenge. This run did not measure how
+long the cookie stays valid. DataDome can challenge the session again at
+any time.
+
+WebSkrap does not export the cookie or copy it into other browsers. That is
+token reuse, which is out of scope.
+
 ## Verification limits
 
 The final Linux ARM64 run passed 858 tests. It excluded 30 opt-in live tests
