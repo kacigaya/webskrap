@@ -58,6 +58,17 @@ PAGES = {
     "/top-worker.js": WORKER.replace("NAME", "top-worker"),
     "/frame-worker.js": WORKER.replace("NAME", "frame-worker"),
     "/shared.js": "new FontFace('f', 'url(/shared.woff)').load().catch(() => {});",
+    # Service workers need a secure context, so this page is loaded from the
+    # server's own 127.0.0.1 origin, not through the proxy.
+    "/service": """<script>
+navigator.serviceWorker.register('/service.js').then(() => navigator.serviceWorker.ready)
+  .then((reg) => {
+    navigator.serviceWorker.onmessage = (e) => {
+      document.body.dataset.worker = JSON.stringify(e.data); };
+    reg.active.postMessage('report');
+  });
+</script>""",
+    "/service.js": "onmessage = (e) => e.source.postMessage(" + IDENTITY + ");",
 }
 
 
@@ -200,6 +211,28 @@ async def test_full_profile_reaches_cross_site_frames_and_workers(
     assert frame_requests
     assert all(request["ua"] == profile.user_agent for request in frame_requests)
     assert {request["languages"] for request in frame_requests} == {"ja-JP,ja;q=0.9"}
+
+
+async def test_full_profile_service_worker_registers_with_the_profile(
+    proxy: str, sandbox_supported: bool
+) -> None:
+    # The page's auto-attach and the browser's both hold a service worker
+    # paused; setting it up twice once hung registration forever.
+    profile = BrowserProfile(name="service-worker", timezone_id="Asia/Tokyo")
+    config = SessionConfig(
+        chromium_sandbox=sandbox_supported, decline_cookies=False, profile_mode="full"
+    )
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("service", profile=profile)
+        page = await session.new_page()
+        await page.goto(f"{proxy}/service", wait_until="load", timeout_s=20)
+        report = None
+        for _ in range(50):
+            if report := await page.evaluate("document.body?.dataset.worker"):
+                break
+            await asyncio.sleep(0.1)
+    assert report is not None
+    assert json.loads(report)["tz"] == "Asia/Tokyo"
 
 
 async def test_native_profile_leaves_child_targets_alone(sandbox_supported: bool) -> None:
