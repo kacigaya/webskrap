@@ -165,7 +165,10 @@ def _ddg_unwrap(href: str) -> str:
     """
     if href.startswith("//"):
         href = "https:" + href
-    parts = urlsplit(href)
+    try:
+        parts = urlsplit(href)
+    except ValueError:
+        return href
     if parts.netloc.endswith("duckduckgo.com") and parts.path.startswith("/l/"):
         return parse_qs(parts.query).get("uddg", [""])[0]
     return href
@@ -200,7 +203,10 @@ def _bing_unwrap(href: str) -> str:
     URL-safe base64 of the destination, without padding. Anything that does
     not decode comes back as given rather than failing the whole page.
     """
-    parts = urlsplit(href)
+    try:
+        parts = urlsplit(href)
+    except ValueError:
+        return href
     if not (parts.netloc.endswith("bing.com") and parts.path == "/ck/a"):
         return href
     encoded = parse_qs(parts.query).get("u", [""])[0]
@@ -292,7 +298,11 @@ def parse_results(engine: SearchEngine, html: str) -> list[SearchHit]:
     seen: set[str] = set()
     hits: list[SearchHit] = []
     for hit in spec.hits(root):
-        if urlsplit(hit.url).scheme not in ("http", "https") or hit.url in seen:
+        try:
+            scheme = urlsplit(hit.url).scheme
+        except ValueError:
+            continue
+        if scheme not in ("http", "https") or hit.url in seen:
             continue
         seen.add(hit.url)
         hits.append(hit)

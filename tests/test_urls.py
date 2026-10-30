@@ -75,6 +75,10 @@ def test_private_net_opt_in_values(monkeypatch: pytest.MonkeyPatch, value: str) 
     "url",
     [
         pytest.param("http://127.0.0.1:8000/", id="loopback-v4"),
+        pytest.param("http://%31%32%37.0.0.1/", id="encoded-loopback"),
+        pytest.param("http://%6cocalhost/", id="encoded-localhost"),
+        pytest.param(r"http://127.0.0.1\example.com/", id="backslash-host"),
+        pytest.param(r"http://%31%32%37.0.0.1\example.com/", id="encoded-backslash-host"),
         pytest.param("http://[::1]/", id="loopback-v6"),
         pytest.param("http://10.0.0.1/", id="rfc1918-10"),
         pytest.param("http://192.168.1.1/", id="rfc1918-192"),
@@ -145,3 +149,17 @@ def test_validate_mcp_url_combines_both_checks(monkeypatch: pytest.MonkeyPatch) 
         asyncio.run(validate_mcp_url("http://169.254.169.254/"))
 
     assert asyncio.run(validate_mcp_url("https://example.com/")) == "https://example.com/"
+
+
+def test_private_network_resolves_decoded_public_hostname(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(PRIVATE_NET_ENV, raising=False)
+    hosts: list[str] = []
+
+    def resolve(hostname: str) -> bool:
+        hosts.append(hostname)
+        return False
+
+    monkeypatch.setattr("webskrap.urls._resolve_blocked", resolve)
+    url = "https://%65xample.com/path%20name"
+    assert asyncio.run(validate_mcp_url(url)) == url
+    assert hosts == ["example.com"]

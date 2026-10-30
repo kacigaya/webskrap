@@ -183,3 +183,15 @@ def test_install_refuses_an_archive_without_the_browser(
 def test_browsers_dir_honors_the_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WEBSKRAP_BROWSERS_PATH", str(tmp_path))
     assert install.browsers_dir() == tmp_path
+
+
+@pytest.mark.parametrize(
+    "name",
+    [r"..\escape", r"\escape", r"\\server\share\escape", "folder/C:/escape", "folder/C:escape"],
+)
+def test_extract_refuses_windows_path_escapes(tmp_path: Path, name: str) -> None:
+    archive = _archive(tmp_path, [(name, b"x", stat.S_IFREG | 0o644)])
+    with pytest.raises(WebSkrapError) as error:
+        install.extract(archive, tmp_path / "out")
+    assert error.value.code is ErrorCode.BROWSER_LAUNCH
+    assert not (tmp_path / "out").exists()

@@ -9,10 +9,32 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Security
+
+- MCP URL checks now decode host escapes and treat backslashes as path
+  separators before checking for private addresses, as Chromium does.
+- Browser installation rejects ZIP entries with Windows separators or drive
+  components that could write outside the install folder.
+
+### Fixed
+
+- On macOS, Chrome for Testing no longer asks for the "Chromium Safe Storage"
+  keychain password at each launch. Launches now use `--use-mock-keychain`.
+
+- Search skips malformed result URLs instead of discarding all results from
+  the page. This also applies to URLs decoded from search-engine redirects.
+
 ## [3.2.2] - 2026-10-30
 
 ### Fixed
 
+- DataDome detection now follows the device check when it navigates its
+  frame. It reads the live challenge frame, and it reports a manual
+  challenge apart from a hard block. The user-agent probe now uses the
+  session proxy and network flags, so it cannot connect directly.
+- Full desktop profiles now set `navigator.platform` to match the user
+  agent. They also fit the viewport inside the real browser window before
+  the metrics override.
 - Cookie decline now finds the reject button of Commanders Act
   TrustCommander notices. Their markup has no "cookie" or "consent" name, so
   the text search did not look inside them.
