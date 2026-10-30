@@ -9,11 +9,10 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-10-30
+
 ### Fixed
 
-- On macOS, Chrome for Testing no longer asks for the "Chromium Safe Storage"
-  keychain password at each launch. The browser is unsigned, so macOS showed
-  the prompt for every session. Launches now use `--use-mock-keychain`.
 - Cookie decline now finds the reject button of Commanders Act
   TrustCommander notices. Their markup has no "cookie" or "consent" name, so
   the text search did not look inside them.
@@ -21,9 +20,10 @@ history, so they summarize each release rather than list every change.
   send a doubled q-value in `Accept-Language` (`fr;q=0.9;q=0.9`). Chromium
   weights the header itself, so the override now gets a plain list.
 - With `profile_mode="full"` (or `"locale"` off Linux),
-  `navigator.serviceWorker.register()` no longer hangs. The page and the browser both held the worker paused, and
-  each waited for the other. Now only the browser-level setup prepares
-  service and shared workers; the page only resumes them.
+  `navigator.serviceWorker.register()` no longer hangs. The page and the
+  browser both held the worker paused, and each waited for the other. Now
+  only the browser-level setup prepares service and shared workers; the page
+  only resumes them.
 - Mouse presses now report `PointerEvent.pressure` 0.5 while the button is
   down, as a real mouse does. CDP's default of 0 was visible to pages.
 
@@ -954,7 +954,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.1...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.2...HEAD
+[3.2.2]: https://github.com/kacigaya/webskrap/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/kacigaya/webskrap/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/kacigaya/webskrap/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/kacigaya/webskrap/compare/v3.0.1...v3.1.0
