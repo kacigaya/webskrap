@@ -7,7 +7,9 @@ engine changes its markup, refresh the fixture and fix the one extractor.
 
 from __future__ import annotations
 
+import base64
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 
@@ -241,3 +243,25 @@ def test_unclosed_and_void_tags_do_not_swallow_later_results() -> None:
     assert [hit.url for hit in hits] == ["https://a.example/", "https://b.example/"]
     assert hits[0].title == "A one"
     assert hits[0].snippet == "first"
+
+
+@pytest.mark.parametrize("engine", list(SearchEngine))
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_malformed_result_url_keeps_valid_neighbors(engine: SearchEngine, wrapped: bool) -> None:
+    href = "http://[broken"
+    if wrapped:
+        if engine is SearchEngine.DDG:
+            href = "https://duckduckgo.com/l/?uddg=" + quote(href, safe="")
+        else:
+            payload = base64.urlsafe_b64encode(href.encode()).decode().rstrip("=")
+            href = "https://www.bing.com/ck/a?u=a1" + payload
+    if engine is SearchEngine.DDG:
+        template = '<div class="result"><a class="result__a" href="{}">hit</a></div>'
+    else:
+        template = '<li class="b_algo"><h2><a href="{}">hit</a></h2></li>'
+    html = '<ol id="b_results">' + template.format(href) + template.format("https://example.com/")
+    html += "</ol>"
+
+    assert parse_results(engine, html) == [
+        SearchHit(title="hit", url="https://example.com/", snippet="")
+    ]

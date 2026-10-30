@@ -16,6 +16,11 @@ history, so they summarize each release rather than list every change.
 - Browser installation rejects ZIP entries with Windows separators or drive
   components that could write outside the install folder.
 
+### Fixed
+
+- Search skips malformed result URLs instead of discarding all results from
+  the page. This also applies to URLs decoded from search-engine redirects.
+
 ## [3.2.2] - 2026-10-30
 
 ### Fixed
