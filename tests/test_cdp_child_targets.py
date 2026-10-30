@@ -79,6 +79,7 @@ class _Proxy(BaseHTTPRequestHandler):
             {
                 "url": f"{url.hostname}{url.path}",
                 "ua": self.headers.get("User-Agent", ""),
+                "languages": self.headers.get("Accept-Language", ""),
                 "authed": str(authed),
             }
         )
@@ -193,10 +194,12 @@ async def test_full_profile_reaches_cross_site_frames_and_workers(
         assert report["document"]["platform"] == platform, url
         for seen in (report["document"], worker):
             assert {key: seen[key] for key in expected} == expected, url
-            assert seen["langs"].startswith("ja-JP,ja"), url
+            # Chromium weights the header itself; q-values never reach JavaScript.
+            assert seen["langs"] == "ja-JP,ja", url
     frame_requests = [r for r in _Proxy.requests if r["url"].startswith("site-b.test")]
     assert frame_requests
     assert all(request["ua"] == profile.user_agent for request in frame_requests)
+    assert {request["languages"] for request in frame_requests} == {"ja-JP,ja;q=0.9"}
 
 
 async def test_native_profile_leaves_child_targets_alone(sandbox_supported: bool) -> None:

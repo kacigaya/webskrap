@@ -43,7 +43,7 @@ def test_full_profile_mode_emulates_the_whole_profile() -> None:
     assert (metrics["width"], metrics["height"]) == (1280, 720)
     assert commands["Emulation.setUserAgentOverride"] == {
         "userAgent": "Custom/1.0",
-        "acceptLanguage": "en-US,en;q=0.9",
+        "acceptLanguage": "en-US,en",
     }
     assert commands["Emulation.setLocaleOverride"] == {"locale": "en-US"}
     assert commands["Emulation.setTimezoneOverride"] == {"timezoneId": "Europe/Paris"}
