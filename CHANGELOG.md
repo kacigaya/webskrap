@@ -20,7 +20,9 @@ history, so they summarize each release rather than list every change.
 
 - On macOS, Chrome for Testing no longer asks for the "Chromium Safe Storage"
   keychain password at each launch. Launches now use `--use-mock-keychain`.
-
+  Upgrade note: on macOS, persistent sessions and `user_data_dir` profiles
+  made before this release used the real Keychain key. They lose their saved
+  cookies and logins once, and you must sign in again.
 - Search skips malformed result URLs instead of discarding all results from
   the page. This also applies to URLs decoded from search-engine redirects.
 
