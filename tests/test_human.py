@@ -97,6 +97,7 @@ async def test_pointer_lands_on_the_exact_click_point(pointer) -> None:
     assert len(moves) >= 12
     assert [(press["x"], press["y"]) for press in presses] == [(moves[-1]["x"], moves[-1]["y"])] * 2
     assert [event["clickCount"] for event in presses] == [1, 2]
+    assert [event["force"] for event in presses] == [cdp_dom.MOUSE_PRESSED_FORCE] * 2
     assert [event["clickCount"] for event in releases] == [1, 2]
     assert call(0.35) in cdp_dom.asyncio.sleep.await_args_list
 

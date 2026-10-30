@@ -120,8 +120,10 @@ PAGE = """<html><title>Vision</title><body style='margin:0;height:3000px'>
 window.events=[];
 const canvas=document.querySelector('canvas');
 canvas.getContext('2d').fillRect(0,0,200,100);
-for (const type of ['click','dblclick','mousemove','mousedown','mouseup','wheel','input'])
-  addEventListener(type,e=>events.push({type:e.type,trusted:e.isTrusted,buttons:e.buttons}),true);
+for (const type of ['click','dblclick','mousemove','mousedown','mouseup','wheel','input',
+    'pointerdown','pointermove','pointerup'])
+  addEventListener(type,e=>events.push({type:e.type,trusted:e.isTrusted,buttons:e.buttons,
+    pressure:e.pressure}),true);
 </script></body></html>"""
 
 
@@ -186,6 +188,10 @@ async def test_mcp_vision_protocol_and_persistent_interactions(
                     assert all(event["trusted"] for event in events)
                     assert {"click", "dblclick", "input", "wheel"} <= {e["type"] for e in events}
                     assert any(e["type"] == "mousemove" and e["buttons"] == 1 for e in events)
+                    # A real mouse reports pressure 0.5 while a button is down.
+                    pointer = [e for e in events if e["type"].startswith("pointer")]
+                    assert {e["pressure"] for e in pointer if e["buttons"]} == {0.5}
+                    assert {e["pressure"] for e in pointer if not e["buttons"]} == {0}
 
                 await browser_session.run_page_action(name, verify)
                 result = await client.call_tool("browser_view", {"session": name})

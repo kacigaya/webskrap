@@ -752,6 +752,8 @@ _BUTTON_BITS = {"left": 1, "right": 2, "middle": 4}
 async def _mouse(
     page: CDPPage, kind: str, x: float, y: float, *, button: str = "none", **extra: Any
 ) -> None:
+    if extra.get("buttons"):
+        extra.setdefault("force", cdp_dom.MOUSE_PRESSED_FORCE)
     await page.send(
         "Input.dispatchMouseEvent",
         {"type": kind, "x": x, "y": y, "button": button, **extra},
