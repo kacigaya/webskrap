@@ -499,6 +499,10 @@ def launch_browser(
         f"--user-data-dir={user_data_dir}",
         "--no-first-run",
         "--no-default-browser-check",
+        # Chrome for Testing is unsigned on macOS, so every launch asks the
+        # user for the "Chromium Safe Storage" keychain item. The mock keychain
+        # keeps cookie encryption profile-local; pages cannot see it.
+        *(["--use-mock-keychain"] if sys.platform == "darwin" else []),
         # A bfcache restore re-fires no load events, stranding the
         # go_back/go_forward load wait. Each command attaches anew and cannot
         # track restores across attachments, so trade bfcache for
