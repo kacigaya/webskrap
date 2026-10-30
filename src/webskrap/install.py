@@ -164,7 +164,12 @@ def _download(url: str, target: IO[bytes]) -> int:
 def _safe_member(name: str) -> PurePosixPath:
     """Return ``name`` as a relative path, refusing absolute or ``..`` paths."""
     path = PurePosixPath(name)
-    if path.is_absolute() or ".." in path.parts or (path.parts and ":" in path.parts[0]):
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or "\\" in name
+        or any(":" in part for part in path.parts)
+    ):
         msg = f"refusing archive entry outside the install folder: {name}"
         raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
     return path
