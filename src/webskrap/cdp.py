@@ -861,6 +861,10 @@ async def launch(
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
+        # Chrome for Testing is unsigned on macOS, so every launch asks the
+        # user for the "Chromium Safe Storage" keychain item. The mock keychain
+        # keeps cookie encryption profile-local; pages cannot see it.
+        *(["--use-mock-keychain"] if sys.platform == "darwin" else []),
         # Chromium builds (not branded Chrome) apply their testing field
         # trials by default. Stable Chrome never runs that config, and one of
         # its trials trims navigator.languages to a single entry.

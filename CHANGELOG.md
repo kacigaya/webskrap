@@ -11,6 +11,9 @@ history, so they summarize each release rather than list every change.
 
 ### Fixed
 
+- On macOS, Chrome for Testing no longer asks for the "Chromium Safe Storage"
+  keychain password at each launch. The browser is unsigned, so macOS showed
+  the prompt for every session. Launches now use `--use-mock-keychain`.
 - Cookie decline now finds the reject button of Commanders Act
   TrustCommander notices. Their markup has no "cookie" or "consent" name, so
   the text search did not look inside them.

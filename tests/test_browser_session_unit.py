@@ -5,6 +5,7 @@ import os
 import signal
 import stat
 import subprocess
+import sys
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -60,6 +61,20 @@ def _capture_launch(
 def _launch(tmp_path: Path, **kwargs: Any) -> None:
     with pytest.raises(WebSkrapError):
         browser_session.launch_browser(tmp_path, executable="/bin/chromium", **kwargs)
+
+
+def test_launch_uses_mock_keychain_on_macos_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    _launch(tmp_path, headless=True)
+    monkeypatch.setattr(sys, "platform", "linux")
+    _launch(tmp_path, headless=True)
+
+    assert "--use-mock-keychain" in commands[0]
+    assert "--use-mock-keychain" not in commands[1]
 
 
 def test_launch_sandboxes_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
