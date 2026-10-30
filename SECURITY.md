@@ -65,6 +65,11 @@ to permit them. The Python API and CLI take URLs from the operator and skip
 the DNS check; point them at internal hosts deliberately, not with
 page-derived input.
 
+This check applies to the supplied URL. It does not filter redirects,
+subresources, or requests from page scripts. DNS can also change after the
+check. Use network-level restrictions when the browser must not reach private
+services. The URL check alone does not provide full SSRF isolation.
+
 ### Chromium sandbox
 
 Persistent sessions keep Chromium's OS sandbox. That sandbox is what stops a

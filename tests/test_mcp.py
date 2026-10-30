@@ -734,6 +734,8 @@ def test_guide_documents_every_error_code() -> None:
         pytest.param("ftp://example.test/x", id="ftp"),
         pytest.param("https://user:pass@example.test/", id="userinfo"),
         pytest.param("http://169.254.169.254/", id="link-local"),
+        pytest.param("http://%31%32%37.0.0.1/", id="encoded-loopback"),
+        pytest.param(r"http://127.0.0.1\example.com/", id="backslash-host"),
     ],
 )
 def test_fetch_rejects_untrusted_targets_before_launch(monkeypatch: Any, url: str) -> None:

@@ -19,7 +19,7 @@ import asyncio
 import ipaddress
 import os
 import socket
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from webskrap.errors import ErrorCode, WebSkrapError
 
@@ -122,7 +122,9 @@ async def reject_private_network(url: str) -> None:
     if urlsplit(url).scheme.lower() not in ("http", "https"):
         # data: and about:blank perform no network request; nothing to guard.
         return
-    hostname = urlsplit(url).hostname or ""
+    # Chromium treats backslashes as path separators and decodes host escapes.
+    # Check the host it will contact, not urllib's literal authority.
+    hostname = unquote(urlsplit(url.replace("\\", "/")).hostname or "")
     if _host_is_blocked_literal(hostname):
         blocked = True
     else:

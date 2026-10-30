@@ -9,6 +9,11 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Security
+
+- MCP URL checks now decode host escapes and treat backslashes as path
+  separators before checking for private addresses, as Chromium does.
+
 ## [3.2.2] - 2026-10-30
 
 ### Fixed
