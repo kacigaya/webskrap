@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.2.3] - 2026-10-30
+
 ### Security
 
 - MCP URL checks now decode host escapes and treat backslashes as path
@@ -978,7 +980,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.2...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.3...HEAD
+[3.2.3]: https://github.com/kacigaya/webskrap/compare/v3.2.2...v3.2.3
 [3.2.2]: https://github.com/kacigaya/webskrap/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/kacigaya/webskrap/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/kacigaya/webskrap/compare/v3.1.0...v3.2.0
