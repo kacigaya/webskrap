@@ -38,6 +38,10 @@ from webskrap.human import MAX_WHEEL_BATCHES, VIEW_MARGIN, bezier_path, click_po
 #: then ``e`` and Chromium's backend node id.
 REF_PATTERN = re.compile(r"^(?:f(\d+))?e(\d+)$")
 _POLL_S = 0.1
+#: ``force`` for a held mouse button. CDP's default of 0 reaches pages as
+#: ``PointerEvent.pressure`` 0, but a real mouse with a button down reports
+#: 0.5, as the Pointer Events spec asks of devices without pressure sensing.
+MOUSE_PRESSED_FORCE = 0.5
 
 # Builds the snapshot text with "[ref=#N]" placeholders and returns it with
 # the listed elements, so the caller can swap each placeholder for the
@@ -917,7 +921,10 @@ async def _human_pointer(element: _Element, *, click_count: int = 0) -> None:
             msg = f"another element covers the click point of: {element.description}"
             raise WebSkrapError(msg, code=ErrorCode.USAGE)
         press = {"x": x, "y": y, "button": "left", "clickCount": count}
-        await page.send("Input.dispatchMouseEvent", {"type": "mousePressed", "buttons": 1, **press})
+        await page.send(
+            "Input.dispatchMouseEvent",
+            {"type": "mousePressed", "buttons": 1, "force": MOUSE_PRESSED_FORCE, **press},
+        )
         await asyncio.sleep(uniform(60, 140) / 1000)
         await page.send("Input.dispatchMouseEvent", {"type": "mouseReleased", **press})
 
@@ -1091,7 +1098,8 @@ async def instant_click(page: CDPPage, target: str, *, click_count: int = 1) -> 
         for count in range(1, click_count + 1):
             press = {"x": x, "y": y, "button": "left", "clickCount": count}
             await element.input_page.send(
-                "Input.dispatchMouseEvent", {"type": "mousePressed", "buttons": 1, **press}
+                "Input.dispatchMouseEvent",
+                {"type": "mousePressed", "buttons": 1, "force": MOUSE_PRESSED_FORCE, **press},
             )
             await element.input_page.send(
                 "Input.dispatchMouseEvent", {"type": "mouseReleased", **press}

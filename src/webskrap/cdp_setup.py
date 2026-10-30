@@ -61,7 +61,8 @@ _NOT_ON_WORKERS = _TOP_LEVEL_ONLY | {
     "Emulation.setEmulatedMedia",
     "Emulation.setLocaleOverride",
 }
-_WORKER_TYPES = frozenset({"worker", "shared_worker", "service_worker"})
+_BROWSER_WORKER_TYPES = frozenset({"shared_worker", "service_worker"})
+_WORKER_TYPES = _BROWSER_WORKER_TYPES | {"worker"}
 
 # A blank document served for an origin while its localStorage is restored.
 _BLANK_PAGE = base64.b64encode(b"<!doctype html><title></title>").decode()
@@ -131,15 +132,15 @@ async def prepare_browser(
 ) -> None:
     """Give shared and service workers the session's identity and routing.
 
-    They are browser targets, so a page's auto-attach does not report them.
-    Each one waits for the debugger until it is set up.
+    They are browser targets: only this browser-level auto-attach sets them
+    up. Each one waits for the debugger until it is set up.
     """
     connection = browser.connection
     commands = await _emulation(connection, config, profile)
     if not commands and not _routes(config):
         return
     timeout_s = config.default_timeout_ms / 1000
-    handler = _on_attached(connection, timeout_s, config, commands)
+    handler = _on_attached(connection, timeout_s, config, commands, browser_level=True)
     connection.on("Target.attachedToTarget", handler, session_id=None)
     await connection.send(
         "Target.setAutoAttach",
@@ -157,18 +158,28 @@ def _on_attached(
     timeout_s: float,
     config: SessionConfig,
     commands: list[tuple[str, dict[str, Any]]],
+    *,
+    browser_level: bool = False,
 ) -> Callable[[dict[str, Any]], None]:
     """Return a ``Target.attachedToTarget`` handler that sets up and resumes targets.
 
     ``commands`` are the page's emulation commands, from :func:`_emulation`.
+    A page's auto-attach also reports its service workers, which the
+    browser-level handler holds paused too. Held by two sessions, a worker
+    answers no setup command until both resume it, so two setups wait for
+    each other forever: page-level handlers only resume these workers.
     """
     tasks: set[asyncio.Task[None]] = set()
 
     def attached(params: dict[str, Any]) -> None:
         info = params.get("targetInfo", {})
+        kind = info.get("type")
         child = CDPPage(connection, params["sessionId"], info.get("targetId", ""))
         child.default_timeout_s = timeout_s
-        task = asyncio.create_task(_prepare_target(child, info.get("type"), config, commands))
+        if kind in _BROWSER_WORKER_TYPES and not browser_level:
+            task = asyncio.create_task(_resume(child))
+        else:
+            task = asyncio.create_task(_prepare_target(child, kind, config, commands))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 
@@ -194,7 +205,7 @@ async def _prepare_target(
                 await _route(child, config)
                 handler = _on_attached(child.connection, child.default_timeout_s, config, commands)
                 await cdp_dom.start_auto_attach(child, handler)
-            elif kind in ("shared_worker", "service_worker"):
+            elif kind in _BROWSER_WORKER_TYPES:
                 await _route(child, config)
         with suppress(WebSkrapError):
             skipped = _NOT_ON_WORKERS if kind in _WORKER_TYPES else _TOP_LEVEL_ONLY
@@ -202,8 +213,12 @@ async def _prepare_target(
                 if method not in skipped:
                     await child.send(method, params)
     finally:
-        with suppress(WebSkrapError):
-            await child.send("Runtime.runIfWaitingForDebugger")
+        await _resume(child)
+
+
+async def _resume(child: CDPPage) -> None:
+    with suppress(WebSkrapError):
+        await child.send("Runtime.runIfWaitingForDebugger")
 
 
 def _document_switches(config: SessionConfig) -> bool:

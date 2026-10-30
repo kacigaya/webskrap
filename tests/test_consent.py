@@ -58,6 +58,19 @@ async def test_falls_back_to_reject_text_inside_consent_container(
 
 
 @pytest.mark.browser
+async def test_scopes_reject_text_to_a_trustcommander_notice(sandbox_supported: bool) -> None:
+    # Its button ids carry no reject meaning: each site orders them itself.
+    html = (
+        '<div id="tc-privacy-wrapper"><div role="dialog" aria-modal="true">'
+        f'<button id="popin_tc_privacy_button" {_RECORD}>Refuser</button>'
+        f'<button id="popin_tc_privacy_button_2" {_RECORD}>Accepter</button></div></div>'
+    )
+    async with _page(html, sandbox_supported) as page:
+        assert await decline_cookies(page) == "text"
+        assert await _clicked(page) == ["popin_tc_privacy_button"]
+
+
+@pytest.mark.browser
 async def test_skips_hidden_and_covered_candidates(sandbox_supported: bool) -> None:
     html = (
         f'<button class="cc-deny" id="hidden" style="display:none" {_RECORD}>No</button>'

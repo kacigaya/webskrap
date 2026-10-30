@@ -68,6 +68,8 @@ CONSENT_CONTAINER_CSS = ", ".join(
         '[id*="gdpr" i]',
         '[class*="gdpr" i]',
         '[aria-label*="cookie" i]',
+        # Commanders Act TrustCommander: its notice markup names neither.
+        "#tc-privacy-wrapper",
     )
 )
 

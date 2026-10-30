@@ -502,7 +502,9 @@ class SessionConfig(BaseModel):
             if profile.user_agent:
                 override: dict[str, Any] = {
                     "userAgent": profile.user_agent,
-                    "acceptLanguage": profile.accept_language(),
+                    # A plain list: Chromium copies it into navigator.languages
+                    # and adds the header's q-values itself.
+                    "acceptLanguage": ",".join(profile.navigator_languages),
                 }
                 if platform := _user_agent_platform(profile.user_agent):
                     override["platform"] = platform
