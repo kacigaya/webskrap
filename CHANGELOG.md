@@ -9,6 +9,21 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Cookie decline now finds the reject button of Commanders Act
+  TrustCommander notices. Their markup has no "cookie" or "consent" name, so
+  the text search did not look inside them.
+- Full profiles no longer put q-values in `navigator.languages`, and no longer
+  send a doubled q-value in `Accept-Language` (`fr;q=0.9;q=0.9`). Chromium
+  weights the header itself, so the override now gets a plain list.
+- With `profile_mode="full"` (or `"locale"` off Linux),
+  `navigator.serviceWorker.register()` no longer hangs. The page and the browser both held the worker paused, and
+  each waited for the other. Now only the browser-level setup prepares
+  service and shared workers; the page only resumes them.
+- Mouse presses now report `PointerEvent.pressure` 0.5 while the button is
+  down, as a real mouse does. CDP's default of 0 was visible to pages.
+
 ## [3.2.1] - 2026-10-26
 
 ### Removed

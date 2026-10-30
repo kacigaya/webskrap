@@ -154,3 +154,59 @@ The final follow-up suite ran inside Gluetun's network namespace. It passed
 suite passed 125 tests. Lint, format, Linux/Windows/macOS type checks, Bandit,
 OSV, pip-audit, package builds, and Twine checks passed. Windows and macOS
 runtime checks were not available on this Linux host.
+
+## Protected form retest
+
+A later retest compared ordinary pages with the website's quote form path.
+Each run used a fresh browser profile and a VPN exit that the run had not
+used before.
+
+The browser passed DataDome on ordinary pages. On some exits the first page
+returned HTTP 403 with a device check (`x-dd-b: 3`). The device check then
+reloaded into the requested page with HTTP 200. On other exits the first page
+returned HTTP 200 at once. DataDome's page tag ran on those pages.
+
+The quote form path returned HTTP 403 with a CAPTCHA on every exit. This
+occurred with a direct load and with a click-through from the landing page.
+These changes did not remove the CAPTCHA:
+
+1. Google Chrome stable for Linux ARM64 instead of Chrome for Testing. This
+   adds the `Google Chrome` brand.
+2. A locale and a timezone that match the exit country.
+3. Mesa WebGL.
+4. `x86` client hints instead of the host's `arm` value.
+5. A 25-second pause with mouse movement and wheel scrolling on each page.
+6. A four-page session with about 75 seconds of activity before the form.
+7. Exits in eleven countries on eight hosting ASNs.
+
+A desktop-like host environment did not change the result. It added Noto
+and Ubuntu fonts and PulseAudio audio devices. On a fresh exit, a direct load
+of the form received a device check (`x-dd-b: 3`). The check reloaded into a
+CAPTCHA. The same check reloaded into HTTP 200 on ordinary pages.
+
+SwiftShader WebGL failed the device check and received a hard block.
+The VPN provider's dedicated-IP servers refused this setup's credentials,
+so a dedicated exit was not tested.
+
+A Windows user agent made the result worse: the first page returned a hard
+block. Repeated fresh profiles on one exit also made the result worse. A later
+visit received the CAPTCHA, or a hard block, without a device check.
+
+The VPN provider's catalog contains only hosting ASNs. The measured limit is
+therefore the exit IP class for this form path, not a browser defect that
+WebSkrap can fix. A residential or mobile IP was not tested.
+
+The retest found two WebSkrap defects:
+
+1. Cookie decline did not search Commanders Act TrustCommander notices.
+2. Full profiles put q-values in `navigator.languages` and doubled them in
+   `Accept-Language`.
+
+A later local fingerprint check found two more:
+
+1. With a full profile, `navigator.serviceWorker.register()` never
+   finished. The page and the browser both held the worker paused.
+2. Mouse presses reported `PointerEvent.pressure` 0. A real mouse reports
+   0.5 while a button is down.
+
+All four are fixed and have regression tests. No CAPTCHA was solved.
