@@ -22,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Typing :: Typed",
 ]
 dependencies = [
@@ -56,8 +57,20 @@ packages = ["src/webskrap"]
 
 [tool.hatch.build.targets.sdist]
 # The web/ frontend ships only to GitHub Pages, never to PyPI. assets/ holds
-# the README logo, which no install step reads.
-exclude = ["web", ".github", "assets"]
+# the README logo, which no install step reads. The agent skill folders link
+# to one shared references/ copy, and Hatch keeps only one path to a linked
+# directory, so they stay in the Git checkout together with test_docs.py,
+# which checks them.
+exclude = [
+  "web",
+  ".github",
+  "assets",
+  ".agents",
+  ".claude",
+  ".codex",
+  "references",
+  "tests/test_docs.py",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

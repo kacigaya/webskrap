@@ -9,6 +9,25 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Python 3.15 is a supported version. CI runs the test suite on it, and the
+  package metadata lists it.
+
+### Changed
+
+- The source distribution no longer contains the agent skill folders and the
+  test that checks them. They stay in the Git repository. Before, the sdist
+  held only one of the linked skill reference paths, and its test failed.
+
+### Fixed
+
+- The CLI guide lists the exit status for each error code. It said before that
+  every browser command failure exits with 1.
+- The MCP guide and the agent reference now describe `browser_wait_for`.
+- `SECURITY.md` names the supported release line without an old version
+  number.
+
 ## [3.2.3] - 2026-10-30
 
 ### Security

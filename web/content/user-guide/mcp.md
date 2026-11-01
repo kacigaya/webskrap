@@ -59,6 +59,7 @@ python -m webskrap.mcp_server
 | `browser_snapshot` | Aria snapshot of the page with `eN` element refs. |
 | `browser_interact` | Click, fill, type, select, hover, check, or uncheck an element. |
 | `browser_press` | Press a keyboard key on the page. |
+| `browser_wait_for` | Wait for text to appear or disappear, a ref or selector state, or a load state. |
 | `browser_view` | Inline viewport PNG and CSS coordinate metadata, without a file write. |
 | `browser_mouse` | Coordinate click, double-click, move, scroll, or drag. |
 | `browser_insert_text` | Literal Unicode text into the focused control. |
