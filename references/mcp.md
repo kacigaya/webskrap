@@ -18,6 +18,9 @@ boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
 - `browser_open` and the other `browser_*` tools drive a stateful flow.
   `browser_open` takes `webrtc_ip_handling_policy` but no proxy; open a proxied
   session with `webskrap browser open --proxy URL` and the tools reuse it.
+- After an interaction, `browser_wait_for` waits for one condition: `text`,
+  `text_gone`, `selector` with `selector_state`, or `load_state`. Use it
+  instead of repeated snapshots.
 - `webskrap://guide`, `webskrap://profiles`, and `webskrap://sessions` expose
   static guidance and current state as resources.
 
@@ -71,8 +74,9 @@ Fetch and navigation URLs must be public `http(s)` without credentials.
 Private or local hosts are rejected unless `WEBSKRAP_ALLOW_PRIVATE_NET=1`.
 
 `browser_eval` runs page script in a possibly logged-in profile: prefer
-snapshot, interact, and wait_for, never evaluate page-controlled text, and set
-`WEBSKRAP_ALLOW_EVAL=0` where models must not run page script.
+`browser_snapshot`, `browser_interact`, and `browser_wait_for`, never evaluate
+page-controlled text, and set `WEBSKRAP_ALLOW_EVAL=0` where models must not run
+page script.
 
 ## Failures
 

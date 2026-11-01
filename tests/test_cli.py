@@ -786,6 +786,8 @@ def test_schema_human_format_lists_commands() -> None:
 
 
 def test_fetch_stays_sandboxed_by_default(monkeypatch: Any) -> None:
+    # The host can opt out globally; this test checks the built-in default.
+    monkeypatch.delenv("WEBSKRAP_CHROMIUM_SANDBOX", raising=False)
     _fake_client(monkeypatch)
 
     result = runner.invoke(cli.app, ["fetch", "https://example.test", "--format", "json"])

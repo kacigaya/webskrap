@@ -245,8 +245,23 @@ another element. They are slower than mechanical input on purpose (see
 
 Navigation uses `goto`, `back`, `forward`, and `reload`; `press` sends a key
 to the page, and `eval` runs JavaScript and prints the JSON result. All
-commands support `--format json` for scripting and agents, and fail with exit
-code 1 and a one-line error instead of a traceback.
+commands support `--format json` for scripting and agents, and fail with a
+one-line error instead of a traceback. The exit status tells the kind of
+failure; JSON output carries the same name in `code`:
+
+| Exit | Code                  |
+| ---- | --------------------- |
+| 1    | `internal`            |
+| 2    | `usage`               |
+| 3    | `timeout`             |
+| 4    | `navigation`          |
+| 5    | `browser_launch`      |
+| 6    | `sandbox`             |
+| 7    | `no_session`          |
+| 8    | `session_unreachable` |
+| 9    | `stale_ref`           |
+| 10   | `path_rejected`       |
+| 11   | `blocked`             |
 
 `open URL` and `goto` take `--decline-cookies` to click a consent notice's
 reject control. They also run the fetch tools' challenge and block check, but

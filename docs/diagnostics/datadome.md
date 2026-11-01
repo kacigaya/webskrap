@@ -129,9 +129,9 @@ was dated March 2024. Some listed endpoints timed out or rejected authentication
 The catalog was refreshed through Gluetun's existing updater. The original
 catalog was backed up, and the VPN was restored to a healthy state.
 
-The final verified exit was `187.13.198.190` in Marseille. It still required
-verification. The refreshed catalog is in the container's writable layer;
-container recreation can replace it because there is no catalog volume mount.
+The final verified exit still required verification. The refreshed catalog is
+in the container's writable layer; container recreation can replace it because
+there is no catalog volume mount.
 
 ## CDP identity investigation
 

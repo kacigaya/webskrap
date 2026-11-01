@@ -5,10 +5,10 @@
 WebSkrap is developed on `main` and released from tags. Fixes land in a new
 patch release on top of the latest minor; older minors are not backported.
 
-| Version                                   | Supported |
-| ----------------------------------------- | --------- |
-| Latest minor (2.13.x as of 2026-10-01)       | Yes       |
-| Older minors                              | No        |
+| Version      | Supported |
+| ------------ | --------- |
+| Latest minor | Yes       |
+| Older minors | No        |
 
 ## Reporting a vulnerability
 
