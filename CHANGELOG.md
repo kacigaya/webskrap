@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.2.4] - 2026-11-01
+
 ### Added
 
 - Python 3.15 is a supported version. CI runs the test suite on it, and the
@@ -999,7 +1001,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.3...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.4...HEAD
+[3.2.4]: https://github.com/kacigaya/webskrap/compare/v3.2.3...v3.2.4
 [3.2.3]: https://github.com/kacigaya/webskrap/compare/v3.2.2...v3.2.3
 [3.2.2]: https://github.com/kacigaya/webskrap/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/kacigaya/webskrap/compare/v3.2.0...v3.2.1
