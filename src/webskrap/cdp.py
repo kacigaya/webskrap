@@ -518,11 +518,18 @@ class CDPPage:
         deadline = time.monotonic() + timeout_s
         try:
             navigation = await self.send("Page.navigate", {"url": url}, timeout_s=timeout_s)
-            if navigation.get("errorText"):
+            # Empty HTTP error bodies can commit Chromium's own error document.
+            # They still have a real response, unlike DNS or TLS failures.
+            http_error = navigation.get("errorText") == "net::ERR_HTTP_RESPONSE_CODE_FAILURE"
+            if navigation.get("errorText") and not http_error:
                 msg = f"{navigation['errorText']} at {url}"
                 raise WebSkrapError(msg, code=ErrorCode.NAVIGATION)
             loader_id = navigation.get("loaderId")
             if not loader_id:
+                if http_error:
+                    raise WebSkrapError(
+                        f"{navigation['errorText']} at {url}", code=ErrorCode.NAVIGATION
+                    )
                 return {}
             loader_id = await self.wait_lifecycle(events, loader_id, wait_until, deadline, url)
             try:
@@ -539,8 +546,17 @@ class CDPPage:
             except WebSkrapError as exc:
                 if exc.code is not ErrorCode.TIMEOUT:
                     raise
+                if http_error:
+                    raise WebSkrapError(
+                        f"{navigation['errorText']} at {url}", code=ErrorCode.NAVIGATION
+                    ) from exc
                 return {}
-            return document.get("response", {})
+            response = document.get("response", {})
+            if http_error and not 400 <= response.get("status", 0) <= 599:
+                raise WebSkrapError(
+                    f"{navigation['errorText']} at {url}", code=ErrorCode.NAVIGATION
+                )
+            return response
         finally:
             events.stop()
 

@@ -52,6 +52,9 @@ Known challenge pages (DataDome, Cloudflare, Akamai, AWS WAF) and provider block
 pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
 checks that reload the page. It does not retry refusals or solve CAPTCHAs.
 Ordinary HTTP errors still return `ok=False`.
+For an empty HTTP error body, Chromium can show its own error page. The returned
+text or HTML is that rendered page. The status, headers, and `final_url` still
+come from the HTTP response.
 
 For manual CAPTCHA completion, open a persistent browser with
 `webskrap browser open --headed --session manual --proxy http://localhost:8888 URL`.

@@ -36,6 +36,10 @@ the browser's HTTP cache and does not intercept service-worker-owned requests.
 Pass `ready_selector="#content"` to either fetch tool when the requested content
 arrives later. It must become visible after consent dismissal; the wait uses
 `timeout_ms` separately from navigation and may vary between warm-session calls.
+Empty HTTP error bodies can make Chromium render its own error page. Fetch returns
+that page's text or HTML, with the origin response's status, headers, and final URL.
+DNS and TLS failures still raise `navigation` errors.
+
 Known challenge and block pages return `blocked`, including HTTP 200 pages:
 
 - Challenges: DataDome, Cloudflare "Just a moment", Akamai's sec-cpt page, and
