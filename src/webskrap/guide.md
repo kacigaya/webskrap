@@ -211,3 +211,17 @@ Screenshots are written under `./webskrap-output` and persistent profiles under
 those roots). Absolute paths and traversal are rejected. The sandbox switch is an
 environment variable and never a tool argument, so a page cannot argue a model
 into disabling it. No CAPTCHA solving and no login-wall bypass.
+
+## Python batch fetching
+
+Use `await client.fetch_many(urls)` for a finite batch. It runs URLs in order
+with one browser and returns a list of `FetchResult` objects. Cookies and storage
+are shared within the batch. The browser closes after success, error, or
+cancellation. Empty batches do not launch a browser. The first page error raises
+and stops the batch; no partial list is returned. Ordinary HTTP errors remain
+results with `ok=False`.
+
+Separate batches and `client.fetch()` calls use fresh sessions. An explicit
+`user_data_dir` can still share state on disk. For large inputs, per-page options,
+or state across batches, use `client.session()` and `session.fetch()`. Close the
+session after use. Use separate sessions for unrelated callers.

@@ -14,7 +14,7 @@ import logging
 import os
 import sys
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, TypeVar
@@ -768,6 +768,82 @@ class WebSkrapClient:
         finally:
             await session.close()
             self._sessions.pop(name, None)
+
+    async def fetch_many(
+        self,
+        urls: Iterable[str],
+        *,
+        profile: str | BrowserProfile | None = None,
+        config: SessionConfig | None = None,
+        wait_until: WaitUntil = "domcontentloaded",
+        screenshot: bool = False,
+        timeout_ms: float | None = None,
+        text_only: bool = False,
+        include_links: bool = False,
+        max_links: int = 50,
+        decline_cookies: bool | None = None,
+        ready_selector: str | None = None,
+    ) -> list[FetchResult]:
+        """Fetch a batch in order, using one browser for the whole batch.
+
+        Cookies and storage are shared within the batch. Each call creates a
+        fresh session and closes it on success, error, or cancellation. An
+        explicit ``config.user_data_dir`` can still share state on disk.
+        Use :meth:`session` and :meth:`WebSkrapSession.fetch` for streaming
+        results, per-page options, or state that must outlive a batch.
+
+        Args:
+            urls: Finite iterable of URLs. All URLs are checked before launch.
+                An empty iterable returns an empty list without a browser.
+            profile: Browser profile; see :meth:`fetch`.
+            config: Session config; defaults to ``default_config``.
+            wait_until: Load state to wait for on each page.
+            screenshot: Save each page to its own generated PNG filename.
+            timeout_ms: Navigation timeout override for each page.
+            text_only: Return visible body text instead of page HTML.
+            include_links: Also collect each page's outbound links.
+            max_links: How many links to keep per page.
+            decline_cookies: Per-page consent override; None uses the config.
+            ready_selector: Selector to wait for on each page.
+
+        Returns:
+            Results in input order, including ordinary HTTP error responses.
+
+        Raises:
+            WebSkrapError: On invalid input, launch failure, or the first page
+                error. Remaining URLs are not fetched and no partial list is
+                returned. See :meth:`WebSkrapSession.fetch` for page errors.
+        """
+        if isinstance(urls, str):
+            raise WebSkrapError(
+                "urls must be an iterable of URLs, not a string", code=ErrorCode.USAGE
+            )
+        targets = [validate_url(url) for url in urls]
+        if not targets:
+            return []
+        name = f"_batch_{uuid4().hex}"
+        try:
+            session = await self.session(name, config=config, profile=profile)
+            results = []
+            for url in targets:
+                results.append(
+                    await session.fetch(
+                        url,
+                        wait_until=wait_until,
+                        screenshot=screenshot,
+                        timeout_ms=timeout_ms,
+                        text_only=text_only,
+                        include_links=include_links,
+                        max_links=max_links,
+                        decline_cookies=decline_cookies,
+                        ready_selector=ready_selector,
+                    )
+                )
+            return results
+        finally:
+            # A cancelled waiter can leave its shielded browser launch running.
+            with CancelScope(shield=True):
+                await self.close_session(name)
 
     async def search(
         self,
