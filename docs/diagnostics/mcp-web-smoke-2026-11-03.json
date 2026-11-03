@@ -1,0 +1,250 @@
+{
+  "date": "2026-11-03",
+  "server_version": "3.2.0",
+  "runs": [
+    {
+      "tool": "fetch",
+      "arguments": {
+        "url": "https://httpbin.org/status/404",
+        "max_chars": 600,
+        "timeout_ms": 20000
+      },
+      "is_error": true,
+      "error": "Error executing tool fetch: net::ERR_HTTP_RESPONSE_CODE_FAILURE at https://httpbin.org/status/404 [code: navigation] Check the URL, the scheme, and that the host is reachable.",
+      "status": null,
+      "ok": null,
+      "hits_total": null,
+      "text_length": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://example.com",
+        "max_chars": 600,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": null,
+      "text_length": 917
+    },
+    {
+      "tool": "search",
+      "arguments": {
+        "query": "Roman concrete volcanic ash",
+        "engine": "ddg",
+        "max_results": 3,
+        "timeout_ms": 20000
+      },
+      "is_error": true,
+      "error": "Error executing tool search: ddg answered with a bot challenge instead of results [code: blocked] The site served a bot challenge or block page instead of content. Try another engine or exit IP (proxy), virtual_display=True, a persistent user_data_dir, or headed mode. WebSkrap does not solve CAPTCHAs.",
+      "status": null,
+      "ok": null,
+      "hits_total": null,
+      "text_length": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://docs.python.org/3/library/asyncio.html",
+        "max_chars": 600,
+        "include_links": true,
+        "max_links": 3,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": null,
+      "text_length": 4556
+    },
+    {
+      "tool": "search",
+      "arguments": {
+        "query": "how do octopuses change color",
+        "max_results": 3,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": 10,
+      "text_length": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://www.wikipedia.org/",
+        "max_chars": 600,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": null,
+      "text_length": 2022
+    },
+    {
+      "tool": "search",
+      "arguments": {
+        "query": "Python asyncio documentation",
+        "max_results": 3,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": 10,
+      "text_length": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://httpbin.org/status/500",
+        "max_chars": 400,
+        "timeout_ms": 15000
+      },
+      "is_error": true,
+      "error": "Error executing tool stealth_fetch: net::ERR_HTTP_RESPONSE_CODE_FAILURE at https://httpbin.org/status/500 [code: navigation] Check the URL, the scheme, and that the host is reachable.",
+      "status": null,
+      "ok": null,
+      "hits_total": null,
+      "text_length": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/404",
+        "max_chars": 400,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": null,
+      "text_length": 4453
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://www.python.org/this-page-does-not-exist-webskrap",
+        "max_chars": 400,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 404,
+      "ok": false,
+      "hits_total": null,
+      "text_length": 1671
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://no-such-host.webskrap.invalid/",
+        "max_chars": 300,
+        "timeout_ms": 5000
+      },
+      "is_error": true,
+      "error": "Error executing tool stealth_fetch: net::ERR_NAME_NOT_RESOLVED at https://no-such-host.webskrap.invalid/ [code: navigation] Check the URL, the scheme, and that the host is reachable.",
+      "status": null,
+      "ok": null,
+      "hits_total": null,
+      "text_length": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://httpbin.org/redirect/1",
+        "max_chars": 300,
+        "timeout_ms": 15000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": null,
+      "text_length": 889
+    },
+    {
+      "tool": "search",
+      "arguments": {
+        "query": "James Webb telescope infrared mirrors",
+        "max_results": 3,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": 10,
+      "text_length": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://www.rfc-editor.org/rfc/rfc9110",
+        "max_chars": 300,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": null,
+      "text_length": 454237
+    },
+    {
+      "tool": "stealth_fetch",
+      "arguments": {
+        "url": "https://www.bing.com/search?q=how+do+octopuses+change+color",
+        "text_only": false,
+        "max_chars": 200000,
+        "timeout_ms": 20000
+      },
+      "is_error": false,
+      "error": null,
+      "status": 200,
+      "ok": true,
+      "hits_total": null,
+      "text_length": 292727
+    }
+  ],
+  "checkout_version": "3.2.4",
+  "local_mcp_retests": [
+    {
+      "tool": "fetch",
+      "url": "https://httpbin.org/status/404",
+      "is_error": false,
+      "status": 404,
+      "ok": false,
+      "final_url": "https://httpbin.org/status/404",
+      "error": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "url": "https://httpbin.org/status/500",
+      "is_error": false,
+      "status": 500,
+      "ok": false,
+      "final_url": "https://httpbin.org/status/500",
+      "error": null
+    },
+    {
+      "tool": "stealth_fetch",
+      "url": "https://no-such-host.webskrap.invalid/",
+      "is_error": true,
+      "status": null,
+      "ok": null,
+      "final_url": null,
+      "error": "Error executing tool stealth_fetch: net::ERR_NAME_NOT_RESOLVED at https://no-such-host.webskrap.invalid/ [code: navigation] Check the URL, the scheme, and that the host is reachable."
+    }
+  ]
+}

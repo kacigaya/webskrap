@@ -391,7 +391,11 @@ class WebSkrapSession:
             cookies = await self.cookies()
             return FetchResult(
                 url=url,
-                final_url=state["url"],
+                final_url=(
+                    response.get("url", url)
+                    if state["url"] == "chrome-error://chromewebdata/"
+                    else state["url"]
+                ),
                 status=status,
                 ok=status is not None and 200 <= status < 400,
                 headers=headers,

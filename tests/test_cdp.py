@@ -379,3 +379,70 @@ async def test_goto_follows_a_document_that_replaces_itself_before_loading() -> 
     finally:
         fake.cancel()
         await connection.close()
+
+
+@pytest.mark.parametrize(
+    ("error_text", "status", "has_loader", "expected"),
+    [
+        ("net::ERR_HTTP_RESPONSE_CODE_FAILURE", 404, True, 404),
+        ("net::ERR_HTTP_RESPONSE_CODE_FAILURE", 500, True, 500),
+        ("net::ERR_HTTP_RESPONSE_CODE_FAILURE", 200, True, None),
+        ("net::ERR_HTTP_RESPONSE_CODE_FAILURE", None, True, None),
+        ("net::ERR_HTTP_RESPONSE_CODE_FAILURE", 404, False, None),
+        ("net::ERR_NAME_NOT_RESOLVED", 404, True, None),
+        ("net::ERR_CERT_AUTHORITY_INVALID", 404, True, None),
+    ],
+)
+async def test_goto_distinguishes_http_errors_from_network_failures(
+    error_text: str, status: int | None, has_loader: bool, expected: int | None
+) -> None:
+    connection, reader, writer = _connection()
+    page = CDPPage(connection, "S1", "F1")
+
+    async def browser() -> None:
+        answered = 0
+        while True:
+            while len(writer.sent) <= answered:
+                await asyncio.sleep(0)
+            message = writer.sent[answered]
+            answered += 1
+            result = {}
+            if message["method"] == "Page.navigate":
+                result = {"frameId": "F1", "errorText": error_text}
+                if has_loader:
+                    result["loaderId"] = "L1"
+                if status is not None:
+                    _feed(
+                        reader,
+                        {
+                            "method": "Network.responseReceived",
+                            "sessionId": "S1",
+                            "params": {
+                                "loaderId": "L1",
+                                "type": "Document",
+                                "response": {"status": status, "headers": {}},
+                            },
+                        },
+                    )
+                _feed(
+                    reader,
+                    {
+                        "method": "Page.lifecycleEvent",
+                        "sessionId": "S1",
+                        "params": {"frameId": "F1", "loaderId": "L1", "name": "load"},
+                    },
+                )
+            _feed(reader, {"id": message["id"], "result": result})
+
+    fake = asyncio.create_task(browser())
+    try:
+        if expected is None:
+            with pytest.raises(WebSkrapError) as error:
+                await page.goto("https://example.test", wait_until="load", timeout_s=0.1)
+            assert error.value.code is ErrorCode.NAVIGATION
+        else:
+            response = await page.goto("https://example.test", wait_until="load", timeout_s=1)
+            assert response["status"] == expected
+    finally:
+        fake.cancel()
+        await connection.close()

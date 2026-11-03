@@ -174,6 +174,13 @@ class _Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
+        if self.path in ("/empty-404", "/empty-500"):
+            self.send_response(int(self.path.rsplit("-", 1)[1]))
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         if self.path == "/interstitial":
             if not self._passed_page("passed=1", b"Passed"):
                 self.send_response(200)
@@ -356,6 +363,36 @@ async def test_fetch_challenge_readiness_and_http_errors(test_server, sandbox_su
         assert result.status == 403
         assert not result.ok
         assert result.text == "Forbidden"
+
+
+@pytest.mark.parametrize("tool", ["fetch", "stealth_fetch"])
+@pytest.mark.parametrize("status", [404, 500])
+async def test_mcp_empty_http_errors(test_server, sandbox_supported, monkeypatch, tool, status):
+    monkeypatch.setenv("WEBSKRAP_ALLOW_PRIVATE_NET", "1")
+    monkeypatch.setenv("WEBSKRAP_CHROMIUM_SANDBOX", "1" if sandbox_supported else "0")
+    url = f"{test_server}/empty-{status}"
+    async with create_client_server_memory_streams() as (client_streams, server_streams):
+        server = asyncio.create_task(
+            mcp_server.mcp._lowlevel_server.run(
+                *server_streams, mcp_server.mcp._lowlevel_server.create_initialization_options()
+            )
+        )
+        try:
+            async with ClientSession(*client_streams) as client:
+                await client.initialize()
+                result = await client.call_tool(
+                    tool, {"url": url, "channel": "chromium", "timeout_ms": 5000}
+                )
+                assert not result.is_error
+                data = result.structured_content
+                assert data["status"] == status
+                assert data["ok"] is False
+                assert data["final_url"] == url
+                assert data["headers"]["content-length"] == "0"
+        finally:
+            server.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await server
 
 
 async def test_fetch_waits_out_self_clearing_interstitials(test_server, sandbox_supported):
