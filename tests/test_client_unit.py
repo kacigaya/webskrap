@@ -12,9 +12,7 @@ from webskrap import client as client_module
 from webskrap.cdp import CDPBrowser, CDPConnection, CDPPage
 from webskrap.challenges import _DETECT_SCRIPT
 from webskrap.client import (
-    _CONTENT_SCRIPT,
-    _STATE_SCRIPT,
-    LINKS_SCRIPT,
+    _EXTRACT_SCRIPT,
     WebSkrapClient,
     WebSkrapError,
     WebSkrapSession,
@@ -231,6 +229,7 @@ class _FakePage:
         self.challenges = list(challenges or [None])
         self.requested: list[str] = []
         self.scripts: list[str] = []
+        self.extraction_args: list[dict[str, object]] = []
         self.default_timeout_s = 30.0
         self.target_id = "F1"
 
@@ -248,12 +247,15 @@ class _FakePage:
             if isinstance(answer, BaseException):
                 raise answer
             return {"provider": answer, "kind": "challenge"} if answer else None
-        if script == _STATE_SCRIPT:
-            return {"url": self.requested[-1], "title": "Title", "text": self.text}
-        if script == _CONTENT_SCRIPT:
-            return self.html
-        if script == LINKS_SCRIPT:
-            return {"links": [], "total": 0}
+        if script == _EXTRACT_SCRIPT:
+            self.extraction_args.append(arg)
+            return {
+                "url": self.requested[-1],
+                "title": "Title",
+                "text": self.text if arg["text_only"] else self.html,
+                "links": [],
+                "links_total": 0,
+            }
         raise AssertionError(f"unexpected script: {script[:60]}")
 
 
@@ -300,7 +302,8 @@ async def test_fetch_text_only_reads_visible_text_not_html() -> None:
 
     assert result.text == "Visible body"
     assert result.headers == {"content-type": "text/html"}
-    assert _CONTENT_SCRIPT not in page.scripts
+    assert page.scripts.count(_EXTRACT_SCRIPT) == 1
+    assert page.extraction_args == [{"text_only": True, "max_links": None}]
     assert session.closed_pages == [page]  # type: ignore[attr-defined]
     assert result.cookie_notice_declined is None
 
@@ -318,7 +321,7 @@ async def test_fetch_blocks_challenges_before_consent_or_extraction(provider, mo
     assert provider in str(error.value)
     decline.assert_not_awaited()
     assert asked == []
-    assert _CONTENT_SCRIPT not in page.scripts
+    assert _EXTRACT_SCRIPT not in page.scripts
     assert session.closed_pages == [page]  # type: ignore[attr-defined]
 
 
@@ -342,7 +345,7 @@ async def test_readiness_timeout_rechecks_challenge_and_closes_page(provider, mo
     with pytest.raises(WebSkrapError) as error:
         await session.fetch("https://example.test", ready_selector="#quote", timeout_ms=150)
     assert error.value.code is (ErrorCode.BLOCKED if provider else ErrorCode.TIMEOUT)
-    assert _CONTENT_SCRIPT not in page.scripts
+    assert _EXTRACT_SCRIPT not in page.scripts
     assert session.closed_pages == [page]  # type: ignore[attr-defined]
 
 
@@ -443,6 +446,9 @@ async def test_search_loads_the_results_page_and_caps_the_hits(monkeypatch) -> N
 
     assert page.requested == ["https://www.bing.com/search?q=example+domain"]
     assert asked == ["body > *", "body > *"]
+    assert page.scripts.count(_EXTRACT_SCRIPT) == 1
+    assert page.extraction_args == [{"text_only": False, "max_links": None}]
+    assert result.final_url == page.requested[0]
     assert session.closed_pages == [page]  # type: ignore[attr-defined]
     assert result.query == "example domain"
     assert "elapsed_ms" in result.timings
@@ -1067,3 +1073,31 @@ async def test_fetch_many_cleans_up_cancelled_launch(monkeypatch) -> None:
         await task
     assert session._closed
     assert client._sessions == {}
+
+
+@pytest.mark.parametrize("text_only", [False, True])
+@pytest.mark.parametrize(
+    ("include_links", "java_script_enabled", "max_links", "expected_max"),
+    [
+        (False, True, 50, None),
+        (True, False, 50, None),
+        (True, True, 0, 0),
+        (True, True, -1, -1),
+        (True, True, 2, 2),
+    ],
+)
+async def test_fetch_collects_requested_content_in_one_evaluation(
+    text_only, include_links, java_script_enabled, max_links, expected_max
+) -> None:
+    page = _FakePage()
+    result = await _session(page, java_script_enabled=java_script_enabled).fetch(
+        "https://example.test",
+        text_only=text_only,
+        include_links=include_links,
+        max_links=max_links,
+    )
+    assert result.text == (page.text if text_only else page.html)
+    assert result.title == "Title"
+    assert result.final_url == "https://example.test"
+    assert page.scripts.count(_EXTRACT_SCRIPT) == 1
+    assert page.extraction_args == [{"text_only": text_only, "max_links": expected_max}]

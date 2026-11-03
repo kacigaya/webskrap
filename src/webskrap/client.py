@@ -89,10 +89,19 @@ _CONTENT_SCRIPT = """() => {
   if (document.documentElement) html += document.documentElement.outerHTML;
   return html;
 }"""
-_STATE_SCRIPT = (
-    "({ url: location.href, title: document.title, "
-    "text: document.body ? document.body.innerText : '' })"
-)
+_EXTRACT_SCRIPT = """({ text_only, max_links }) => {
+  const text = text_only
+    ? (document.body ? document.body.innerText : '')
+    : (CONTENT)();
+  const collected = max_links === null ? { links: [], total: 0 } : (LINKS)(max_links);
+  return {
+    url: location.href,
+    title: document.title,
+    text,
+    links: collected.links,
+    links_total: collected.total,
+  };
+}""".replace("CONTENT", _CONTENT_SCRIPT).replace("LINKS", LINKS_SCRIPT)
 _POLL_S = 0.1
 
 
@@ -381,11 +390,14 @@ class WebSkrapSession:
                     page, ready_selector, timeout_s=timeout_s, headers=headers, status=status
                 )
             await raise_for_challenge(page, headers, status, deadline=deadline)
-            state = await page.evaluate(_STATE_SCRIPT)
-            text = state["text"] if text_only else await page.evaluate(_CONTENT_SCRIPT)
-            links, links_total = await _collect_links(
-                page,
-                max_links if include_links and self.config.java_script_enabled else None,
+            state = await page.evaluate(
+                _EXTRACT_SCRIPT,
+                {
+                    "text_only": text_only,
+                    "max_links": (
+                        max_links if include_links and self.config.java_script_enabled else None
+                    ),
+                },
             )
             screenshot_path = await _maybe_screenshot(page, screenshot)
             cookies = await self.cookies()
@@ -399,14 +411,14 @@ class WebSkrapSession:
                 status=status,
                 ok=status is not None and 200 <= status < 400,
                 headers=headers,
-                text=text,
+                text=state["text"],
                 title=state["title"],
                 cookies=cookies,
                 timings={"elapsed_ms": (time.perf_counter() - started) * 1000},
                 screenshot_path=screenshot_path,
                 cookie_notice_declined=declined,
-                links=links,
-                links_total=links_total,
+                links=[Link(**link) for link in state["links"]],
+                links_total=state["links_total"],
             )
         finally:
             documents.stop()
@@ -466,19 +478,18 @@ class WebSkrapSession:
                 page, response_headers(response), response_status(response), deadline=deadline
             )
             declined = await self._decline_after_navigation(page, "domcontentloaded")
-            html = await page.evaluate(_CONTENT_SCRIPT)
-            final_url = (await page.evaluate(_STATE_SCRIPT))["url"]
+            state = await page.evaluate(_EXTRACT_SCRIPT, {"text_only": False, "max_links": None})
         finally:
             documents.stop()
             with CancelScope(shield=True):
                 await self.close_page(page)
-        hits = parse_results(engine, html)
+        hits = parse_results(engine, state["text"])
         status = response_status(response)
         return SearchResult(
             query=query,
             engine=engine,
             url=url,
-            final_url=final_url,
+            final_url=state["url"],
             status=status,
             ok=status is not None and 200 <= status < 400,
             hits=hits[: max(0, max_results)],
@@ -1152,16 +1163,3 @@ async def _maybe_screenshot(page: CDPPage, screenshot: bool | str | Path) -> Pat
     image = await page.screenshot(full_page=True)
     await asyncio.to_thread(path.write_bytes, image)
     return path
-
-
-async def _collect_links(page: CDPPage, max_links: int | None) -> tuple[list[Link], int]:
-    """Return ``page``'s outbound links and how many there were before the cap.
-
-    ``max_links`` of None means the caller did not ask for links, or JavaScript
-    is disabled for this session; both return an empty list and a zero total
-    rather than failing the fetch.
-    """
-    if max_links is None:
-        return [], 0
-    collected = await page.evaluate(LINKS_SCRIPT, max_links)
-    return [Link(**link) for link in collected["links"]], int(collected["total"])

@@ -218,3 +218,71 @@ async def test_browser_text_rejects_a_bad_pattern_before_connecting(
     monkeypatch.setattr(mcp_server, "_browser_action", None)  # must not be reached
     with pytest.raises(WebSkrapError, match=r"invalid pattern.*\[code: usage\]"):
         await mcp_server.browser_text(pattern="(")
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize("text_only", [False, True])
+@pytest.mark.parametrize("max_links", [None, 0, -1, 1])
+async def test_extraction_skips_unused_content_and_links(page, text_only, max_links) -> None:
+    from webskrap.client import _EXTRACT_SCRIPT
+
+    await set_page_content(
+        page,
+        "<!DOCTYPE html><html><head><title>Extract</title></head>"
+        '<body>Visible <a href="https://example.test/one">One</a></body></html>',
+    )
+    result = await page.evaluate(
+        """(options) => {
+          let bodyReads = 0;
+          let htmlReads = 0;
+          let linkScans = 0;
+          const bodyText = document.body.innerText;
+          const html = document.documentElement.outerHTML;
+          Object.defineProperty(document.body, 'innerText', {get() {
+            bodyReads++;
+            return bodyText;
+          }});
+          Object.defineProperty(document.documentElement, 'outerHTML', {get() {
+            htmlReads++;
+            return html;
+          }});
+          const query = document.querySelectorAll.bind(document);
+          document.querySelectorAll = (selector) => {
+            if (selector === 'a[href]') linkScans++;
+            return query(selector);
+          };
+          return {state: (EXTRACT)(options), bodyReads, htmlReads, linkScans};
+        }""".replace("EXTRACT", _EXTRACT_SCRIPT),
+        {"text_only": text_only, "max_links": max_links},
+    )
+    assert result["bodyReads"] == int(text_only)
+    assert result["htmlReads"] == int(not text_only)
+    assert result["linkScans"] == int(max_links is not None)
+    state = result["state"]
+    assert state["title"] == "Extract"
+    assert state["url"] == "about:blank"
+    assert state["text"] == (
+        "Visible One"
+        if text_only
+        else "<!DOCTYPE html><html><head><title>Extract</title></head>"
+        '<body>Visible <a href="https://example.test/one">One</a></body></html>'
+    )
+    assert state["links_total"] == int(max_links is not None)
+    assert state["links"] == (
+        [{"href": "https://example.test/one", "text": "One"}] if max_links == 1 else []
+    )
+
+
+@pytest.mark.browser
+async def test_extraction_handles_a_document_without_a_body(page) -> None:
+    from webskrap.client import _EXTRACT_SCRIPT
+
+    result = await page.evaluate(
+        """() => {
+          document.body.remove();
+          return (EXTRACT)({text_only: true, max_links: null});
+        }""".replace("EXTRACT", _EXTRACT_SCRIPT)
+    )
+    assert result["text"] == ""
+    assert result["links"] == []
+    assert result["links_total"] == 0
