@@ -43,6 +43,30 @@ config = SessionConfig(
 `channel=None` or `"chromium"` uses the Chrome for Testing build from
 `webskrap install`.
 
+## Python batches
+
+Use `client.fetch_many(urls)` to fetch a finite batch in order with one browser:
+
+```python
+async with WebSkrapClient() as client:
+    results = await client.fetch_many(
+        ["https://example.com", "https://example.org"], text_only=True
+    )
+```
+
+Each batch shares cookies and storage, then closes its browser. Separate batches
+and `client.fetch()` calls use fresh sessions. An explicit `user_data_dir` can
+still share state on disk. Empty batches do not launch a browser. The first page
+error stops the batch and raises; no partial list is returned. Ordinary HTTP
+errors remain results with `ok=False`. `screenshot=True` uses a separate generated
+PNG filename for each page.
+
+For large inputs, per-page options, or state across batches, create a session
+with `session = await client.session("crawl")`. Call `await session.fetch(url)`
+for each URL. Close it with `await client.close_session("crawl")`, or let the
+client context close it. Session names belong to one client. Use separate
+sessions for unrelated callers.
+
 ## Pages you drive yourself
 
 `session.new_page()` returns a `webskrap.cdp.CDPPage` with the session's

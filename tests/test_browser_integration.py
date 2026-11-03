@@ -9,6 +9,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from mcp import ClientSession
@@ -699,3 +700,25 @@ def test_persistent_actions_produce_human_input_events(persistent_session_env: P
     assert all(
         later - earlier >= 50 for earlier, later in zip(keydowns, keydowns[1:], strict=False)
     )
+
+
+async def test_python_batches_share_cookies_only_within_batch(
+    test_server: str, sandbox_supported: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
+    async with WebSkrapClient(default_config=config) as client:
+        create = AsyncMock(wraps=client._create_session)
+        monkeypatch.setattr(client, "_create_session", create)
+        first = await client.fetch_many(
+            [f"{test_server}/set-cookie", f"{test_server}/echo-cookie"],
+            text_only=True,
+            wait_until="load",
+        )
+        assert "webskrap_test=1" in first[1].text
+        assert create.await_count == 1
+        second = await client.fetch_many([f"{test_server}/echo-cookie"], text_only=True)
+        single = await client.fetch(f"{test_server}/echo-cookie", text_only=True)
+        assert "webskrap_test" not in second[0].text
+        assert "webskrap_test" not in single.text
+        assert create.await_count == 3
+        assert client._sessions == {}

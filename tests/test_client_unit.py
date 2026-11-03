@@ -986,3 +986,84 @@ def test_a_real_playwright_storage_state_is_accepted() -> None:
         ],
     }
     assert load_storage_state(state) is state
+
+
+async def test_fetch_many_reuses_one_session_and_forwards_options(monkeypatch) -> None:
+    client = WebSkrapClient()
+    session = _session(_FakePage())
+    create = AsyncMock(return_value=session)
+    monkeypatch.setattr(client, "_create_session", create)
+    config = SessionConfig(decline_cookies=True)
+    results = await client.fetch_many(
+        (url for url in ["https://example.test/1", "https://example.test/2"]),
+        config=config,
+        profile="mobile-chrome",
+        text_only=True,
+        include_links=True,
+        decline_cookies=False,
+    )
+    assert [result.url for result in results] == [
+        "https://example.test/1",
+        "https://example.test/2",
+    ]
+    assert all(result.text == "Visible body" for result in results)
+    create.assert_awaited_once()
+    assert create.call_args.args[1] is config
+    assert create.call_args.args[2].name == "mobile-chrome"
+    assert session._closed
+    assert client._sessions == {}
+
+
+@pytest.mark.parametrize("urls", [[], iter(())])
+async def test_fetch_many_empty_does_not_launch(monkeypatch, urls) -> None:
+    client = WebSkrapClient()
+    create = AsyncMock()
+    monkeypatch.setattr(client, "_create_session", create)
+    assert await client.fetch_many(urls) == []
+    create.assert_not_awaited()
+
+
+@pytest.mark.parametrize("urls", ["https://example.test", ["https://example.test", "file:///x"]])
+async def test_fetch_many_validates_before_launch(monkeypatch, urls) -> None:
+    client = WebSkrapClient()
+    create = AsyncMock()
+    monkeypatch.setattr(client, "_create_session", create)
+    with pytest.raises(WebSkrapError) as error:
+        await client.fetch_many(urls)
+    assert error.value.code == ErrorCode.USAGE
+    create.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("page failed"), asyncio.CancelledError()])
+async def test_fetch_many_stops_and_closes_on_page_failure(monkeypatch, failure) -> None:
+    client = WebSkrapClient()
+    session = _session()
+    fetch = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(session, "fetch", fetch)
+    monkeypatch.setattr(client, "_create_session", AsyncMock(return_value=session))
+    with pytest.raises(type(failure)):
+        await client.fetch_many(["https://example.test/1", "https://example.test/2"])
+    fetch.assert_awaited_once()
+    assert session._closed
+    assert client._sessions == {}
+
+
+async def test_fetch_many_cleans_up_cancelled_launch(monkeypatch) -> None:
+    client = WebSkrapClient()
+    started, release = asyncio.Event(), asyncio.Event()
+    session = _session()
+
+    async def create(*_args):
+        started.set()
+        await release.wait()
+        return session
+
+    monkeypatch.setattr(client, "_create_session", create)
+    task = asyncio.create_task(client.fetch_many(["https://example.test"]))
+    await started.wait()
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert session._closed
+    assert client._sessions == {}
