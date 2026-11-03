@@ -758,7 +758,8 @@ def test_schema_reports_kinds_defaults_and_choices() -> None:
     assert parameters["url"]["required"] is True
     assert parameters["profile"]["kind"] == "option"
     assert parameters["profile"]["default"] == "desktop-chrome"
-    assert parameters["resource_policy"]["choices"] == ["all", "lite", "documents"]
+    assert parameters["resource_policy"]["choices"] == ["auto", "all", "lite", "documents"]
+    assert parameters["resource_policy"]["default"] == "auto"
     assert parameters["launch_args"]["multiple"] is True
 
 

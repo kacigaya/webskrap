@@ -261,8 +261,11 @@ def fetch_command(
     ] = 30_000,
     resource_policy: Annotated[
         ResourcePolicy,
-        typer.Option("--resource-policy", help="Resource routing preset."),
-    ] = ResourcePolicy.ALL,
+        typer.Option(
+            "--resource-policy",
+            help="auto: lite for text without screenshots; all otherwise. Or all, lite, documents.",
+        ),
+    ] = ResourcePolicy.AUTO,
     decline_cookies: Annotated[
         bool,
         typer.Option(

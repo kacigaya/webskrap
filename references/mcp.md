@@ -43,7 +43,10 @@ or `full`) to set how much of the profile pages see.
   a 2-second limit.
 - `browser_goto` and `browser_open` take `decline_cookies`;
   `browser_screenshot` takes `target` for one element.
-- Use `resource_policy=lite` to skip images, fonts, and media.
+- Both fetch tools default to `domcontentloaded` and `resource_policy="auto"`.
+  Auto uses lite for text and all for HTML. Explicit policies take priority.
+  Use `ready_selector` for deferred content. Keep cookie rejection on unless
+  the page is known not to need it.
 - Keep `include_links` off unless links are needed.
 - Snapshots default to `depth=6`. Set `depth=null` for an unlimited tree,
   or reduce depth before increasing `max_chars`.

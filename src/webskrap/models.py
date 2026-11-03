@@ -41,11 +41,14 @@ ProfileMode = Literal["native", "locale", "full"]
 class ResourcePolicy(StrEnum):
     """Which resource types a session is allowed to load.
 
+    ``AUTO`` uses lite for text-only fetches without screenshots and all
+    resources for other tasks. Explicit policies always take priority.
     ``LITE`` blocks images, fonts and media; ``DOCUMENTS`` also blocks
     stylesheets. Both cut bandwidth and latency, and both are visible to a site
     that checks whether its assets loaded.
     """
 
+    AUTO = "auto"
     ALL = "all"
     LITE = "lite"
     DOCUMENTS = "documents"
@@ -267,8 +270,8 @@ class SessionConfig(BaseModel):
     """How a session's browser is launched and how its pages behave.
 
     Defaults are deliberately plain: headless Chromium with its native
-    identity, no proxy, everything loaded, and every stealth feature off. The
-    stealth switches are documented at their fields, since each has a cost as
+    identity, no proxy, task-based resource loading, and every stealth feature
+    off. The stealth switches are documented at their fields, since each has a cost as
     well as a benefit.
     """
 
@@ -284,7 +287,7 @@ class SessionConfig(BaseModel):
     user_data_dir: Path | None = None
     storage_state: Path | dict[str, Any] | None = None
     proxy: ProxyConfig | None = None
-    resource_policy: ResourcePolicy = ResourcePolicy.ALL
+    resource_policy: ResourcePolicy = ResourcePolicy.AUTO
     ignore_https_errors: bool = False
     java_script_enabled: bool = True
     service_workers: Literal["allow", "block"] = "allow"

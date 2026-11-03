@@ -32,6 +32,7 @@ def test_parse_wait_until_rejects_other_values(value: str) -> None:
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
+        pytest.param("auto", ResourcePolicy.AUTO, id="auto"),
         pytest.param("all", ResourcePolicy.ALL, id="all"),
         pytest.param("lite", ResourcePolicy.LITE, id="lite"),
         pytest.param("documents", ResourcePolicy.DOCUMENTS, id="documents"),
