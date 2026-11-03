@@ -114,8 +114,8 @@ Keep results small
 - max_chars defaults to 8000. Start lower; page via next_text_offset /
   next_snapshot_offset. browser_snapshot defaults to depth=6 (null for full).
 - Keep text_only=true; browser_eval should return a narrow value, not full DOM.
-- resource_policy="lite" skips images/fonts/media. Both fetch tools accept it
-  and wait_until: stealth_fetch defaults to domcontentloaded, fetch to networkidle.
+- Fetch defaults: domcontentloaded, resource_policy="auto" (lite for text, all
+  for HTML). Use ready_selector for deferred content; networkidle only if needed.
 - Opt into repeated fetch reuse with session="crawl"; cookies/storage share that
   name. Keep profile/config unchanged. fetch_session_close releases it.
   These warm sessions are separate from browser_* sessions and end on server
@@ -203,8 +203,8 @@ async def fetch(
     url: str,
     profile: str = "desktop-chrome",
     channel: str = "chrome",
-    wait_until: str = "networkidle",
-    resource_policy: str = "all",
+    wait_until: str = "domcontentloaded",
+    resource_policy: str = "auto",
     timeout_ms: float = 60_000,
     max_chars: int = 8_000,
     offset: int = 0,
@@ -221,8 +221,8 @@ async def fetch(
 
     Uses the same stealth path as the CLI (no Runtime.enable, isolated-world
     scripts), so
-    JS-heavy and anti-bot pages that block naive scrapers still load. Waits for
-    networkidle by default so single-page apps have hydrated before reading.
+    JS-heavy and anti-bot pages that block naive scrapers still load. Uses
+    domcontentloaded by default; set ready_selector for deferred content.
     Returns clean visible page text by default (LLM-friendly, no HTML tags); set
     text_only=False to get the raw HTML instead. For finer stealth control
     (fingerprint surface, WebRTC, UA masking, persistent profile) use
@@ -234,7 +234,8 @@ async def fetch(
         channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
             ARM64 has no build), Edge and then bundled Chromium are tried.
         wait_until: commit, domcontentloaded, load, or networkidle.
-        resource_policy: all, lite (block images/fonts/media), or documents.
+        resource_policy: auto (lite for text, all for HTML), all, lite, or
+            documents (also blocks CSS). Explicit policies take priority.
         timeout_ms: Navigation timeout in milliseconds.
         max_chars: Maximum characters of page text to return.
         offset: Character index to start the returned text at. Pass back the
@@ -303,7 +304,7 @@ async def stealth_fetch(
     *,
     ready_selector: str | None = None,
     wait_until: str = "domcontentloaded",
-    resource_policy: str = "all",
+    resource_policy: str = "auto",
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -346,7 +347,8 @@ async def stealth_fetch(
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
         wait_until: commit, domcontentloaded (default), load, or networkidle.
-        resource_policy: all, lite (block images/fonts/media), or documents.
+        resource_policy: auto (lite for text, all for HTML), all, lite, or
+            documents (also blocks CSS). Explicit policies take priority.
         ready_selector: Optional CSS selector or snapshot ref that must be visible
             before extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;

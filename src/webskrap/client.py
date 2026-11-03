@@ -46,6 +46,7 @@ from webskrap.models import (
     FetchResult,
     GpuBackend,
     Link,
+    ResourcePolicy,
     SearchEngine,
     SearchResult,
     SessionConfig,
@@ -294,16 +295,24 @@ class WebSkrapSession:
         """Close the session, so a failing block still releases the browser."""
         await self.close()
 
-    async def new_page(self) -> CDPPage:
+    async def new_page(self, *, text_only: bool = False) -> CDPPage:
         """Open a page with the session's profile and policies applied.
 
+        With the auto resource policy, text_only skips images, fonts and media.
         Close it with :meth:`close_page` when done; the browser closes any page
         left open when the session closes.
         """
         self._ensure_open()
         page = await self.browser.new_page()
         try:
-            await cdp_setup.prepare_page(page, self.config, self.profile)
+            config = self.config
+            if config.resource_policy is ResourcePolicy.AUTO:
+                config = config.model_copy(
+                    update={
+                        "resource_policy": ResourcePolicy.LITE if text_only else ResourcePolicy.ALL
+                    }
+                )
+            await cdp_setup.prepare_page(page, config, self.profile)
         except BaseException:
             with CancelScope(shield=True):
                 await self.close_page(page)
@@ -344,7 +353,9 @@ class WebSkrapSession:
                 full-page PNG to. The path is used as given, so pass a
                 destination you control.
             timeout_ms: Navigation timeout; defaults to the config's.
-            text_only: Return visible body text instead of page HTML.
+            text_only: Return visible body text instead of page HTML. The auto
+                resource policy skips images, fonts and media unless a screenshot
+                is requested.
             include_links: Also collect the page's outbound links. Off by
                 default because a link-heavy page costs more to return than the
                 caller may want.
@@ -371,7 +382,7 @@ class WebSkrapSession:
             raise WebSkrapError("ready_selector cannot be blank", code=ErrorCode.USAGE)
         started = time.perf_counter()
         timeout_s = (timeout_ms or self.config.navigation_timeout_ms) / 1000
-        page = await self.new_page()
+        page = await self.new_page(text_only=text_only and not screenshot)
         documents = record_documents(page)
         try:
             deadline = time.monotonic() + timeout_s

@@ -19,9 +19,11 @@ spends tokens on content instead of markup (typically 5-10x fewer tokens than
 raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control. Pass
 `text_only=false` when you need the HTML.
 
-`fetch` waits for `networkidle` by default; `stealth_fetch` uses
-`domcontentloaded`. Both accept `wait_until` and `resource_policy`. Use `lite`
-to skip images, fonts and media, or `documents` to also skip stylesheets.
+Both fetch tools default to `domcontentloaded` and `resource_policy="auto"`.
+Auto skips images, fonts and media for text; HTML loads all resources.
+Explicit `all`, `lite`, or `documents` policies take priority. Use `documents`
+only when removing CSS preserves the required result. Use `ready_selector` for
+deferred content. Keep cookie rejection on unless the page is known not to need it.
 Earlier load states can read before deferred content arrives. Routing disables
 the HTTP cache and does not intercept service-worker-owned requests.
 
@@ -87,8 +89,8 @@ leave the notice in place.
 | `url` | required | URL to load. |
 | `profile` | `desktop-chrome` | Profile label; the browser's native identity is kept unless `profile_mode` asks for more. |
 | `channel` | `chrome` | Browser channel; use `chromium` on Linux ARM64. |
-| `wait_until` | `networkidle` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
-| `resource_policy` | `all` | `all`, `lite`, or `documents`. |
+| `wait_until` | `domcontentloaded` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
+| `resource_policy` | `auto` | `auto`, `all`, `lite`, or `documents`. |
 | `timeout_ms` | `60000` | Timeout applied separately to navigation and readiness. |
 | `ready_selector` | `null` | CSS selector or snapshot ref that must become visible after consent dismissal. |
 | `max_chars` | `8000` | Maximum returned text characters. |
@@ -109,7 +111,7 @@ Example arguments:
 ```
 
 `stealth_fetch` accepts the same URL/profile/timeout/output-size/session controls,
-`resource_policy` (default `all`) and `wait_until` (default `domcontentloaded`),
+`resource_policy` (default `auto`) and `wait_until` (default `domcontentloaded`),
 plus stealth options:
 
 ```json

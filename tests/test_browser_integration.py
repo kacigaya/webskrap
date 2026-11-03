@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import shutil
 import sys
 import threading
@@ -175,6 +176,25 @@ class _Handler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self) -> None:
+        if self.path == "/resource-probe":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"""<html><body><div id="asset-result"></div>
+            <img src="/asset.svg"
+              onload="document.querySelector('div').textContent='image loaded'"
+              onerror="document.querySelector('div').textContent='image blocked'">
+            <script>new MutationObserver(() => {
+              document.querySelector('div').setAttribute('data-ready', 'yes');
+            }).observe(document.querySelector('div'), {childList:true});</script>
+            </body></html>""")
+            return
+        if self.path == "/asset.svg":
+            self.send_response(200)
+            self.send_header("Content-Type", "image/svg+xml")
+            self.end_headers()
+            self.wfile.write(b'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"/>')
+            return
         if self.path in ("/empty-404", "/empty-500"):
             self.send_response(int(self.path.rsplit("-", 1)[1]))
             self.send_header("Content-Type", "text/html")
@@ -722,3 +742,48 @@ async def test_python_batches_share_cookies_only_within_batch(
         assert "webskrap_test" not in single.text
         assert create.await_count == 3
         assert client._sessions == {}
+
+
+@pytest.mark.parametrize(
+    "policy,text_only,screenshot,expected",
+    [
+        ("auto", True, False, "image blocked"),
+        ("auto", False, False, "image loaded"),
+        ("auto", True, True, "image loaded"),
+        ("all", True, False, "image loaded"),
+        ("lite", False, False, "image blocked"),
+        ("lite", True, True, "image blocked"),
+    ],
+)
+async def test_fetch_loads_resources_for_task(
+    test_server, sandbox_supported, tmp_path, policy, text_only, screenshot, expected
+):
+    config = SessionConfig(chromium_sandbox=sandbox_supported, resource_policy=policy)
+    async with WebSkrapClient(default_config=config) as client:
+        session = await client.session("resources")
+        result = await session.fetch(
+            f"{test_server}/resource-probe",
+            text_only=text_only,
+            screenshot=tmp_path / "page.png" if screenshot else False,
+            ready_selector="#asset-result[data-ready]",
+        )
+        content = (
+            result.text
+            if text_only
+            else re.search(r'<div id="asset-result"[^>]*>([^<]+)</div>', result.text).group(1)
+        )
+        assert content == expected
+        assert (tmp_path / "page.png").exists() is screenshot
+        # A second fetch in the same session must keep its own output policy.
+        if policy == "auto":
+            other = await session.fetch(
+                f"{test_server}/resource-probe",
+                text_only=not text_only,
+                ready_selector="#asset-result[data-ready]",
+            )
+            content = (
+                other.text
+                if not text_only
+                else re.search(r'<div id="asset-result"[^>]*>([^<]+)</div>', other.text).group(1)
+            )
+            assert content == ("image loaded" if text_only else "image blocked")

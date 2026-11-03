@@ -17,11 +17,12 @@ config = SessionConfig(resource_policy=ResourcePolicy.LITE)
 
 | Policy | Behavior |
 | --- | --- |
+| `ResourcePolicy.AUTO` | Default. Uses lite for text without screenshots; all for other tasks. |
 | `ResourcePolicy.ALL` | Allows all resources. |
 | `ResourcePolicy.LITE` | Blocks images, fonts, and media. |
 | `ResourcePolicy.DOCUMENTS` | Blocks images, fonts, media, and stylesheets. |
 
-Use `ALL` for maximum page fidelity. Use `LITE` when you want a faster page load while keeping stylesheets and scripts.
+Explicit policies take priority over `AUTO`. Use `ALL` for maximum page fidelity. Use `LITE` when you want a faster page load while keeping stylesheets and scripts.
 
 ## Examples
 
@@ -38,15 +39,15 @@ async with WebSkrapClient() as client:
 ```
 
 Use `DOCUMENTS` when you only need document-oriented HTML and can tolerate
-unstyled pages:
+unstyled pages without losing required content:
 
 ```python
 config = SessionConfig(resource_policy=ResourcePolicy.DOCUMENTS)
 ```
 
-Resource policies block resource types through the CDP `Fetch` domain on every
-page of the session. They also cover cross-site iframes, and shared and service
-workers. Scripts and XHR/fetch requests are not blocked by these presets.
+Resource policies use the CDP `Fetch` domain. Auto selects a policy for each
+page and its cross-site iframes. Auto does not block resources in shared or
+service workers. Explicit policies also apply to shared and service workers. Scripts and XHR/fetch requests are not blocked by these presets.
 
 ## CLI
 

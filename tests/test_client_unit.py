@@ -268,7 +268,7 @@ def _session(page: _FakePage | None = None, **config: Any) -> WebSkrapSession:
     )
     session.closed_pages = []  # type: ignore[attr-defined]
 
-    async def new_page() -> Any:
+    async def new_page(*, text_only: bool = False) -> Any:
         if page is None:
             raise AssertionError("no page may open")
         return page
@@ -1101,3 +1101,41 @@ async def test_fetch_collects_requested_content_in_one_evaluation(
     assert result.final_url == "https://example.test"
     assert page.scripts.count(_EXTRACT_SCRIPT) == 1
     assert page.extraction_args == [{"text_only": text_only, "max_links": expected_max}]
+
+
+@pytest.mark.parametrize("policy", ["auto", "all", "lite", "documents"])
+@pytest.mark.parametrize("text_only", [False, True])
+async def test_page_resource_policy_is_resolved_without_changing_session(
+    monkeypatch, policy, text_only
+) -> None:
+    browser = _fake_browser()
+    browser.new_page = AsyncMock(return_value=MagicMock(spec=CDPPage))
+    prepare = AsyncMock()
+    monkeypatch.setattr(client_module.cdp_setup, "prepare_page", prepare)
+    session = WebSkrapSession(
+        name="resources",
+        browser=browser,
+        config=SessionConfig(resource_policy=policy, decline_cookies=True),
+        profile=get_profile(None),
+    )
+    await session.new_page(text_only=text_only)
+    expected = ("lite" if text_only else "all") if policy == "auto" else policy
+    assert prepare.call_args.args[1].resource_policy == expected
+    assert session.config.resource_policy == policy
+    assert session.config.decline_cookies is True
+
+
+@pytest.mark.parametrize(
+    "text_only,screenshot,expected",
+    [
+        (False, False, False),
+        (True, False, True),
+        (True, True, False),
+    ],
+)
+async def test_fetch_selects_resources_for_output(monkeypatch, text_only, screenshot, expected):
+    session = _session(_FakePage(), decline_cookies=False)
+    session.new_page = AsyncMock(wraps=session.new_page)
+    monkeypatch.setattr(client_module, "_maybe_screenshot", AsyncMock(return_value=None))
+    await session.fetch("https://example.test", text_only=text_only, screenshot=screenshot)
+    session.new_page.assert_awaited_once_with(text_only=expected)

@@ -136,6 +136,16 @@ Coordinates are CSS pixels from the original image's top-left. Take a fresh
 view after scrolling or page changes. Headless Chromium needs no Xvfb for
 this; the agent's client and model must support image input.
 
+## Load only what the task needs
+The default resource policy is `auto`. Text-only fetches skip images, fonts
+and media. HTML fetches, screenshots and interactive pages load all resources.
+Set `resource_policy="all"`, `"lite"`, or `"documents"` to override this choice.
+Use `documents` only when removing CSS preserves the required result.
+Fetches use `domcontentloaded`; set `ready_selector` for deferred content.
+Use `networkidle`, screenshots and full snapshots only when the task needs them.
+CLI and MCP reject cookies by default. Disable this only for known pages where
+it is unnecessary. In Python, enable rejection with `SessionConfig(decline_cookies=True)`.
+
 ## Documentation
 
 - [Agent skill](.agents/skills/webskrap/SKILL.md)

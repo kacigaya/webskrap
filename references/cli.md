@@ -25,6 +25,10 @@ webskrap fetch https://example.com --stdout --text-only
 webskrap fetch https://example.com --quiet --output page.html
 ```
 
+The fetch default is `--resource-policy auto`: `--text-only` skips images, fonts
+and media, unless `--screenshot` is set. Other fetches load all resources.
+Explicit `all`, `lite`, or `documents` policies take priority.
+
 Use `--offset` with the previous result's next offset to continue reading a
 long page. Do not re-fetch with an ever larger limit.
 

@@ -27,11 +27,14 @@ eight named fetch sessions stay open. A busy session cannot be closed. These
 sessions end when the MCP server stops and are separate from `browser_*`
 sessions. Persistent `user_data_dir` files survive closing.
 
-Both fetch tools accept `resource_policy` and `wait_until`. `stealth_fetch`
-defaults to `domcontentloaded`; `fetch` defaults to `networkidle`. Use `lite`
-to skip images/fonts/media or `documents` to also skip stylesheets. Earlier
-load states can read before deferred page content arrives. Routing disables
-the browser's HTTP cache and does not intercept service-worker-owned requests.
+Both fetch tools default to `domcontentloaded` and `resource_policy="auto"`.
+Auto skips images, fonts and media for text. HTML loads all resources. Explicit
+`all`, `lite`, or `documents` policies take priority. Use `documents` only when
+removing CSS preserves the required result. Use `ready_selector` for deferred
+content. Reserve `networkidle`, screenshots and full snapshots for tasks that
+need them. Cookie rejection stays on; disable it only for known pages where it
+is unnecessary. Routing disables the HTTP cache and does not intercept
+service-worker-owned requests.
 
 Pass `ready_selector="#content"` to either fetch tool when the requested content
 arrives later. It must become visible after consent dismissal; the wait uses

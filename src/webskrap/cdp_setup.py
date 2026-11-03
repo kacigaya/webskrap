@@ -44,6 +44,7 @@ from webskrap.models import BrowserProfile, ResourcePolicy, SessionConfig, user_
 
 #: CDP resource types each policy blocks.
 BLOCKED_TYPES: dict[ResourcePolicy, tuple[str, ...]] = {
+    ResourcePolicy.AUTO: (),
     ResourcePolicy.ALL: (),
     ResourcePolicy.LITE: ("Image", "Font", "Media"),
     ResourcePolicy.DOCUMENTS: ("Image", "Font", "Media", "Stylesheet"),

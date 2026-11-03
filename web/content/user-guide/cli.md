@@ -129,7 +129,11 @@ webskrap fetch https://example.com --resource-policy lite
 webskrap fetch https://example.com --resource-policy documents -o page.html
 ```
 
-`lite` blocks images, fonts, and media. `documents` also blocks stylesheets.
+The fetch default is `auto`. With `--text-only`, it skips images, fonts and
+media unless a screenshot is requested. HTML and screenshots load all resources.
+Explicit policies take priority. `lite` blocks images, fonts and media.
+`documents` also blocks stylesheets; use it only when removing CSS preserves
+the required result.
 
 ## Cookie banners
 
