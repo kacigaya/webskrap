@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
       # uv, as in CI: the runner's bundled pip can lag behind CA-bundle fixes
       # and would fetch the build tooling with stale trust roots.
-      - uses: astral-sh/setup-uv@v10.3.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: "3.13"
       - name: Prepare package output
