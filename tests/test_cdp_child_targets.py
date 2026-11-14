@@ -277,8 +277,9 @@ async def test_datadome_device_check_tracks_the_live_cross_site_frame(
         "/captcha/",
         '<body data-dd-response-page="hard-block">Restricted</body>'
         if outcome == "block"
-        else """<body><img src="/challenge.png"><button id="manual">Manual check</button>
-<script>document.querySelector('button').onclick = () => parent.postMessage('done', '*');
+        else """<body><img><button id="manual">Manual check</button>
+<script>setTimeout(() => { document.querySelector('img').src = '/challenge.png'; }, 500);
+document.querySelector('button').onclick = () => parent.postMessage('done', '*');
 </script></body>""",
     )
     config = SessionConfig(
@@ -305,7 +306,9 @@ async def test_datadome_device_check_tracks_the_live_cross_site_frame(
                 "http://geo.captcha-delivery.com/interstitial/"
             )
         if outcome == "captcha":
-            assert any(r["url"].endswith("/challenge.png") for r in _Proxy.requests)
+            async with asyncio.timeout(5):
+                while not any(r["url"].endswith("/challenge.png") for r in _Proxy.requests):
+                    await asyncio.sleep(0.01)
             # Stand-in for a person's click on our local test fixture only.
             tree = await cdp_dom.snapshot(page)
             button = re.search(r'"Manual check" \[ref=(f\d+e\d+)\]', tree)

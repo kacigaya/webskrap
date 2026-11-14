@@ -116,10 +116,18 @@ and Darwin, Bandit, source/wheel build and Twine metadata validation. The review
 was performed locally. Public live tests and Windows/macOS runtime tests were
 not run on this Linux host. Cross-platform typing does not replace those tests.
 
-Both pip-audit and the OSV scan of 51 locked public packages found the existing
-`opentelemetry-api==1.45.1` advisory
+The lockfile pins `opentelemetry-api==1.45.2`, which fixes
 [GHSA-mf5v-w3w3-f6cg](https://osv.dev/vulnerability/GHSA-mf5v-w3w3-f6cg)
-(CVE-2026-126360, traceparent parsing denial of service; supplied CVSS v3.1
-vector `AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L`). The affected range starts at 0
-and is fixed in 1.45.2. This unchanged dependency remains an audit failure;
-no dependency versions or lockfile entries were changed for snapshot work.
+(CVE-2026-126360, traceparent parsing denial of service). The previous locked
+version, 1.45.1, failed the CI audit. Only that package's version and artifact
+metadata changed. Both pip-audit and the OSV scan of 51 locked public packages
+now report no known vulnerabilities. No new dependency was added.
+
+After the audit repair, the full local non-live suite passed 967 tests with
+89.15% coverage. Windows CI also exposed a fixture race: challenge detection
+can return before an iframe's image request reaches the proxy. The local test
+now defers that request and waits for its actual arrival with a five-second
+deadline. The old immediate assertion failed against the delayed fixture;
+all six transition/authentication cases pass with the bounded wait. The final
+combined frame/snapshot run passed 30 tests. Production challenge handling is
+unchanged.
