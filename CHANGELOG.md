@@ -9,6 +9,41 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-11-14
+
+### Added
+
+- MCP `browser_find` locates accessible elements and visible text with minimal
+  ancestor context. `browser_snapshot` accepts subtree targets and optional
+  bounding boxes. Existing interaction refs and response fields stay compatible.
+- Named MCP fetch sessions reuse a browser across repeated requests. Close them
+  with `fetch_session_close`.
+
+### Changed
+
+- Page extraction uses one browser evaluation.
+- Fetch defaults use `domcontentloaded` and automatic resource policies:
+  lightweight resources for text, all resources for HTML. Use explicit
+  `networkidle` or `resource_policy="all"` when a task needs them.
+- Refresh the Python dependency lock and update setup-uv to 10.3.3.
+
+### Fixed
+
+- Preserve empty HTTP error responses instead of reporting a navigation failure.
+- Keep CLI schema output compatible with Typer 0.29 type descriptors and older
+  Typer parameter types.
+- Accessibility searches retain inline paragraph, status and form-value text.
+  Snapshots follow the focused dialog when native modal dialogs are stacked.
+- Wait for the local cross-site fixture's image request before checking it in
+  browser tests.
+
+### Security
+
+- Omit password input values from accessibility snapshots. Escape URL metadata
+  and normalize line separators so page attributes cannot inject fake snapshot
+  lines. Detect detached refs before interaction.
+- Update locked OpenTelemetry API to 1.45.2 for GHSA-mf5v-w3w3-f6cg.
+
 ## [3.2.4] - 2026-11-01
 
 ### Added
@@ -1001,7 +1036,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.2.4...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/kacigaya/webskrap/compare/v3.2.4...v3.3.0
 [3.2.4]: https://github.com/kacigaya/webskrap/compare/v3.2.3...v3.2.4
 [3.2.3]: https://github.com/kacigaya/webskrap/compare/v3.2.2...v3.2.3
 [3.2.2]: https://github.com/kacigaya/webskrap/compare/v3.2.1...v3.2.2
