@@ -654,7 +654,7 @@ def test_cdp_session_snapshot_refs_drive_elements(
     assert "Secret" not in tree  # hidden subtrees are left out
     assert "Invisible text" not in tree and "Shown again" in tree
     # Links are named by their image's alt text and say where they go.
-    assert '- link "Logo" [ref=e' in tree and "- /url: /home" in tree
+    assert '- link "Logo" [ref=e' in tree and '- /url: "/home"' in tree
     assert "- code [ref=e" in tree and "- text: Run" in tree
     assert "#" not in "".join(re.findall(r"\[ref=[^\]]*\]", tree))  # no placeholder left
     # Like Playwright, depth 0 means no limit; depth 1 keeps the top level.

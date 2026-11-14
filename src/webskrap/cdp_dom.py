@@ -58,9 +58,10 @@ _SNAPSHOT_SCRIPT = r"""({depth: maxDepth, boxes, offsetX, offsetY, refToken}, sc
   const FROM_CONTENT = new Set(['button', 'link', 'heading', 'cell', 'columnheader',
     'rowheader', 'option', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
     'treeitem', 'checkbox', 'radio', 'switch', 'tooltip']);
-  const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
+  const norm = (text) => (text || '').replace(/[\s\u001c-\u001e\u0085]+/g, ' ').trim();
   const clip = (text) => text.length > 200 ? text.slice(0, 199) + '…' : text;
-  const quote = (text) => JSON.stringify(text);
+  const quote = (text) => JSON.stringify(text).replace(/[\u0085\u2028\u2029]/g,
+    (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
   const inLandmark = (e) => !!e.parentElement && !!e.parentElement.closest(
     'article, aside, main, nav, section');
   const inputRole = (e) => {
@@ -185,7 +186,7 @@ _SNAPSHOT_SCRIPT = r"""({depth: maxDepth, boxes, offsetX, offsetY, refToken}, sc
       const state = e.getAttribute('aria-' + attr);
       if (state !== null && !(state === 'true' && ['pressed', 'selected'].includes(attr)))
         out.push(state === 'true' && ['required', 'readonly'].includes(attr)
-          ? attr : attr + '=' + state);
+          ? attr : attr + '=' + norm(state));
     }
     if (e.required) out.push('required');
     if (e.readOnly) out.push('readonly');
@@ -276,7 +277,8 @@ _SNAPSHOT_SCRIPT = r"""({depth: maxDepth, boxes, offsetX, offsetY, refToken}, sc
       children = children.filter((child) => child.text === undefined || child.text !== label);
       const href = node.getAttribute('href');
       const room = maxDepth === null || depth + 1 < maxDepth;
-      if (href !== null && room) children.unshift({ line: '- /url: ' + href, depth: depth + 1 });
+      if (href !== null && room)
+        children.unshift({ line: '- /url: ' + quote(href), depth: depth + 1 });
     }
     if (children.length === 1 && children[0].text !== undefined) {
       if (children[0].text !== label) line += ': ' + children[0].text;
@@ -285,7 +287,8 @@ _SNAPSHOT_SCRIPT = r"""({depth: maxDepth, boxes, offsetX, offsetY, refToken}, sc
     if (children.length) line += ':';
     return [{ line, depth }, ...children];
   };
-  const modal = document.querySelector('dialog:modal');
+  const modal = document.activeElement?.closest('dialog:modal')
+    || [...document.querySelectorAll('dialog:modal')].at(-1) || null;
   const root = modal && (!scope || scope.contains(modal))
     ? modal : scope || document.body || document.documentElement;
   let ancestor = scope;
@@ -443,7 +446,11 @@ async def matching_snapshot(
     lines = tree.splitlines()
     searchable = [
         re.sub(
-            r" \[ref=(?:#[a-f0-9]+-\d+|(?:f\d+)?e\d+)\](?: \[box=[^]]+\])?(?::.*)?$", "", line
+            r'^(?P<node>\s*- [a-z][a-z0-9-]*(?: "(?:[^"\\]|\\.)*")?'
+            r"(?: \[(?!ref=)[^\]]*\])*) \[ref=(?:#[a-f0-9]+-\d+|(?:f\d+)?e\d+)\]"
+            r"(?: \[box=[^]]+\])?(?P<text>:.*)?$",
+            r"\g<node>\g<text>",
+            line,
         ).strip()
         for line in lines
     ]

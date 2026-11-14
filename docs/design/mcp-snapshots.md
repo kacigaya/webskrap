@@ -24,8 +24,10 @@ meaning. Negative depth returns a usage error. Boxes are rounded CSS pixels
 relative to the top-level viewport, including iframe offsets.
 
 `browser_find` returns the same snapshot-window fields, plus match counts.
-It searches semantic lines and retains their ancestor paths. It omits sibling
-subtrees and link URL metadata. Search takes either case-insensitive literal
+It searches semantic lines, including text and non-password values appended
+after refs, and retains their ancestor paths. Only structural ref and box
+tokens are removed for matching; ref-like text in names or content is kept.
+It omits sibling subtrees and link URL metadata. Search takes either case-insensitive literal
 text or Python regex. Literal text is escaped before compilation. Caller regex
 uses the existing subprocess worker and two-second timeout. Regex never runs
 in the page. Search has a match cap and independent character pagination.
@@ -58,6 +60,16 @@ was not added: this change measures explicit targeted reads, without adding a
 second state lifetime or requiring clients to reconstruct trees.
 
 ## Semantics and limits
+
+Link URL metadata uses quoted JSON strings, including escaped line separators.
+A URL cannot add structural lines or refs to the snapshot. Search still omits
+URL metadata. Dynamic ARIA state text is normalized to one line.
+
+With stacked native modal dialogs, snapshots select the modal containing
+`document.activeElement`. If focus does not identify a modal, the last modal in
+document order is used. That fallback is an approximation of top-layer order.
+Scope checks apply to the selected modal, and closing it restores the lower
+modal's context.
 
 The shared walker now also omits password input values, inert content, closed
 details content and background content behind native modal dialogs. It resolves

@@ -3,6 +3,9 @@
 Measured on 2026-11-14 on Linux ARM64, Python 3.14.7, uv 0.13.5 and
 Chrome for Testing 156.0.8078.47, headless with sandbox explicitly disabled.
 Baseline revision: `914e24576ebe92e08d46c2867d065343b1b71fdc`.
+The measurements precede the review fixes for inline-text search, URL escaping
+and stacked dialogs. Those fixes have separate regression coverage; the
+benchmark has not been rerun for them.
 No production dependency was added.
 
 ## Method
@@ -131,3 +134,12 @@ deadline. The old immediate assertion failed against the delayed fixture;
 all six transition/authentication cases pass with the bounded wait. The final
 combined frame/snapshot run passed 30 tests. Production challenge handling is
 unchanged.
+
+Review follow-up validation: the full non-live run passed 980 tests with 89.15%
+coverage. The final focused run passed 31 tests, including additional Unicode
+separator cases. The broader session/MCP regression run passed 81 tests. New
+regressions cover inline paragraph/status/value searches, ref-like visible text,
+URL and ARIA line injection, and stacked modal opening/closing order. Ruff,
+three-platform Pyright, Bandit, pip-audit, OSV, build and Twine passed. Public
+live tests were excluded; local cross-platform runtime tests remain delegated
+to CI. No benchmark numbers were regenerated for this follow-up.

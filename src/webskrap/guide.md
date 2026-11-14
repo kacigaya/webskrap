@@ -239,9 +239,10 @@ It returns matching semantic lines and ancestor paths in `snapshot`, plus
 `browser_interact(action="click", target="e15")`.
 
 Use exactly one of `text` (case-insensitive substring) or `regex` (Python
-syntax, such as `(?i)save`). Searches cover names, roles, states and visible
-text, but exclude link URL metadata and refs. Regex has a 200-character limit
-and a two-second worker timeout per frame. `max_matches` defaults to 20 and
+syntax, such as `(?i)save`). Searches cover names, roles, states, visible text
+and non-password field values. They exclude link URL metadata and structural
+refs. Link URLs are JSON-quoted to keep them on one snapshot line. Regex has
+a 200-character limit and a two-second worker timeout per frame. `max_matches` defaults to 20 and
 accepts 1 through 50. No matches returns an empty snapshot.
 
 `browser_snapshot(target="e15", depth=2)` reads one subtree. A unique CSS
