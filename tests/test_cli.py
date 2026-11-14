@@ -690,15 +690,20 @@ def test_search_human_output_does_not_render_page_text_as_markup(monkeypatch: An
     [
         pytest.param("--engine", "google", "is not one of 'ddg', 'bing'", id="engine"),
         pytest.param("--format", "yaml", "human, json", id="output-format"),
-        pytest.param("--max-results", "-1", "x>=0", id="max-results"),
+        pytest.param(
+            "--max-results", "-1", ("x>=0", "greater than or equal to 0"), id="max-results"
+        ),
         pytest.param("--webrtc-ip-handling-policy", "off", "disable_non_proxied_udp", id="webrtc"),
     ],
 )
-def test_search_rejects_invalid_option_values(option: str, value: str, expected: str) -> None:
+def test_search_rejects_invalid_option_values(
+    option: str, value: str, expected: str | tuple[str, ...]
+) -> None:
     result = runner.invoke(cli.app, ["search", "example domain", option, value])
 
     assert result.exit_code == 2
-    assert "".join(expected.split()) in _plain(result.output)
+    messages = (expected,) if isinstance(expected, str) else expected
+    assert any("".join(message.split()) in _plain(result.output) for message in messages)
 
 
 def test_search_falls_back_to_chromium_when_channel_is_missing(monkeypatch: Any) -> None:
@@ -761,6 +766,16 @@ def test_schema_reports_kinds_defaults_and_choices() -> None:
     assert parameters["resource_policy"]["choices"] == ["auto", "all", "lite", "documents"]
     assert parameters["resource_policy"]["default"] == "auto"
     assert parameters["launch_args"]["multiple"] is True
+    for name, kind in {
+        "url": "str",
+        "max_chars": "int range",
+        "text_only": "boolean",
+        "user_data_dir": "path",
+        "launch_args": "str",
+        "resource_policy": "choice",
+        "timeout_ms": "float range",
+    }.items():
+        assert parameters[name]["type"] == kind
 
 
 def test_schema_omits_the_help_flag_every_command_has() -> None:
