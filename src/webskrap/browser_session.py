@@ -1268,9 +1268,15 @@ async def screenshot(
     return result
 
 
-async def snapshot(page: CDPPage, *, depth: int | None = None) -> dict[str, Any]:
+async def snapshot(
+    page: CDPPage,
+    *,
+    depth: int | None = None,
+    target: str | None = None,
+    boxes: bool = False,
+) -> dict[str, Any]:
     """Return the page state plus a snapshot whose elements carry ``eN`` refs."""
-    tree = await cdp_dom.snapshot(page, depth=depth)
+    tree = await cdp_dom.snapshot(page, depth=depth, target=target, boxes=boxes)
     return {**await page_state(page), "snapshot": tree}
 
 

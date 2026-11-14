@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
+from webskrap import text_search
 from webskrap.cdp import CDPError, CDPPage
 from webskrap.cdp_session import key_events
 from webskrap.errors import ErrorCode, WebSkrapError
@@ -47,7 +48,7 @@ MOUSE_PRESSED_FORCE = 0.5
 # the listed elements, so the caller can swap each placeholder for the
 # element's backend node id. Roles and names follow the ARIA implicit-role
 # table and the accessible-name rules for the elements pages commonly use.
-_SNAPSHOT_SCRIPT = r"""(maxDepth) => {
+_SNAPSHOT_SCRIPT = r"""({depth: maxDepth, boxes, offsetX, offsetY, refToken}, scope) => {
   const elements = [];
   const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'HEAD', 'META', 'LINK']);
   const LEAF = new Set(['button', 'link', 'heading', 'textbox', 'searchbox', 'checkbox',
@@ -57,9 +58,10 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
   const FROM_CONTENT = new Set(['button', 'link', 'heading', 'cell', 'columnheader',
     'rowheader', 'option', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
     'treeitem', 'checkbox', 'radio', 'switch', 'tooltip']);
-  const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
+  const norm = (text) => (text || '').replace(/[\s\u001c-\u001e\u0085]+/g, ' ').trim();
   const clip = (text) => text.length > 200 ? text.slice(0, 199) + '…' : text;
-  const quote = (text) => JSON.stringify(text);
+  const quote = (text) => JSON.stringify(text).replace(/[\u0085\u2028\u2029]/g,
+    (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
   const inLandmark = (e) => !!e.parentElement && !!e.parentElement.closest(
     'article, aside, main, nav, section');
   const inputRole = (e) => {
@@ -134,7 +136,7 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
     const labelledBy = norm(e.getAttribute('aria-labelledby'));
     if (labelledBy) {
       const text = labelledBy.split(' ')
-        .map((id) => document.getElementById(id))
+        .map((id) => e.getRootNode().getElementById(id))
         .filter(Boolean).map((el) => norm(el.textContent)).join(' ');
       if (text) return clip(text);
     }
@@ -176,9 +178,18 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
       if (ariaChecked === 'mixed' || e.indeterminate) out.push('checked=mixed');
       else if (ariaChecked === 'true' || (ariaChecked === null && e.checked)) out.push('checked');
     }
-    if (e.disabled || e.getAttribute('aria-disabled') === 'true') out.push('disabled');
+    if (e.matches(':disabled') || e.closest('[aria-disabled="true"]')) out.push('disabled');
     const expanded = e.getAttribute('aria-expanded');
     if (expanded === 'true') out.push('expanded');
+    if (expanded === 'false') out.push('expanded=false');
+    for (const attr of ['pressed', 'selected', 'invalid', 'busy', 'required', 'readonly']) {
+      const state = e.getAttribute('aria-' + attr);
+      if (state !== null && !(state === 'true' && ['pressed', 'selected'].includes(attr)))
+        out.push(state === 'true' && ['required', 'readonly'].includes(attr)
+          ? attr : attr + '=' + norm(state));
+    }
+    if (e.required) out.push('required');
+    if (e.readOnly) out.push('readonly');
     if (e.tagName === 'DETAILS' && e.open) out.push('expanded');
     if (e.getAttribute('aria-pressed') === 'true') out.push('pressed');
     if (r === 'option' ? e.selected : e.getAttribute('aria-selected') === 'true')
@@ -188,9 +199,10 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
       out.push('level=' + level);
     }
     if (e === document.activeElement && e !== document.body) out.push('active');
-    return out.map((s) => ' [' + s + ']').join('');
+    return [...new Set(out)].map((s) => ' [' + s + ']').join('');
   };
   const value = (e, r) => {
+    if (e.tagName === 'INPUT' && e.type === 'password') return '';
     if (['textbox', 'searchbox', 'spinbutton', 'slider'].includes(r) && 'value' in e)
       return norm(e.value);
     if (r === 'combobox' && e.tagName === 'SELECT')
@@ -199,6 +211,10 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
     return '';
   };
   const childrenOf = (node) => {
+    if (node.tagName === 'DETAILS' && !node.open) {
+      const summary = node.querySelector(':scope > summary');
+      return summary ? [summary] : [];
+    }
     if (node.shadowRoot) return [...node.shadowRoot.childNodes];
     if (node.tagName === 'SLOT') {
       const assigned = node.assignedNodes({ flatten: true });
@@ -207,7 +223,7 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
     return [...node.childNodes];
   };
   const hidden = (e) => {
-    if (e.hidden || e.getAttribute('aria-hidden') === 'true') return true;
+    if (e.hidden || e.inert || e.getAttribute('aria-hidden') === 'true') return true;
     const style = getComputedStyle(e);
     return style.display === 'none';
   };
@@ -244,7 +260,12 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
     const index = elements.push(node) - 1;
     const label = name(node, r);
     let line = '- ' + r + (label ? ' ' + quote(label) : '') + states(node, r);
-    line += ' [ref=#' + index + ']';
+    line += ' [ref=#' + refToken + '-' + index + ']';
+    if (boxes) {
+      const b = node.getBoundingClientRect();
+      line += ' [box=' + [b.x + offsetX, b.y + offsetY, b.width, b.height]
+        .map(Math.round).join(',') + ']';
+    }
     const own = value(node, r);
     if (LEAF.has(r) && r !== 'link') {
       return [{ line: own ? line + ': ' + quote(own) : line, depth }];
@@ -256,7 +277,8 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
       children = children.filter((child) => child.text === undefined || child.text !== label);
       const href = node.getAttribute('href');
       const room = maxDepth === null || depth + 1 < maxDepth;
-      if (href !== null && room) children.unshift({ line: '- /url: ' + href, depth: depth + 1 });
+      if (href !== null && room)
+        children.unshift({ line: '- /url: ' + quote(href), depth: depth + 1 });
     }
     if (children.length === 1 && children[0].text !== undefined) {
       if (children[0].text !== label) line += ': ' + children[0].text;
@@ -265,8 +287,20 @@ _SNAPSHOT_SCRIPT = r"""(maxDepth) => {
     if (children.length) line += ':';
     return [{ line, depth }, ...children];
   };
-  const root = document.body || document.documentElement;
-  const lines = merge(root ? childrenOf(root).flatMap((child) => walk(child, 0)) : []);
+  const modal = document.activeElement?.closest('dialog:modal')
+    || [...document.querySelectorAll('dialog:modal')].at(-1) || null;
+  const root = modal && (!scope || scope.contains(modal))
+    ? modal : scope || document.body || document.documentElement;
+  let ancestor = scope;
+  let insideModal = !modal || (scope && scope.contains(modal));
+  while (ancestor) {
+    if (ancestor === modal) insideModal = true;
+    if (hidden(ancestor)) return [''];
+    ancestor = ancestor.parentElement || ancestor.getRootNode().host;
+  }
+  if (scope && !insideModal) return [''];
+  const lines = merge(root ? (scope || modal ? walk(root, 0)
+    : childrenOf(root).flatMap((child) => walk(child, 0))) : []);
   const text = lines.map((item) => '  '.repeat(item.depth)
     + (item.text !== undefined ? '- text: ' + item.text : item.line)).join('\n');
   return [text, ...elements];
@@ -344,7 +378,14 @@ _SELECT_FUNCTION = """function (wanted) {
 }"""
 
 
-async def snapshot(page: CDPPage, *, depth: int | None = None) -> str:
+async def snapshot(
+    page: CDPPage,
+    *,
+    depth: int | None = None,
+    target: str | None = None,
+    boxes: bool = False,
+    pattern: str | re.Pattern[str] | None = None,
+) -> str:
     """Return the snapshot text, with iframe content under each ``iframe`` line.
 
     Each frame is walked in its own isolated world. A frame is listed when its
@@ -352,10 +393,16 @@ async def snapshot(page: CDPPage, *, depth: int | None = None) -> str:
     are left out. ``depth`` counts levels across frames.
     """
     # Like Playwright, a depth of 0 means no limit.
+    if depth is not None and depth < 0:
+        raise WebSkrapError("depth must be non-negative or null", code=ErrorCode.USAGE)
     limit = int(depth) if depth else None
     page_frames = await frames(page)
     main, *children = page_frames
-    lines, refs = await _frame_snapshot(main, limit, "")
+    if target:
+        main = await _locate(page, target)
+        children = [frame for frame in page_frames if frame.page.target_id != main.page.target_id]
+    prefix = f"f{frame_key(main.page.target_id)}" if main.owner else ""
+    lines, refs = await _frame_snapshot(main, limit, prefix, target, boxes, pattern)
     for frame in children:
         owner = refs.get(frame.owner) if frame.owner else None
         line = next((i for i, text in enumerate(lines) if f"[ref={owner}]" in text), None)
@@ -368,10 +415,17 @@ async def snapshot(page: CDPPage, *, depth: int | None = None) -> str:
         prefix = f"f{frame_key(frame.page.target_id)}"
         try:
             inner, inner_refs = await _frame_snapshot(
-                frame, None if limit is None else limit - level, prefix
+                frame,
+                None if limit is None else limit - level,
+                prefix,
+                None,
+                boxes,
+                pattern,
             )
-        except WebSkrapError:
-            continue  # the frame navigated or closed during the walk
+        except WebSkrapError as exc:
+            if pattern is not None and exc.code in (ErrorCode.USAGE, ErrorCode.INTERNAL):
+                raise
+            continue
         refs.update(inner_refs)
         if inner:
             if not lines[line].endswith(":"):
@@ -381,13 +435,58 @@ async def snapshot(page: CDPPage, *, depth: int | None = None) -> str:
     return "\n".join(lines)
 
 
+async def matching_snapshot(
+    tree: str,
+    pattern: str | re.Pattern[str],
+    max_matches: int,
+    *,
+    keep_frames: bool = False,
+) -> tuple[str, int]:
+    """Select matching semantic lines and their ancestor paths, without siblings."""
+    lines = tree.splitlines()
+    searchable = [
+        re.sub(
+            r'^(?P<node>\s*- [a-z][a-z0-9-]*(?: "(?:[^"\\]|\\.)*")?'
+            r"(?: \[(?!ref=)[^\]]*\])*) \[ref=(?:#[a-f0-9]+-\d+|(?:f\d+)?e\d+)\]"
+            r"(?: \[box=[^]]+\])?(?P<text>:.*)?$",
+            r"\g<node>\g<text>",
+            line,
+        ).strip()
+        for line in lines
+    ]
+    if isinstance(pattern, re.Pattern):
+        hits = [i for i, line in enumerate(searchable) if pattern.search(line)]
+    else:
+        hits = await text_search._matching_lines(pattern, searchable)
+    hits = [i for i in hits if not searchable[i].startswith("- /url:")]
+    selected = set(hits[:max_matches])
+    if keep_frames:
+        selected.update(i for i, line in enumerate(searchable) if line.startswith("- iframe"))
+    stack: list[tuple[int, int]] = []
+    kept: set[int] = set()
+    for i, line in enumerate(lines):
+        indent = len(line) - len(line.lstrip())
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        if i in selected:
+            kept.add(i)
+            kept.update(index for _, index in stack)
+        stack.append((indent, i))
+    return "\n".join(line for i, line in enumerate(lines) if i in kept), len(hits)
+
+
 def frame_key(frame_id: str) -> int:
     """Return the short number that names ``frame_id`` in refs."""
     return zlib.crc32(frame_id.encode()) % 100_000
 
 
 async def _frame_snapshot(
-    frame: Frame, depth: int | None, prefix: str
+    frame: Frame,
+    depth: int | None,
+    prefix: str,
+    target: str | None = None,
+    boxes: bool = False,
+    pattern: str | re.Pattern[str] | None = None,
 ) -> tuple[list[str], dict[tuple[str, int], str]]:
     """Walk one frame; return its lines and each listed node's ref.
 
@@ -400,15 +499,43 @@ async def _frame_snapshot(
     page = frame.page
     world = await page.isolated_world()
     async with _object_group(page) as group:
-        result = await page.send(
-            "Runtime.evaluate",
-            {
-                "expression": f"({_SNAPSHOT_SCRIPT})({'null' if depth is None else depth})",
-                "contextId": world,
-                "returnByValue": False,
-                "objectGroup": group,
-            },
-        )
+        ref_token = uuid4().hex
+        placeholder = re.compile(r"\[ref=#" + ref_token + r"-(\d+)\]")
+        options = {
+            "depth": depth,
+            "refToken": ref_token,
+            "boxes": boxes,
+            "offsetX": frame.offset_x,
+            "offsetY": frame.offset_y,
+        }
+        if target:
+            elements = await _find(frame, target, group)
+            if len(elements) != 1:
+                raise WebSkrapError("target must match one element", code=ErrorCode.USAGE)
+            element = elements[0]
+            if await element.call(_STATE_FUNCTION) == "detached":
+                raise _stale(target)
+            result = await page.send(
+                "Runtime.callFunctionOn",
+                {
+                    "objectId": element.object_id,
+                    "functionDeclaration": "function (options) { return ("
+                    + _SNAPSHOT_SCRIPT
+                    + ")(options, this); }",
+                    "arguments": [{"value": options}],
+                    "objectGroup": group,
+                },
+            )
+        else:
+            result = await page.send(
+                "Runtime.evaluate",
+                {
+                    "expression": f"({_SNAPSHOT_SCRIPT})({json.dumps(options)})",
+                    "contextId": world,
+                    "returnByValue": False,
+                    "objectGroup": group,
+                },
+            )
         if "exceptionDetails" in result:
             raise CDPError("snapshot script failed")
         properties = await page.send(
@@ -421,16 +548,23 @@ async def _frame_snapshot(
             if item["name"].isdigit() and "value" in item
         }
         text = str(by_index[0]["value"])
-        object_ids = [by_index[index]["objectId"] for index in range(1, len(by_index))]
+        if pattern is not None:
+            text, _ = await matching_snapshot(text, pattern, len(text), keep_frames=True)
+        indexes = sorted({int(index) for index in placeholder.findall(text)})
         nodes = await asyncio.gather(
-            *(page.send("DOM.describeNode", {"objectId": object_id}) for object_id in object_ids)
+            *(
+                page.send("DOM.describeNode", {"objectId": by_index[index + 1]["objectId"]})
+                for index in indexes
+            )
         )
     refs: dict[tuple[str, int], str] = {}
-    for index, node in enumerate(nodes):
+    replacements: dict[str, str] = {}
+    for index, node in zip(indexes, nodes, strict=True):
         backend_id = int(node["node"]["backendNodeId"])
         ref = f"{prefix}e{backend_id}"
         refs[(page.session_id, backend_id)] = ref
-        text = text.replace(f"[ref=#{index}]", f"[ref={ref}]")
+        replacements[str(index)] = ref
+    text = placeholder.sub(lambda match: f"[ref={replacements[match[1]]}]", text)
     return (text.split("\n") if text else []), refs
 
 
@@ -691,7 +825,9 @@ async def _find_in(page: CDPPage, target: str, group: str, world: int) -> list[_
         element = _Element(page, resolved["object"]["objectId"], target)
         # In-process frames share one session: a node of another frame resolves
         # too, so a ref whose node left its frame's document is stale.
-        if not await element.call("function () { return this.ownerDocument === document; }"):
+        if not await element.call(
+            "function () { return this.isConnected && this.ownerDocument === document; }"
+        ):
             raise _stale(target)
         return [element]
     result = await page.send(

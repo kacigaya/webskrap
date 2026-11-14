@@ -1,0 +1,83 @@
+{
+  "package": "@playwright/mcp@0.0.85",
+  "runs": [
+    {
+      "mode": "full",
+      "repeat": 0,
+      "success": true,
+      "tool_calls": 6,
+      "request_tokens": 91,
+      "response_tokens": 479,
+      "response_bytes": 1508,
+      "snapshot_ms_median": 74.09905100939795,
+      "task_ms": 2093.8407619833015,
+      "cpu_seconds": 0.6999999999999993,
+      "rss_mib_after": 1396.22265625
+    },
+    {
+      "mode": "full",
+      "repeat": 1,
+      "success": true,
+      "tool_calls": 6,
+      "request_tokens": 91,
+      "response_tokens": 479,
+      "response_bytes": 1508,
+      "snapshot_ms_median": 109.93575002066791,
+      "task_ms": 2686.555687978398,
+      "cpu_seconds": 0.7799999999999994,
+      "rss_mib_after": 1335.69921875
+    },
+    {
+      "mode": "full",
+      "repeat": 2,
+      "success": true,
+      "tool_calls": 6,
+      "request_tokens": 91,
+      "response_tokens": 479,
+      "response_bytes": 1508,
+      "snapshot_ms_median": 90.022451011464,
+      "task_ms": 2248.4715349855833,
+      "cpu_seconds": 0.7300000000000004,
+      "rss_mib_after": 1335.19140625
+    },
+    {
+      "mode": "none",
+      "repeat": 0,
+      "success": true,
+      "tool_calls": 6,
+      "request_tokens": 91,
+      "response_tokens": 351,
+      "response_bytes": 1162,
+      "snapshot_ms_median": 130.02865097951144,
+      "task_ms": 2340.031432977412,
+      "cpu_seconds": 0.7799999999999998,
+      "rss_mib_after": 1314.16796875
+    },
+    {
+      "mode": "none",
+      "repeat": 1,
+      "success": true,
+      "tool_calls": 6,
+      "request_tokens": 91,
+      "response_tokens": 351,
+      "response_bytes": 1162,
+      "snapshot_ms_median": 77.6378289447166,
+      "task_ms": 1987.0279059978202,
+      "cpu_seconds": 0.7399999999999998,
+      "rss_mib_after": 1312.30859375
+    },
+    {
+      "mode": "none",
+      "repeat": 2,
+      "success": true,
+      "tool_calls": 6,
+      "request_tokens": 91,
+      "response_tokens": 351,
+      "response_bytes": 1162,
+      "snapshot_ms_median": 73.93148995470256,
+      "task_ms": 2026.7483039642684,
+      "cpu_seconds": 0.75,
+      "rss_mib_after": 1314.65625
+    }
+  ]
+}
