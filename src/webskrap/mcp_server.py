@@ -12,14 +12,16 @@ import base64
 import json
 import logging
 import os
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
 
-from webskrap import browser_session, text_search
+from webskrap import browser_session, cdp_dom, text_search
 from webskrap.browser_session import SessionPage
+from webskrap.cdp import CDPPage
 from webskrap.client import WebSkrapClient, WebSkrapError, with_channel_fallback
 from webskrap.diagnostics import diagnose
 from webskrap.errors import ErrorCode, classify, tool_message
@@ -99,7 +101,8 @@ Choose a tool
 
 In a browser session
 - Headless only over MCP. Shared with the browser CLI. browser_tabs picks the tab.
-- browser_snapshot gives [ref=eN] handles; snapshot again after DOM changes.
+- browser_find(text=...) locates known controls with refs and ancestor context.
+  browser_snapshot(target=..., depth=...) scopes a tree; boxes=true adds geometry.
 - browser_text reads text without an accessibility tree; pattern= greps lines.
 - Visual layouts/canvas: browser_view returns an inline PNG and metadata,
   without a file write. browser_mouse clicks/moves/scrolls/drags in viewport
@@ -107,8 +110,7 @@ In a browser session
   height. Take a fresh view after scrolling, navigation, or layout changes.
 - browser_insert_text inserts literal text into the focused control;
   browser_press sends keys. Prefer refs/selectors for identifiable controls.
-- After an interaction, browser_wait_for waits for the expected change.
-  Run dependent actions in sequence.
+- Use browser_wait_for after actions. Run dependent actions in sequence.
 
 Keep results small
 - max_chars defaults to 8000. Start lower; page via next_text_offset /
@@ -127,7 +129,6 @@ stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
 browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
 Known challenge/block pages (DataDome, Cloudflare, Akamai, AWS WAF) return
 blocked: follow its hint; do not retry. browser_goto reports it.
-Fetch tools accept ready_selector to verify visible content before extraction.
 Call doctor for unexplained failures; read webskrap://guide for details.
 Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.
 Paths must be relative and cannot escape their roots (path_rejected).
@@ -673,6 +674,8 @@ async def browser_snapshot(
     depth: int | None = 6,
     max_chars: int = 8_000,
     offset: int = 0,
+    target: str | None = None,
+    boxes: bool = False,
 ) -> dict[str, Any]:
     """Return an aria snapshot of the current page with eN element refs.
 
@@ -682,6 +685,8 @@ async def browser_snapshot(
     current DOM, so take a fresh snapshot after the page changes.
 
     Args:
+        target: Snapshot only this ref or unique main-frame CSS selector.
+        boxes: Include viewport-relative CSS pixel boxes.
         session: Browser session name.
         depth: Maximum snapshot tree depth (default 6; None for unlimited). Lower it
             before raising max_chars:
@@ -693,9 +698,53 @@ async def browser_snapshot(
     """
     result = await _browser_action(
         session,
-        lambda page: browser_session.snapshot(page, depth=depth),
+        lambda page: browser_session.snapshot(page, depth=depth, target=target, boxes=boxes),
         browser_session.DEFAULT_ACTION_TIMEOUT_MS,
     )
+    return browser_session.shape_snapshot(result, max_chars, offset)
+
+
+@mcp.tool(title="Find accessible elements", annotations=_hints(read_only=True))
+async def browser_find(
+    text: str | None = None,
+    regex: str | None = None,
+    session: str = "default",
+    target: str | None = None,
+    max_matches: int = 20,
+    max_chars: int = 8_000,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Find semantic lines and ancestor context without unrelated subtrees.
+
+    Provide exactly one of text (case-insensitive substring) or regex (Python
+    syntax, inline flags such as (?i) supported). Regex is capped at 200 chars
+    and runs outside Chromium with a two-second timeout. Refs work with
+    browser_interact. Searches open shadow roots and available iframe content.
+    target scopes to a ref or unique main-frame CSS selector. max_matches is
+    1..50. Character paging uses the browser_snapshot response fields; repeat
+    the same search with next_snapshot_offset while the DOM stays unchanged.
+    """
+    with _tool_errors():
+        if (text is None) == (regex is None):
+            raise WebSkrapError("provide exactly one of text or regex", code=ErrorCode.USAGE)
+        if text is not None and not text.strip():
+            raise WebSkrapError("text cannot be blank", code=ErrorCode.USAGE)
+        pattern = "(?i)" + re.escape(text) if text is not None else str(regex)
+        text_search.validate_search(pattern, context=0, max_matches=max_matches)
+
+    query = re.compile(pattern) if text is not None else pattern
+
+    async def find(page: CDPPage) -> dict[str, Any]:
+        tree = await cdp_dom.snapshot(page, target=target, pattern=query)
+        tree, total = await cdp_dom.matching_snapshot(tree, query, max_matches)
+        return {
+            **await browser_session.page_state(page),
+            "snapshot": tree,
+            "matches_total": total,
+            "matches_truncated": total > max_matches,
+        }
+
+    result = await _browser_action(session, find, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
     return browser_session.shape_snapshot(result, max_chars, offset)
 
 

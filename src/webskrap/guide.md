@@ -111,7 +111,8 @@ IP, not a retry.
    Iframe content has refs like `f12345e15`.
 3. `browser_interact(action="fill", target="e12", values=["hello"])`.
 4. `browser_wait_for(text="Welcome")` -- not another snapshot.
-5. `browser_snapshot()` again, because the refs from step 2 are now stale.
+5. Use `browser_find(text="Next action")` for the next control. Read a snapshot
+   only when you need broader context.
 6. `browser_close()` -- the profile survives, so the next open is still logged in.
    `delete_data=true` throws the cookies and logins away.
 
@@ -170,6 +171,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_open` | `session`, `pid`, `port`, `reused`, `chromium_sandbox`; with `url`, also the `browser_goto` keys |
 | `browser_goto` | `status`, `url`, `title`, `blocked` (null or `code`, `provider`, `kind`, `hint`), `cookie_notice_declined` with `decline_cookies=true` |
 | `browser_text` | `url`, `title`, `text`, `text_length`, `text_offset`, `text_truncated`, `next_text_offset`; with `pattern`: `matches` (`line`, `text`, `before`, `after`), `matches_total`, `matches_truncated`, `text_length` |
+| `browser_find` | Snapshot window fields plus `matches_total`, `matches_truncated` |
 | `browser_snapshot` | `url`, `title`, `snapshot`, `snapshot_length`, `snapshot_offset`, `snapshot_truncated`, `next_snapshot_offset` |
 | `browser_interact`, `browser_press`, `browser_mouse`, `browser_insert_text` | `url`, `title` |
 | `browser_wait_for` | `url`, `title`, `matched` |
@@ -198,7 +200,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | --- | --- |
 | `no_session` | `browser_open` first. |
 | `session_unreachable` | `browser_close`, then `browser_open`. |
-| `stale_ref` | Snapshot again; refs belong to one snapshot. |
+| `stale_ref` | Find again; the node was removed or its document changed. |
 | `timeout` | Raise `timeout_ms`, weaken `wait_until`, or `browser_wait_for` first. |
 | `navigation` | Check the URL and that the host resolves. |
 | `browser_launch` | Run `webskrap install`. Fetch and search already fall back from `chrome` to Edge and bundled Chromium. |
@@ -228,3 +230,43 @@ Separate batches and `client.fetch()` calls use fresh sessions. An explicit
 `user_data_dir` can still share state on disk. For large inputs, per-page options,
 or state across batches, use `client.session()` and `session.fetch()`. Close the
 session after use. Use separate sessions for unrelated callers.
+
+## Targeted accessibility reads
+
+Use `browser_find(text="Save changes")` when you know the accessible name.
+It returns matching semantic lines and ancestor paths in `snapshot`, plus
+`matches_total` and `matches_truncated`. Pass a returned ref to
+`browser_interact(action="click", target="e15")`.
+
+Use exactly one of `text` (case-insensitive substring) or `regex` (Python
+syntax, such as `(?i)save`). Searches cover names, roles, states and visible
+text, but exclude link URL metadata and refs. Regex has a 200-character limit
+and a two-second worker timeout per frame. `max_matches` defaults to 20 and
+accepts 1 through 50. No matches returns an empty snapshot.
+
+`browser_snapshot(target="e15", depth=2)` reads one subtree. A unique CSS
+selector also works in the main frame. Scoped depth starts at that element.
+Omit target to read the page. Depth 0 or null means unlimited.
+`boxes=true` adds `[box=x,y,width,height]` in top-level viewport CSS pixels,
+rounded to integers. Boxes cost text and layout reads; request them only when
+needed. Offscreen boxes can have negative coordinates.
+
+Both tools keep the existing snapshot character-window fields. Use
+`max_chars`, then repeat the same request with `next_snapshot_offset` if needed.
+Offsets describe the current DOM, not a cached version. A window may split a
+line or ref; read its continuation before using it. Find's match count precedes
+character truncation. Ancestor paths can include gaps in siblings.
+
+Refs identify DOM nodes, including across repeated reads and SPA updates that
+keep those nodes. Removed nodes and navigation make refs stale. Actions do not
+attach snapshots. Wait for the expected state, then request only the context
+needed for the next action. Password input values are omitted. Other visible
+field values and page text can contain sensitive data; these tools are not a
+secret scanner.
+
+Snapshots use isolated-world DOM reads, not Chromium's native accessibility
+domain. Common role/name rules are supported; this is not a complete browser
+accessibility audit. Open Shadow DOM and available same-site/cross-site frames
+are walked. Closed shadow roots and frames nested inside an out-of-process
+frame keep the existing driver limits. CSS scope selectors do not pierce
+shadow roots; use a returned ref there. No incremental cache or diff is kept.
