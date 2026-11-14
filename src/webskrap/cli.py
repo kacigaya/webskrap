@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from typing import Annotated, Any, NoReturn, Protocol, TypeVar
+from typing import Annotated, Any, NoReturn, Protocol, TypeVar, get_args, get_origin
 
 import typer
 from rich.console import Console
@@ -845,13 +845,6 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-class _ParameterType(Protocol):
-    """The part of a Click parameter type :func:`describe_command` reads."""
-
-    @property
-    def name(self) -> str: ...
-
-
 class _Parameter(Protocol):
     """The part of a Click parameter :func:`describe_command` reads."""
 
@@ -872,9 +865,6 @@ class _Parameter(Protocol):
 
     @property
     def default(self) -> object: ...
-
-    @property
-    def type(self) -> _ParameterType: ...
 
 
 class _Command(Protocol):
@@ -903,13 +893,40 @@ def _describe_parameter(parameter: _Parameter) -> dict[str, Any]:
     ``param_type_name`` is read rather than the parameter's class, because
     Typer's parameters do not subclass ``click.Argument`` or ``click.Option``
     and an isinstance check would silently call every parameter an option.
+    Support both legacy parameter types and Typer 0.29 type descriptors.
     """
-    choices = getattr(parameter.type, "choices", None)
+    parameter_type = getattr(parameter, "type", None)
+    if parameter_type is not None:
+        choices = getattr(parameter_type, "choices", None)
+        type_name = parameter_type.name
+    else:
+        descriptor = getattr(parameter, "type_descriptor", None)
+        if descriptor is None:
+            raise TypeError("CLI parameter has no type or type descriptor")
+        choices = descriptor.choices
+        annotation = descriptor.annotation
+        if get_origin(annotation) is list:
+            annotation = get_args(annotation)[0]
+        type_name = (
+            "choice"
+            if choices
+            else {
+                str: "str",
+                int: "int",
+                bool: "boolean",
+                float: "float",
+                Path: "path",
+            }.get(annotation, getattr(annotation, "__name__", "text"))
+        )
+        if annotation in (int, float) and any(
+            getattr(parameter, bound, None) is not None for bound in ("min", "max")
+        ):
+            type_name += " range"
     return {
         "name": parameter.name,
         "kind": parameter.param_type_name,
         "flags": list(parameter.opts),
-        "type": parameter.type.name,
+        "type": type_name,
         "choices": [str(choice) for choice in choices] if choices else None,
         "required": bool(parameter.required),
         "multiple": bool(parameter.multiple),
