@@ -58,6 +58,7 @@ python -m webskrap.mcp_server
 | `browser_open` | Start (or reuse) a persistent headless browser session. |
 | `browser_goto` | Navigate the session's current page. |
 | `browser_text` | Visible body text, windowed in the browser without an accessibility tree. |
+| `browser_find` | Find accessible elements by text or regex with minimal ancestor context. |
 | `browser_snapshot` | Aria snapshot of the page with `eN` element refs. |
 | `browser_interact` | Click, fill, type, select, hover, check, or uncheck an element. |
 | `browser_press` | Press a keyboard key on the page. |
@@ -354,3 +355,23 @@ native browser controls you need:
   "webrtc_ip_handling_policy": "disable_non_proxied_udp"
 }
 ```
+
+## Targeted snapshots
+
+Use `browser_find(text="Save changes")` to find known controls. Supply exactly
+one of `text` (case-insensitive substring) or `regex` (Python regex, with inline
+flags such as `(?i)`). Results include matching lines, ancestor paths and refs
+for `browser_interact`. `max_matches` accepts 1..50, default 20. Match counts
+precede character truncation. Caller regex runs in a worker with a two-second
+limit per frame.
+
+Use `browser_snapshot(target="e15", depth=2)` for one subtree. Unique main-frame
+CSS selectors also work. Set `boxes=true` only when viewport geometry is needed.
+The existing character limit and continuation fields remain unchanged for both
+tools. Repeat the same query with `next_snapshot_offset` while the DOM is stable.
+
+Snapshots omit password values, hidden and inert content, and background content
+behind a native modal dialog. Visible page text and other input values can still
+contain sensitive data. Open shadow roots and available iframe content use the
+existing native CDP driver. Closed roots and nested out-of-process frames keep
+its existing limits. Interactions do not append snapshots. No diff cache is kept.

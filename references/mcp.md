@@ -135,3 +135,16 @@ a fresh view before choosing more coordinates. Wheel input can finish after the
 call returns. Run dependent actions sequentially in each session. The image
 shows the page, including canvas and frames, not browser chrome, OS dialogs,
 or a live desktop stream. Headless rendering needs no Xvfb.
+
+## Find and scope
+
+Prefer `browser_find(text="Save")` to a full snapshot when the target is known.
+Use `regex="(?i)save"` for Python regex matching. Supply one search mode.
+Results contain matching semantic lines, ancestor context, actionable refs,
+and match counts. `max_matches` accepts 1..50 (default 20).
+
+Use `browser_snapshot(target="e15", depth=2)` for a subtree. A unique main-frame
+CSS selector is also accepted. `boxes=true` adds viewport CSS pixel geometry.
+Both tools support `max_chars`, `offset`, and `next_snapshot_offset`.
+Interactions do not append snapshots. Refs survive reads while their DOM nodes
+remain connected. Re-find after navigation or a stale-ref error.

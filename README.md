@@ -142,6 +142,9 @@ and media. HTML fetches, screenshots and interactive pages load all resources.
 Set `resource_policy="all"`, `"lite"`, or `"documents"` to override this choice.
 Use `documents` only when removing CSS preserves the required result.
 Fetches use `domcontentloaded`; set `ready_selector` for deferred content.
+Use `browser_find(text="Save")` to locate a known control with ancestor context.
+Use `browser_snapshot(target="e15", depth=2)` for one subtree; add `boxes=true`
+only when geometry matters. Reuse returned refs with `browser_interact`.
 Use `networkidle`, screenshots and full snapshots only when the task needs them.
 CLI and MCP reject cookies by default. Disable this only for known pages where
 it is unnecessary. In Python, enable rejection with `SessionConfig(decline_cookies=True)`.
