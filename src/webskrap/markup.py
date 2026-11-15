@@ -19,6 +19,7 @@ sibling combinators, raises ``ValueError`` instead of matching wrongly.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -288,13 +289,17 @@ class _TreeBuilder(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.root = Element("#document", {}, None)
         self._open = [self.root]
+        self._counts: Counter[str] = Counter()
+
+    def _pop(self) -> None:
+        self._counts[self._open.pop().tag] -= 1
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         closers = _IMPLIED_END.get(tag, frozenset())
         while len(self._open) > 1 and (
             self._open[-1].tag in closers or (tag in _CLOSES_P and self._open[-1].tag == "p")
         ):
-            self._open.pop()
+            self._pop()
         values: dict[str, str] = {}
         for name, value in attrs:
             values.setdefault(name, value or "")
@@ -302,12 +307,14 @@ class _TreeBuilder(HTMLParser):
         self._open[-1].children.append(element)
         if tag not in _VOID:
             self._open.append(element)
+            self._counts[tag] += 1
 
     def handle_endtag(self, tag: str) -> None:
-        for index in range(len(self._open) - 1, 0, -1):
-            if self._open[index].tag == tag:
-                del self._open[index:]
-                return
+        if self._counts[tag] <= 0:
+            return
+        while self._open[-1].tag != tag:
+            self._pop()
+        self._pop()
 
     def handle_data(self, data: str) -> None:
         children = self._open[-1].children

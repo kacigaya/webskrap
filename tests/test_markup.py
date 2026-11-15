@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from webskrap import Element, FetchResult, parse_html
@@ -84,6 +86,14 @@ def test_deep_documents_do_not_recurse_or_go_quadratic() -> None:
     assert root.text == "x"
     assert root.css("span div") == []
     assert len(root.css("div > div")) == depth - 1
+
+
+def test_stray_end_tags_under_deep_nesting_stay_linear() -> None:
+    depth = 20_000
+    started = time.perf_counter()
+    root = parse_html("<div>" * depth + "</x>" * depth + "<b>y</b>")
+    assert time.perf_counter() - started < 5
+    assert [b.text for b in root.css("div > b")] == ["y"]
 
 
 def test_fetch_result_css_reparses_only_when_text_changes() -> None:
