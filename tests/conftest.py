@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from webskrap import browser_session, client
-from webskrap.cdp import CDPPage
+from webskrap.cdp import CDPPage, find_executable
 from webskrap.client import WebSkrapError
 
 
@@ -22,10 +22,13 @@ def _sandbox_launches() -> bool:
     under test, so the session lifecycle tests below fall back instead of
     failing. The sandbox *policy* (which flags a launch gets) is asserted
     without a browser in ``test_browser_session_unit.py``.
+
+    It probes the downloaded Chromium that ``channel="chromium"`` tests pin.
+    An installed Chrome, which sessions prefer, may sandbox where it cannot.
     """
     directory = Path(tempfile.mkdtemp(prefix="webskrap-sandbox-probe-"))
     try:
-        executable = asyncio.run(browser_session.chromium_executable())
+        executable = str(find_executable("chromium"))
         pid, _port = browser_session.launch_browser(
             directory, executable=executable, headless=True, chromium_sandbox=True
         )

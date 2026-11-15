@@ -211,8 +211,10 @@ webskrap fetch https://example.com \
 `webskrap browser` drives a persistent browser with commands modeled on the
 official [Playwright CLI](https://playwright.dev/agent-cli/introduction),
 implemented natively on WebSkrap's own CDP client. `open` launches a detached
-Chromium that keeps running between commands; every other command reconnects
-to it over CDP, acts on the current page, and exits.
+browser that keeps running between commands; every other command reconnects
+to it over CDP, acts on the current page, and exits. It uses installed Chrome,
+then Edge, then Chrome for Testing. Installed Chrome and Edge include the
+platform's sandbox support, such as the AppArmor profile Ubuntu 23.10+ needs.
 
 The session uses the same stealth path as `webskrap fetch`: commands never
 enable the CDP `Runtime` domain, so no `Runtime.enable` leak reaches the page or
@@ -400,8 +402,8 @@ A popup or a new tab becomes current. When it closes, the tab selected before
 it is current again. When the current tab closes, the newest tab left is
 current.
 
-Deliberate limitations versus the official Playwright CLI: Chrome for Testing
-only, and no commands for network mocking, tracing, or video. `back` and `forward` always reload the page,
+Deliberate limitations versus the official Playwright CLI: Chromium-based
+browsers only, and no commands for network mocking, tracing, or video. `back` and `forward` always reload the page,
 because the back/forward cache is disabled to keep history navigation
 deterministic.
 

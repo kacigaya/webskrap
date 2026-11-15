@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Persistent browser sessions now launch installed Chrome first, then Edge,
+  then the downloaded Chromium, like one-shot fetches. On Ubuntu 23.10+ the
+  downloaded Chrome for Testing has no AppArmor `userns` profile, so
+  `browser open` and MCP `browser_open` failed with the sandbox on.
+
 ## [3.3.0] - 2026-11-14
 
 ### Added

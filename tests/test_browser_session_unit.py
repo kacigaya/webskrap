@@ -827,3 +827,34 @@ def test_child_processes_do_not_inherit_proxy_credentials(monkeypatch: pytest.Mo
 
     assert "WEBSKRAP_PROXY_USERNAME" not in env and "WEBSKRAP_PROXY_PASSWORD" not in env
     assert env["WEBSKRAP_KEPT"] == "1"
+
+
+@pytest.mark.parametrize(
+    ("installed", "expected"),
+    [
+        ({"chrome", "msedge", "chromium"}, "/bin/chrome"),
+        ({"msedge", "chromium"}, "/bin/msedge"),
+        ({"chromium"}, "/bin/chromium"),
+    ],
+)
+def test_sessions_prefer_installed_chrome_then_edge_then_chromium(
+    monkeypatch: pytest.MonkeyPatch, installed: set[str], expected: str
+) -> None:
+    def fake_find(channel: str | None) -> Path:
+        if channel not in installed:
+            raise WebSkrapError("not found", code=ErrorCode.BROWSER_LAUNCH)
+        return Path(f"/bin/{channel}")
+
+    monkeypatch.setattr(browser_session, "find_executable", fake_find)
+
+    assert asyncio.run(browser_session.chromium_executable()) == str(Path(expected))
+
+
+def test_sessions_report_a_missing_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_find(channel: str | None) -> Path:
+        raise WebSkrapError(f"{channel} not found", code=ErrorCode.BROWSER_LAUNCH)
+
+    monkeypatch.setattr(browser_session, "find_executable", fake_find)
+
+    with pytest.raises(WebSkrapError, match="chromium not found"):
+        asyncio.run(browser_session.chromium_executable())

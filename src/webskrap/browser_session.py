@@ -307,11 +307,19 @@ def is_session_dir(path: Path) -> bool:
 
 
 async def chromium_executable() -> str:
-    """Return the Chromium binary sessions launch; see :func:`webskrap.cdp.find_executable`.
+    """Return the binary sessions launch: installed Chrome, then Edge, then Chromium.
+
+    Same order as one-shot fetches. Installed Chrome and Edge ship the
+    platform's sandbox support (for example an AppArmor ``userns`` profile on
+    Ubuntu 23.10+), which a downloaded Chrome for Testing lacks. See
+    :func:`webskrap.cdp.find_executable`.
 
     Raises:
         WebSkrapError: ``browser_launch`` when no Chromium is installed.
     """
+    for channel in ("chrome", "msedge"):
+        with suppress(WebSkrapError):
+            return str(find_executable(channel))
     return str(find_executable("chromium"))
 
 
