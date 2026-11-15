@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+
+from webskrap.markup import Element, parse_html
 
 #: Chromium's WebRTC ICE candidate policy; see
 #: :attr:`SessionConfig.webrtc_ip_handling_policy`.
@@ -706,6 +708,7 @@ class FetchResult(BaseModel):
     ``text`` is page HTML unless the fetch asked for ``text_only``. ``ok`` is
     an HTTP-status judgement (2xx/3xx), not a promise that the page is what you
     wanted. ``cookies`` are the whole context's, not just this page's.
+    :meth:`css` and :meth:`css_first` query ``text`` as HTML.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -728,6 +731,33 @@ class FetchResult(BaseModel):
     # "not requested" -- ``links_total`` is the count before the cap applied.
     links: list[Link] = Field(default_factory=list)
     links_total: int = 0
+    _document: tuple[str, Element] | None = PrivateAttr(default=None)
+
+    def css(self, selector: str) -> list[Element]:
+        """Return elements of ``text`` that match ``selector``, in document order.
+
+        ``text`` is parsed once with :func:`~webskrap.markup.parse_html`, and
+        the tree is reused until ``text`` changes. Text from a ``text_only``
+        fetch is not HTML, so query a fetch without it. See
+        :mod:`webskrap.markup` for the supported selectors.
+
+        Raises:
+            ValueError: If ``selector`` is empty or uses unsupported syntax.
+        """
+        return self._root().css(selector)
+
+    def css_first(self, selector: str) -> Element | None:
+        """Return the first element of ``text`` that matches ``selector``, or ``None``.
+
+        Raises:
+            ValueError: If ``selector`` is empty or uses unsupported syntax.
+        """
+        return self._root().css_first(selector)
+
+    def _root(self) -> Element:
+        if self._document is None or self._document[0] is not self.text:
+            self._document = (self.text, parse_html(self.text))
+        return self._document[1]
 
 
 class SearchHit(BaseModel):

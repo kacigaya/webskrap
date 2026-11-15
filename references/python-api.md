@@ -129,6 +129,19 @@ Links resolve against the final URL. Duplicate and `javascript:` targets are
 dropped. `links_total` is the count before the cap. A session with
 `java_script_enabled=False` cannot collect links.
 
+## Select elements
+
+`result.css(selector)` returns matching `Element` objects in document order.
+`result.css_first(selector)` returns the first match or `None`. Elements have
+`tag`, `attrs`, `parent`, `children`, `text`, `css()`, and `css_first()`.
+`parse_html(html)` returns the document root for any HTML string.
+
+Selectors: type, `*`, `#id`, `.class`, `[a]`, `[a=v]`, `~=`, `|=`, `^=`,
+`$=`, `*=`, descendant, `>`, and `,`. Other syntax raises `ValueError`. The
+parser reads `result.text` offline. Do not query `text_only` results; they
+are plain text. It
+does not insert implied elements such as `tbody`.
+
 ## Search
 
 `client.search(query, engine=..., max_results=...)` and
