@@ -9,6 +9,15 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-11-15
+
+### Added
+
+- `FetchResult.css()` and `css_first()` query fetched HTML with CSS
+  selectors. `parse_html()` builds the same `Element` tree from any HTML
+  string. Both use the standard library, so WebSkrap adds no dependency.
+  Unsupported selector syntax raises `ValueError`.
+
 ### Fixed
 
 - Persistent browser sessions now launch installed Chrome first, then Edge,
@@ -1043,7 +1052,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/kacigaya/webskrap/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/kacigaya/webskrap/compare/v3.2.4...v3.3.0
 [3.2.4]: https://github.com/kacigaya/webskrap/compare/v3.2.3...v3.2.4
 [3.2.3]: https://github.com/kacigaya/webskrap/compare/v3.2.2...v3.2.3
