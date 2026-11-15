@@ -184,3 +184,33 @@ elif result.ok:
 else:
     print("HTTP error", result.status)
 ```
+
+### Select elements
+
+`result.css(selector)` returns matching elements in document order.
+`result.css_first(selector)` returns the first match or `None`. Each `Element`
+has `tag`, `attrs`, `parent`, `children`, and `text`, and supports the same two
+methods. Use `parse_html(html)` to query HTML from another source.
+
+```python
+from webskrap import WebSkrapClient
+
+async with WebSkrapClient() as client:
+    result = await client.fetch("https://example.com")
+    for row in result.css("table.prices tr"):
+        print([cell.text.strip() for cell in row.css("td")])
+    link = result.css_first("a[href^='https://']")
+    print(link.attrs["href"] if link else None)
+```
+
+Supported selectors are type and `*`, `#id`, `.class`, attribute tests
+(`[a]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`), the descendant and `>`
+combinators, and `,` lists. Other syntax, such as pseudo-classes and sibling
+combinators, raises `ValueError`.
+
+The parser runs offline on `result.text`. A `text_only` fetch returns plain
+text, not HTML, so fetch without `text_only` before you query. The parser
+handles void elements and common implied end tags. It does not run the full
+HTML5 tree-construction algorithm, so badly broken markup can nest
+differently than in the browser. It also does not insert implied elements
+such as `tbody`. To query the browser's live tree, use a page from a session.

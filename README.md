@@ -91,6 +91,18 @@ for each URL. Close it with `await client.close_session("crawl")`, or let the
 client context close it. Session names belong to one client. Use separate
 sessions for unrelated callers.
 
+## Select elements
+
+Query fetched HTML with CSS selectors. Use `parse_html(html)` for HTML from
+other sources.
+
+```python
+async with WebSkrapClient() as client:
+    result = await client.fetch("https://example.com")
+    print(result.css_first("h1").text)
+    print([a.attrs["href"] for a in result.css("a[href]")])
+```
+
 ## Search
 
 A search loads the engine's results page in the same stealth browser and
