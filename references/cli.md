@@ -59,7 +59,8 @@ first attempt.
 
 ## Persistent browser
 
-`webskrap browser open` launches detached Chromium. Later commands reconnect
+`webskrap browser open` launches detached Chromium: installed Chrome, then Edge,
+then Chrome for Testing. Later commands reconnect
 over CDP, act on its current page, and exit. The browser
 gets the same automation and headless-screen flags as `fetch`; `--headed`
 also drops the `HeadlessChrome` user-agent token. `--proxy URL` routes the
