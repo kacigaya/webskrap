@@ -1011,7 +1011,6 @@ async def _scroll_into_view(element: _Element) -> None:
         wheel_x, wheel_y = page.pointer
     else:
         wheel_x, wheel_y = element.offset[0] + 1, element.offset[1] + 1
-    page.pointer = (wheel_x, wheel_y)
     previous_top: float | None = None
     for _ in range(MAX_WHEEL_BATCHES):
         box = await _box(element, recover=True)
@@ -1029,6 +1028,7 @@ async def _scroll_into_view(element: _Element) -> None:
                 "Input.dispatchMouseEvent",
                 {"type": "mouseWheel", "x": wheel_x, "y": wheel_y, "deltaX": 0, "deltaY": step},
             )
+            page.pointer = (wheel_x, wheel_y)
             remaining -= step
             await asyncio.sleep(uniform(16, 45) / 1000)
         await asyncio.sleep(uniform(60, 160) / 1000)

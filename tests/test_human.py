@@ -91,6 +91,7 @@ async def test_pointer_does_not_hide_protocol_errors(pointer) -> None:
 
 async def test_pointer_lands_on_the_exact_click_point(pointer) -> None:
     element, _ = pointer
+    element.input_page.pointer = (10.0, 10.0)
     await cdp_dom._human_pointer(element, click_count=2)
     events = [args.args[1] for args in element.input_page.send.await_args_list]
     moves = [event for event in events if event["type"] == "mouseMoved"]
@@ -170,6 +171,18 @@ async def test_second_click_starts_where_the_first_ended(pointer) -> None:
 
     moves = _moves(page)
     assert ((moves[0][0] - first_end[0]) ** 2 + (moves[0][1] - first_end[1]) ** 2) ** 0.5 < 30
+
+
+async def test_a_visible_target_keeps_the_cursor_position(pointer) -> None:
+    element, _ = pointer
+    page = element.input_page
+    page.pointer = (500.0, 300.0)
+    element.offset = (40.0, 60.0)
+
+    await cdp_dom._scroll_into_view(element)
+
+    page.send.assert_not_awaited()
+    assert page.pointer == (500.0, 300.0)
 
 
 async def test_consent_click_timeout_stops_before_mouse_input(pointer, monkeypatch) -> None:
