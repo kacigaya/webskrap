@@ -28,6 +28,9 @@ history, so they summarize each release rather than list every change.
 
 ### Changed
 
+- MCP `stealth_fetch` defaults to `resource_policy="all"`. With `auto` it
+  blocked images, fonts and media for text output, and page scripts can see
+  those failed loads. `fetch` keeps `auto`.
 - The simulated headless screen no longer has the same 1840x1000 window at
   0,0 for every user. A Linux desktop panel and the window's size and
   position come from the persistent profile directory, or one process-wide

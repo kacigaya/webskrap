@@ -19,8 +19,10 @@ spends tokens on content instead of markup (typically 5-10x fewer tokens than
 raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control. Pass
 `text_only=false` when you need the HTML.
 
-Both fetch tools default to `domcontentloaded` and `resource_policy="auto"`.
-Auto skips images, fonts and media for text; HTML loads all resources.
+Both fetch tools default to `domcontentloaded`. `fetch` defaults to
+`resource_policy="auto"`: it skips images, fonts and media for text, and HTML
+loads all resources. `stealth_fetch` defaults to `all`, because page scripts can
+see a blocked image or font, which no real browser blocks.
 Explicit `all`, `lite`, or `documents` policies take priority. Use `documents`
 only when removing CSS preserves the required result. Use `ready_selector` for
 deferred content. Keep cookie rejection on unless the page is known not to need it.
@@ -112,7 +114,7 @@ Example arguments:
 ```
 
 `stealth_fetch` accepts the same URL/profile/timeout/output-size/session controls,
-`resource_policy` (default `auto`) and `wait_until` (default `domcontentloaded`),
+`resource_policy` (default `all`) and `wait_until` (default `domcontentloaded`),
 plus stealth options:
 
 ```json
