@@ -26,7 +26,7 @@ import signal
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for Chromium, never a shell
 import sys
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -543,7 +543,8 @@ def launch_browser(
         profile=profile,
         user_data_dir=directory / "user-data",
     )
-    env = {**_child_env(), **(config.browser_env(native_profile) or {}), **(display_env or {})}
+    # The locale environment is built from os.environ, credentials included.
+    env = _child_env({**(config.browser_env(native_profile) or os.environ), **(display_env or {})})
     user_data_dir = secure_directory(directory / "user-data")
     port_file = user_data_dir / DEVTOOLS_PORT_FILE
     port_file.unlink(missing_ok=True)
@@ -597,11 +598,11 @@ def launch_browser(
         raise
 
 
-def _child_env() -> dict[str, str]:
-    """Return this process's environment without the proxy credentials."""
+def _child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Return ``base`` (this process's environment) without the proxy credentials."""
     return {
         key: value
-        for key, value in os.environ.items()
+        for key, value in (os.environ if base is None else base).items()
         if key not in {PROXY_USERNAME_ENV, PROXY_PASSWORD_ENV}
     }
 

@@ -183,19 +183,34 @@ def stop_detached(pid: int, directory: Path) -> None:
     """
     if sys.platform == "win32" or not directory.name.startswith(DIRECTORY_PREFIX):
         return
-    try:
-        command = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except OSError:
-        command = b""
-    if b"Xvfb" in command and str(directory).encode() in command:
+    if _is_display(pid, directory):
         with suppress(ProcessLookupError):
             os.kill(pid, signal.SIGTERM)
             deadline = time.monotonic() + STOP_TIMEOUT_S
-            while Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
+            while _is_display(pid, directory) and time.monotonic() < deadline:
                 time.sleep(0.05)
-            if Path(f"/proc/{pid}").exists():
+            if _is_display(pid, directory):
                 os.kill(pid, signal.SIGKILL)
     shutil.rmtree(directory, ignore_errors=True)
+
+
+def _is_display(pid: int, directory: Path) -> bool:
+    """True while ``pid`` is the running Xvfb of ``directory``.
+
+    The process that started the display, such as a long-lived MCP server,
+    is its parent, so a stopped display stays a zombie until reaped. It is
+    reaped here when this process is the parent, and a zombie's empty
+    command line counts as stopped either way.
+    """
+    if sys.platform == "win32":
+        return False
+    with suppress(ChildProcessError):
+        os.waitpid(pid, os.WNOHANG)
+    try:
+        command = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    return b"Xvfb" in command and str(directory).encode() in command
 
 
 def _read_display_number(fd: int, process: subprocess.Popen[bytes]) -> int:

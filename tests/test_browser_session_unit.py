@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 import stat
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1077,3 +1079,48 @@ def test_stop_detached_kills_only_its_own_display(tmp_path: Path) -> None:
 
     assert not owned.exists()
     assert foreign.exists()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="reads /proc")
+def test_stop_detached_does_not_wait_on_its_own_zombie(tmp_path: Path) -> None:
+    # The MCP server starts a session's display and may also close it, so the
+    # stopped display is this process's child and lingers as a zombie.
+    owned = tmp_path / f"{display.DIRECTORY_PREFIX}child"
+    owned.mkdir()
+    child = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", "import time; time.sleep(60)", "Xvfb", str(owned)]
+    )
+    try:
+        started = time.monotonic()
+        display.stop_detached(child.pid, owned)
+        elapsed = time.monotonic() - started
+    finally:
+        child.kill()
+        with contextlib.suppress(ChildProcessError):
+            child.wait(timeout=5)
+
+    assert elapsed < display.STOP_TIMEOUT_S / 2
+    assert not owned.exists()
+
+
+def test_locale_launch_keeps_proxy_credentials_out_of_the_browser(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The locale environment starts from os.environ, which holds the credentials.
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("WEBSKRAP_PROXY_USERNAME", "user")
+    monkeypatch.setenv("WEBSKRAP_PROXY_PASSWORD", "secret")
+    launched: list[dict[str, str]] = []
+
+    def fake_popen(_command: list[str], **kwargs: Any) -> _FakeProcess:
+        launched.append(kwargs["env"])
+        return _FakeProcess(exited=True)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda *_args, **_kwargs: None)
+
+    _launch(tmp_path, headless=True, profile_mode="locale")
+
+    assert launched[0]["TZ"] == "Europe/Paris"
+    assert "WEBSKRAP_PROXY_USERNAME" not in launched[0]
+    assert "WEBSKRAP_PROXY_PASSWORD" not in launched[0]
