@@ -15,6 +15,7 @@ from webskrap.models import (
     ProfileMode,
     ResourcePolicy,
     SearchEngine,
+    SessionProfileMode,
     WaitUntil,
     WebRtcIPHandlingPolicy,
 )
@@ -56,6 +57,15 @@ def parse_profile_mode(value: str) -> ProfileMode:
         ValueError: If ``value`` is not a profile mode.
     """
     return cast(ProfileMode, parse_literal(value, ProfileMode, "profile_mode"))
+
+
+def parse_session_profile_mode(value: str) -> SessionProfileMode:
+    """Parse a browser session's profile mode: native or locale.
+
+    Raises:
+        ValueError: If ``value`` is not native or locale.
+    """
+    return cast(SessionProfileMode, parse_literal(value, SessionProfileMode, "profile_mode"))
 
 
 def parse_load_state(value: str) -> LoadState:

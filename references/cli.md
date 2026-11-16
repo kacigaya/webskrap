@@ -69,6 +69,9 @@ session through a proxy and defaults WebRTC to `disable_non_proxied_udp`;
 reopening with different values is refused. The URL never holds credentials:
 for an http or https proxy, set `WEBSKRAP_PROXY_USERNAME` and
 `WEBSKRAP_PROXY_PASSWORD`, and a helper process answers the proxy.
+`--virtual-display` runs Chrome headed on a private Xvfb display that lives
+as long as the session. `--gpu mesa` and `--profile-mode locale --profile NAME`
+work as for `fetch`; `full` mode is not offered for sessions.
 
 ```bash
 webskrap browser open https://example.com --decline-cookies

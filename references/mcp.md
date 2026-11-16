@@ -18,6 +18,8 @@ boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
 - `browser_open` and the other `browser_*` tools drive a stateful flow.
   `browser_open` takes `webrtc_ip_handling_policy` but no proxy; open a proxied
   session with `webskrap browser open --proxy URL` and the tools reuse it.
+  It also takes `virtual_display`, `gpu`, and `profile_mode` `locale` with
+  `profile` (Linux). Prefer `virtual_display=True` on protected sites.
 - After an interaction, `browser_wait_for` waits for one condition: `text`,
   `text_gone`, `selector` with `selector_state`, or `load_state`. Use it
   instead of repeated snapshots.

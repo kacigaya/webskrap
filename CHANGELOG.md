@@ -9,6 +9,15 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Browser sessions take the native stealth settings of `fetch`:
+  `virtual_display`, `gpu`, and `profile_mode="locale"` with a `profile`
+  (`webskrap browser open --virtual-display --gpu --profile-mode --profile`,
+  MCP `browser_open`). The virtual display lives as long as the session, and
+  `browser close` stops it. `full` mode is not offered for sessions, because
+  CDP emulation ends with each command's connection.
+
 ### Fixed
 
 - `WebSkrapClient.fetch()` and `search()` now release the browser when the

@@ -55,7 +55,7 @@ python -m webskrap.mcp_server
 | `fetch_session_close` | Close an idle warm fetch session; persistent profile files survive. |
 | `search` | Find URLs for a query on Bing (default) or DuckDuckGo, with the `stealth_fetch` stealth controls. |
 | `doctor` | Check that Chromium can launch. |
-| `browser_open` | Start (or reuse) a persistent headless browser session. |
+| `browser_open` | Start (or reuse) a persistent browser session with no visible window. |
 | `browser_goto` | Navigate the session's current page. |
 | `browser_text` | Visible body text, windowed in the browser without an accessibility tree. |
 | `browser_find` | Find accessible elements by text or regex with minimal ancestor context. |
@@ -201,6 +201,15 @@ switch: page text can steer a model, and a model-chosen proxy could reroute all
 of a session's traffic. Open a proxied session from the CLI with
 `webskrap browser open --proxy URL`; the browser tools then reuse it, and
 `browser_open` reports its `proxy_server`.
+
+`browser_open` also takes the native stealth settings of `stealth_fetch`:
+`virtual_display` (headed Chromium on a private Xvfb display that lives as long
+as the session, Linux), `gpu` (`mesa` renders WebGL through Mesa's lavapipe),
+and `profile_mode` `locale` with a `profile` (timezone and languages set at
+launch, Linux). Session commands reconnect for every call, and CDP emulation
+ends with its connection, so `full` mode is not offered. These settings are
+fixed at launch: reopening a running session with a different requested value
+is refused.
 
 A typical flow:
 

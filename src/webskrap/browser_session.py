@@ -33,19 +33,24 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, BinaryIO, TypedDict, TypeVar
 
-from webskrap import cdp_dom, cdp_session, text_search
+from webskrap import cdp_dom, cdp_session, display, text_search
 from webskrap.cdp import CDPPage, base_args, find_executable
+from webskrap.client import require_lavapipe
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
+    BrowserProfile,
     ElementState,
+    GpuBackend,
     LoadState,
     ProxyConfig,
     SessionConfig,
+    SessionProfileMode,
     WaitUntil,
     WebRtcIPHandlingPolicy,
     text_window,
 )
 from webskrap.paths import secure_directory
+from webskrap.profiles import get_profile
 
 logger = logging.getLogger(__name__)
 
@@ -418,6 +423,10 @@ def stealth_launch_args(
     proxy_server: str | None = None,
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
     fake_media_devices: bool = False,
+    virtual_display: bool = False,
+    gpu: GpuBackend = GpuBackend.AUTO,
+    profile_mode: SessionProfileMode = "native",
+    profile: str | None = None,
 ) -> list[str]:
     """Return the browser flags a one-shot fetch would get, for a detached launch.
 
@@ -425,12 +434,46 @@ def stealth_launch_args(
     definition: ``--disable-blink-features=AutomationControlled`` (otherwise a
     remote-debugging port sets ``navigator.webdriver``), the headless virtual
     screen and smaller window (otherwise 800x600 at 10,10), ``--no-sandbox`` only
-    when the sandbox is off, ``--proxy-server`` for the proxy, and the WebRTC
-    policy, which defaults to ``disable_non_proxied_udp`` behind a proxy.
+    when the sandbox is off, ``--proxy-server`` for the proxy, the WebRTC
+    policy, which defaults to ``disable_non_proxied_udp`` behind a proxy, the
+    GL flags of ``gpu`` and the profile's ``--accept-lang`` in locale mode.
 
     Raises:
         WebSkrapError: If ``proxy_server`` is not a proxy URL WebSkrap accepts
-            or embeds credentials (see :func:`persistent_proxy_server`).
+            or embeds credentials (see :func:`persistent_proxy_server`), or if
+            ``profile`` is unknown (``usage``).
+    """
+    config, native_profile = _session_config(
+        headless=headless,
+        chromium_sandbox=chromium_sandbox,
+        proxy_server=proxy_server,
+        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+        fake_media_devices=fake_media_devices,
+        virtual_display=virtual_display,
+        gpu=gpu,
+        profile_mode=profile_mode,
+        profile=profile,
+    )
+    return config.browser_args(native_profile)
+
+
+def _session_config(
+    *,
+    headless: bool,
+    chromium_sandbox: bool,
+    proxy_server: str | None,
+    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None,
+    fake_media_devices: bool,
+    virtual_display: bool,
+    gpu: GpuBackend,
+    profile_mode: SessionProfileMode,
+    profile: str | None,
+) -> tuple[SessionConfig, BrowserProfile | None]:
+    """Return a detached session's config and the profile its launch applies.
+
+    Raises:
+        WebSkrapError: ``usage`` for an invalid proxy, an unknown profile, or
+            locale mode off Linux, where only CDP emulation applies a locale.
     """
     proxy = ProxyConfig(server=persistent_proxy_server(proxy_server)) if proxy_server else None
     config = SessionConfig(
@@ -439,8 +482,19 @@ def stealth_launch_args(
         proxy=proxy,
         webrtc_ip_handling_policy=webrtc_ip_handling_policy,
         fake_media_devices=fake_media_devices,
+        virtual_display=virtual_display,
+        gpu=gpu,
+        profile_mode=profile_mode,
     )
-    return config.browser_args()
+    if profile_mode == "native":
+        return config, None
+    if not config.uses_native_profile():
+        msg = "profile_mode='locale' for a browser session needs Linux"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    try:
+        return config, get_profile(profile)
+    except ValueError as exc:
+        raise WebSkrapError(str(exc), code=ErrorCode.USAGE) from exc
 
 
 def persistent_proxy_server(server: str) -> str:
@@ -477,6 +531,11 @@ def launch_browser(
     proxy_server: str | None = None,
     webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
     fake_media_devices: bool = False,
+    virtual_display: bool = False,
+    gpu: GpuBackend = GpuBackend.AUTO,
+    profile_mode: SessionProfileMode = "native",
+    profile: str | None = None,
+    display_env: dict[str, str] | None = None,
 ) -> tuple[int, int]:
     """Start a detached Chromium and return its (pid, CDP port).
 
@@ -492,11 +551,30 @@ def launch_browser(
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy; defaults to
             ``disable_non_proxied_udp`` when ``proxy_server`` is set.
         fake_media_devices: Supply a synthetic camera and microphone.
+        virtual_display: Run headed on the display in ``display_env`` when
+            ``headless`` is set; the caller starts that display.
+        gpu: WebGL renderer; ``mesa`` renders through Mesa's lavapipe.
+        profile_mode: ``locale`` sets ``profile``'s timezone and languages
+            through the browser's environment and ``--accept-lang`` (Linux).
+        profile: Bundled profile name for locale mode.
+        display_env: ``DISPLAY`` and ``XAUTHORITY`` of a virtual display.
 
     Raises:
         WebSkrapError: If the browser exits during startup or never reports a
             DevTools port.
     """
+    config, native_profile = _session_config(
+        headless=headless,
+        chromium_sandbox=chromium_sandbox,
+        proxy_server=proxy_server,
+        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+        fake_media_devices=fake_media_devices,
+        virtual_display=virtual_display,
+        gpu=gpu,
+        profile_mode=profile_mode,
+        profile=profile,
+    )
+    env = {**_child_env(), **(config.browser_env(native_profile) or {}), **(display_env or {})}
     user_data_dir = secure_directory(directory / "user-data")
     port_file = user_data_dir / DEVTOOLS_PORT_FILE
     port_file.unlink(missing_ok=True)
@@ -511,15 +589,9 @@ def launch_browser(
         # track restores across attachments, so trade bfcache for
         # deterministic load events.
         "--disable-features=BackForwardCache",
-        *stealth_launch_args(
-            headless=headless,
-            chromium_sandbox=chromium_sandbox,
-            proxy_server=proxy_server,
-            webrtc_ip_handling_policy=webrtc_ip_handling_policy,
-            fake_media_devices=fake_media_devices,
-        ),
+        *config.browser_args(native_profile),
     ]
-    if headless:
+    if config.launch_headless:
         command.append("--headless=new")
     command.append("about:blank")
 
@@ -532,7 +604,7 @@ def launch_browser(
             command,
             stdout=log,
             stderr=log,
-            env=_child_env(),
+            env=env,
             start_new_session=True,
         )
     try:
@@ -697,6 +769,10 @@ async def open_session(
     fake_media_devices: bool = False,
     proxy_username: str | None = None,
     proxy_password: str | None = None,
+    virtual_display: bool = False,
+    gpu: GpuBackend = GpuBackend.AUTO,
+    profile_mode: SessionProfileMode = "native",
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
@@ -719,20 +795,30 @@ async def open_session(
             either one set, a helper process (:func:`start_proxy_auth`) keeps
             both in memory and answers the proxy for as long as the browser
             runs. Neither is written to disk.
+        virtual_display: With ``headless``, run headed on a private Xvfb
+            display that lives as long as the session (Linux). Pages then see
+            no ``HeadlessChrome`` token and get full client hints.
+        gpu: WebGL renderer; ``mesa`` uses Mesa's lavapipe instead of
+            SwiftShader (Linux with mesa-vulkan-drivers).
+        profile_mode: ``locale`` launches with ``profile``'s timezone and
+            languages (Linux). ``full`` emulation is not offered: it ends when
+            the CDP connection that set it closes.
+        profile: Bundled profile for locale mode; ``desktop-chrome`` when None.
 
     Returns:
         ``{"session", "pid", "port", "reused", "chromium_sandbox",
         "proxy_server", "proxy_auth", "webrtc_ip_handling_policy",
-        "fake_media_devices"}``. The last five describe the running
+        "fake_media_devices", "virtual_display", "gpu", "profile_mode",
+        "profile"}``. Every key after ``reused`` describes the running
         browser's launch settings.
 
     Raises:
-        WebSkrapError: If the name or proxy is invalid, the browser or the
-            proxy helper fails to start, or a running session was launched
-            with a different proxy, proxy authentication or WebRTC policy than
-            requested (``usage``). Launch flags cannot change on a running
-            browser, and silently reusing it would send traffic outside the
-            requested proxy.
+        WebSkrapError: If the name, proxy or profile is invalid, the browser,
+            display or proxy helper fails to start, or a running session was
+            launched with a different proxy, proxy authentication, WebRTC
+            policy or requested stealth setting (``usage``). Launch flags
+            cannot change on a running browser, and silently reusing it would
+            send traffic outside the requested proxy.
     """
     credentials = None
     if proxy_username is not None or proxy_password is not None:
@@ -743,6 +829,23 @@ async def open_session(
         # Chromium answers no challenge from a SOCKS proxy.
         msg = "proxy credentials need an http:// or https:// proxy server"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
+    config, _ = _session_config(
+        headless=headless,
+        chromium_sandbox=True,
+        proxy_server=proxy_server,
+        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+        fake_media_devices=fake_media_devices,
+        virtual_display=virtual_display,
+        gpu=gpu,
+        profile_mode=profile_mode,
+        profile=profile,
+    )
+    launch = {
+        "virtual_display": config.uses_virtual_display(),
+        "gpu": str(gpu),
+        "profile_mode": profile_mode,
+        "profile": (profile or "desktop-chrome") if profile_mode == "locale" else None,
+    }
     operation_lock = await _acquire_session_operation_lock(name)
     try:
         # Unconditional, so a session directory created by an older version (or
@@ -765,18 +868,43 @@ async def open_session(
                     f"Run: webskrap browser close --session {name}, then open it again"
                 )
                 raise WebSkrapError(msg, code=ErrorCode.USAGE)
+            _require_same_launch(name, state, launch, explicit_profile=profile is not None)
 
         if state is None:
+            if existing is not None:
+                # A crashed browser leaves its display running.
+                _stop_display(existing)
+            if gpu is GpuBackend.MESA:
+                require_lavapipe()
             executable = await chromium_executable()
             sandboxed = sandbox_enabled(chromium_sandbox)
-            pid, port = launch_browser(
-                directory,
-                executable=executable,
-                headless=headless,
-                chromium_sandbox=sandboxed,
-                proxy_server=proxy_server,
-                webrtc_ip_handling_policy=webrtc_ip_handling_policy,
-                fake_media_devices=fake_media_devices,
+            virtual = None
+            if config.uses_virtual_display():
+                screen = config.virtual_screen()
+                virtual = await display.VirtualDisplay.start(screen.width, screen.height)
+            try:
+                pid, port = launch_browser(
+                    directory,
+                    executable=executable,
+                    headless=headless,
+                    chromium_sandbox=sandboxed,
+                    proxy_server=proxy_server,
+                    webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+                    fake_media_devices=fake_media_devices,
+                    virtual_display=virtual_display,
+                    gpu=gpu,
+                    profile_mode=profile_mode,
+                    profile=profile,
+                    display_env=virtual.env if virtual is not None else None,
+                )
+            except BaseException:
+                if virtual is not None:
+                    await virtual.stop()
+                raise
+            display_state = (
+                {"display_pid": virtual.pid, "display_dir": str(virtual.directory)}
+                if virtual is not None
+                else {}
             )
             helper = None
             if credentials is not None:
@@ -784,6 +912,7 @@ async def open_session(
                     helper = await start_proxy_auth(directory, port, credentials)
                 except BaseException:
                     kill_browser(pid, force=True)
+                    _stop_display(display_state)
                     raise
             state = {
                 "pid": pid,
@@ -802,6 +931,8 @@ async def open_session(
                     proxy=ProxyConfig(server=proxy_server) if proxy_server else None,
                     webrtc_ip_handling_policy=webrtc_ip_handling_policy,
                 ).effective_webrtc_ip_handling_policy(),
+                **launch,
+                **display_state,
                 "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
             }
             try:
@@ -810,6 +941,7 @@ async def open_session(
                 # Without a state file the running browser would be unreachable
                 # and would hold the profile lock against the next open.
                 kill_browser(pid, force=True)
+                _stop_display(display_state)
                 raise
 
         return {
@@ -822,9 +954,51 @@ async def open_session(
             "proxy_auth": bool(state.get("proxy_auth_pid")),
             "webrtc_ip_handling_policy": state.get("webrtc_ip_handling_policy"),
             "fake_media_devices": bool(state.get("fake_media_devices", False)),
+            **{key: state.get(key, _LAUNCH_DEFAULTS[key]) for key in _LAUNCH_DEFAULTS},
         }
     finally:
         await asyncio.to_thread(operation_lock.release)
+
+
+#: Stealth launch settings a session records, with the value of a session
+#: started before they were recorded.
+_LAUNCH_DEFAULTS: dict[str, Any] = {
+    "virtual_display": False,
+    "gpu": str(GpuBackend.AUTO),
+    "profile_mode": "native",
+    "profile": None,
+}
+
+
+def _require_same_launch(
+    name: str, state: dict[str, Any], launch: dict[str, Any], *, explicit_profile: bool
+) -> None:
+    """Refuse to reuse a running session for a stealth setting it lacks.
+
+    As with the network settings, only what the caller asked for counts: a
+    default value, or a profile left unnamed, reuses the session as it runs.
+    """
+    asked = {key: value != _LAUNCH_DEFAULTS[key] for key, value in launch.items()}
+    asked["profile"] = explicit_profile and launch["profile_mode"] == "locale"
+    mismatched = [
+        key
+        for key, value in launch.items()
+        if asked[key] and state.get(key, _LAUNCH_DEFAULTS[key]) != value
+    ]
+    if mismatched:
+        msg = (
+            f"session '{name}' is already running with a different "
+            f"{', '.join(mismatched)}. Run: webskrap browser close --session {name}, "
+            "then open it again"
+        )
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
+
+
+def _stop_display(state: dict[str, Any]) -> None:
+    """Stop the virtual display a session state records, if any."""
+    pid, directory = state.get("display_pid"), state.get("display_dir")
+    if isinstance(pid, int) and isinstance(directory, str):
+        display.stop_detached(pid, Path(directory))
 
 
 def _require_same_network(
@@ -868,6 +1042,8 @@ def close_session(name: str, *, delete_data: bool = False) -> dict[str, Any]:
         state = read_state(directory)
         if state is not None and session_running(directory, state):
             _terminate(directory, state)
+        if state is not None:
+            _stop_display(state)
         state_path(directory).unlink(missing_ok=True)
         if delete_data:
             try:

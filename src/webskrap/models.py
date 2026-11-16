@@ -38,6 +38,10 @@ LoadState = Literal["domcontentloaded", "load", "networkidle"]
 ElementState = Literal["attached", "detached", "visible", "hidden"]
 #: How much of a BrowserProfile pages see; see :attr:`SessionConfig.profile_mode`.
 ProfileMode = Literal["native", "locale", "full"]
+#: Profile modes a persistent browser session accepts. "full" is CDP
+#: emulation, which ends when its connection closes, and every session
+#: command connects anew.
+SessionProfileMode = Literal["native", "locale"]
 
 
 class ResourcePolicy(StrEnum):

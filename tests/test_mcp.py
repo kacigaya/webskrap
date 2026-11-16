@@ -15,7 +15,15 @@ from webskrap.cdp import CDPBrowser
 from webskrap.client import WebSkrapError, WebSkrapSession
 from webskrap.errors import RECOVERY_HINTS, ErrorCode
 from webskrap.fetch_runtime import FetchRuntime
-from webskrap.models import FetchResult, Link, SearchEngine, SearchHit, SearchResult, SessionConfig
+from webskrap.models import (
+    FetchResult,
+    GpuBackend,
+    Link,
+    SearchEngine,
+    SearchHit,
+    SearchResult,
+    SessionConfig,
+)
 from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 from webskrap.profiles import list_profiles
 
@@ -820,8 +828,40 @@ def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
             "headless": True,
             "webrtc_ip_handling_policy": "disable_non_proxied_udp",
             "fake_media_devices": True,
+            "virtual_display": False,
+            "gpu": GpuBackend.AUTO,
+            "profile_mode": "native",
+            "profile": None,
         }
     ]
+
+
+def test_browser_open_passes_the_stealth_launch_settings(monkeypatch: Any) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"session": name, "reused": False, "proxy_server": None}
+
+    monkeypatch.setattr(browser_session, "open_session", fake_open)
+
+    asyncio.run(
+        mcp_server.browser_open(
+            virtual_display=True, gpu=GpuBackend.MESA, profile_mode="locale", profile="desktop-edge"
+        )
+    )
+
+    assert calls[0]["virtual_display"] is True
+    assert calls[0]["gpu"] is GpuBackend.MESA
+    assert calls[0]["profile_mode"] == "locale"
+    assert calls[0]["profile"] == "desktop-edge"
+
+
+def test_browser_open_refuses_full_profile_mode() -> None:
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_open(profile_mode="full"))
+
+    assert caught.value.code is ErrorCode.USAGE
 
 
 def test_browser_open_rejects_an_unknown_webrtc_policy() -> None:

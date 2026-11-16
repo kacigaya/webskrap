@@ -13,9 +13,10 @@ from typing import Any
 
 import pytest
 
-from webskrap import browser_session
+from webskrap import browser_session, display
 from webskrap.client import WebSkrapError
 from webskrap.errors import ErrorCode
+from webskrap.models import GpuBackend
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 
@@ -858,3 +859,215 @@ def test_sessions_report_a_missing_browser(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(WebSkrapError, match="chromium not found"):
         asyncio.run(browser_session.chromium_executable())
+
+
+def test_launch_on_a_virtual_display_runs_headed_there(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launched: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_popen(command: list[str], **kwargs: Any) -> _FakeProcess:
+        launched.append((command, kwargs["env"]))
+        return _FakeProcess(exited=True)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda *_args, **_kwargs: None)
+    display_env = {"DISPLAY": ":42", "XAUTHORITY": "/private/Xauthority"}
+
+    _launch(tmp_path, headless=True, virtual_display=True, display_env=display_env)
+
+    command, env = launched[0]
+    assert "--headless=new" not in command
+    assert "--window-size=1840,1000" in command
+    assert not any(arg.startswith("--screen-info") for arg in command)
+    assert env["DISPLAY"] == ":42"
+    assert env["XAUTHORITY"] == "/private/Xauthority"
+
+
+def test_launch_applies_mesa_and_the_locale_natively(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    launched: list[tuple[list[str], dict[str, str]]] = []
+
+    def fake_popen(command: list[str], **kwargs: Any) -> _FakeProcess:
+        launched.append((command, kwargs["env"]))
+        return _FakeProcess(exited=True)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda *_args, **_kwargs: None)
+
+    _launch(
+        tmp_path,
+        headless=True,
+        gpu=GpuBackend.MESA,
+        profile_mode="locale",
+        profile="desktop-edge",
+    )
+
+    command, env = launched[0]
+    assert "--use-angle=vulkan" in command
+    assert "--accept-lang=en-US,en" in command
+    assert env["TZ"] == "Europe/Paris"
+    assert env["LC_ALL"] == "en_US.UTF-8"
+
+
+def test_locale_session_needs_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    with pytest.raises(WebSkrapError, match="needs Linux") as caught:
+        browser_session.stealth_launch_args(
+            headless=True, chromium_sandbox=True, profile_mode="locale"
+        )
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_session_rejects_an_unknown_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    with pytest.raises(WebSkrapError, match="unknown profile") as caught:
+        browser_session.stealth_launch_args(
+            headless=True, chromium_sandbox=True, profile_mode="locale", profile="nope"
+        )
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+class _FakeDisplay:
+    pid = 4321
+    env = {"DISPLAY": ":7", "XAUTHORITY": "/tmp/webskrap-display-x/Xauthority"}  # noqa: S108
+    directory = Path("/tmp/webskrap-display-x")  # noqa: S108
+
+    def __init__(self) -> None:
+        self.stopped = False
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+
+def _stub_virtual_display(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, Path]]:
+    stops: list[tuple[int, Path]] = []
+
+    async def fake_start(_width: int, _height: int) -> _FakeDisplay:
+        return _FakeDisplay()
+
+    monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
+    monkeypatch.setattr(display, "stop_detached", lambda pid, path: stops.append((pid, path)))
+    return stops
+
+
+def test_open_keeps_a_virtual_display_for_the_session_and_close_stops_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    stops = _stub_virtual_display(monkeypatch)
+    monkeypatch.setattr(browser_session, "_terminate", lambda *_args: None)
+
+    opened = asyncio.run(browser_session.open_session("vd", virtual_display=True))
+    browser_session.close_session("vd")
+
+    assert launches[0]["display_env"] == _FakeDisplay.env
+    assert opened["virtual_display"] is True
+    assert stops == [(4321, _FakeDisplay.directory)]
+
+
+def test_open_stops_the_display_when_the_browser_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_session_launch(monkeypatch, tmp_path)
+    created: list[_FakeDisplay] = []
+
+    async def fake_start(_width: int, _height: int) -> _FakeDisplay:
+        created.append(_FakeDisplay())
+        return created[-1]
+
+    def failing_launch(_directory: Path, **_kwargs: Any) -> tuple[int, int]:
+        raise WebSkrapError("browser exited during startup")
+
+    monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
+    monkeypatch.setattr(browser_session, "launch_browser", failing_launch)
+
+    with pytest.raises(WebSkrapError, match="startup"):
+        asyncio.run(browser_session.open_session("vd", virtual_display=True))
+
+    assert created[0].stopped is True
+
+
+def test_headed_session_starts_no_virtual_display(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    _stub_virtual_display(monkeypatch)
+
+    opened = asyncio.run(browser_session.open_session("vd", headless=False, virtual_display=True))
+
+    assert launches[0]["display_env"] is None
+    assert opened["virtual_display"] is False
+
+
+@pytest.mark.parametrize(
+    ("second", "label"),
+    [
+        pytest.param({"virtual_display": True}, "virtual_display", id="virtual-display"),
+        pytest.param({"gpu": GpuBackend.MESA}, "gpu", id="gpu"),
+        pytest.param({"profile_mode": "locale"}, "profile_mode", id="locale"),
+    ],
+)
+def test_reopen_refuses_a_missing_stealth_setting(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, second: dict[str, Any], label: str
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    _stub_virtual_display(monkeypatch)
+    asyncio.run(browser_session.open_session("stealth"))
+
+    with pytest.raises(WebSkrapError, match=f"different {label}") as caught:
+        asyncio.run(browser_session.open_session("stealth", **second))
+
+    assert caught.value.code is ErrorCode.USAGE
+    assert len(launches) == 1
+
+
+def test_reopen_without_stealth_settings_reuses_the_running_ones(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(browser_session, "require_lavapipe", lambda: None)
+    _stub_session_launch(monkeypatch, tmp_path)
+    _stub_virtual_display(monkeypatch)
+    asyncio.run(
+        browser_session.open_session(
+            "stealth",
+            virtual_display=True,
+            gpu=GpuBackend.MESA,
+            profile_mode="locale",
+            profile="desktop-edge",
+        )
+    )
+
+    reused = asyncio.run(browser_session.open_session("stealth"))
+    with pytest.raises(WebSkrapError, match="different profile"):
+        asyncio.run(
+            browser_session.open_session("stealth", profile_mode="locale", profile="desktop-chrome")
+        )
+
+    assert reused["reused"] is True
+    assert reused["virtual_display"] is True
+    assert reused["gpu"] == "mesa"
+    assert reused["profile"] == "desktop-edge"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="virtual displays need POSIX")
+def test_stop_detached_kills_only_its_own_display(tmp_path: Path) -> None:
+    owned = tmp_path / f"{display.DIRECTORY_PREFIX}abc"
+    owned.mkdir()
+    foreign = tmp_path / "not-a-display"
+    foreign.mkdir()
+
+    # This test process is no Xvfb, so it must survive both calls.
+    display.stop_detached(os.getpid(), owned)
+    display.stop_detached(os.getpid(), foreign)
+
+    assert not owned.exists()
+    assert foreign.exists()
