@@ -14,10 +14,15 @@ boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
   with `stealth_fetch` on the hits worth reading.
 - `doctor` reports readiness, browser identity, CPU architecture, Fontconfig
   family count, versions, paths, environment overrides, persistent sessions,
-  and the host timezone, with a warning when it is UTC.
+  and the host timezone, with a warning when it is UTC. Its `fingerprint`
+  reads what a default fetch shows pages (webdriver, user agent, client-hint
+  architecture, WebGL renderer, media device count), and each gap gets a
+  warning that names a native fix.
 - `browser_open` and the other `browser_*` tools drive a stateful flow.
   `browser_open` takes `webrtc_ip_handling_policy` but no proxy; open a proxied
   session with `webskrap browser open --proxy URL` and the tools reuse it.
+  It also takes `virtual_display`, `gpu`, and `profile_mode` `locale` with
+  `profile` (Linux). Prefer `virtual_display=True` on protected sites.
 - After an interaction, `browser_wait_for` waits for one condition: `text`,
   `text_gone`, `selector` with `selector_state`, or `load_state`. Use it
   instead of repeated snapshots.
@@ -43,8 +48,9 @@ or `full`) to set how much of the profile pages see.
   a 2-second limit.
 - `browser_goto` and `browser_open` take `decline_cookies`;
   `browser_screenshot` takes `target` for one element.
-- Both fetch tools default to `domcontentloaded` and `resource_policy="auto"`.
-  Auto uses lite for text and all for HTML. Explicit policies take priority.
+- Both fetch tools default to `domcontentloaded` and `resource_policy="all"`,
+  since page scripts can see blocked resources. `auto` (lite for text) is
+  faster on pages that do not check. Explicit policies take priority.
   Use `ready_selector` for deferred content. Keep cookie rejection on unless
   the page is known not to need it.
 - Keep `include_links` off unless links are needed.

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import os
 import struct
 import time
@@ -121,6 +122,8 @@ _POLL_S = 0.1
 T = TypeVar("T")
 #: Session-directory file with page target ids in creation order.
 PAGE_ORDER_FILE = "cdp-pages.json"
+#: Last mouse position per page target, kept between commands.
+POINTER_FILE = "cdp-pointer.json"
 #: Session-directory file with the selected tab and the pages known then.
 TAB_SELECTION_FILE = "cdp-tab.json"
 # networkidle has no live event to subscribe to after the fact; this quiet
@@ -177,6 +180,40 @@ def _write_ids(path: Path, data: object) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(data, handle)
     os.replace(temp, path)
+
+
+def saved_pointer(path: Path, target: str) -> tuple[float, float] | None:
+    """Return the mouse position a previous command left on ``target``.
+
+    Each command connects anew, and Chromium keeps the last position, so the
+    next path starts there. None when nothing valid is saved.
+    """
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    point = saved.get(target) if isinstance(saved, dict) else None
+    if (
+        isinstance(point, list)
+        and len(point) == 2
+        and all(isinstance(value, int | float) and math.isfinite(value) for value in point)
+    ):
+        return float(point[0]), float(point[1])
+    return None
+
+
+def save_pointer(path: Path, target: str, pointer: tuple[float, float], live: set[str]) -> None:
+    """Record ``target``'s mouse position, dropping pages that are gone."""
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    kept = (
+        {key: value for key, value in saved.items() if key in live}
+        if isinstance(saved, dict)
+        else {}
+    )
+    _write_ids(path, {**kept, target: list(pointer)})
 
 
 def current_page(directory: Path, pages: list[str]) -> str | None:
@@ -277,11 +314,16 @@ async def attach(
         )
         page = CDPPage(connection, attached["sessionId"], target_id)
         page.default_timeout_s = timeout_ms / 1000
+        pointer_file = user_data_dir.parent / POINTER_FILE
+        page.pointer = saved_pointer(pointer_file, target_id)
+        start = page.pointer
         try:
             yield page
         finally:
             if created:
                 _ordered_pages(order_file, [*pages, *created])
+            if page.pointer is not None and page.pointer != start:
+                save_pointer(pointer_file, target_id, page.pointer, {*pages, *created})
             with suppress(WebSkrapError):
                 await connection.send(
                     "Target.detachFromTarget", {"sessionId": attached["sessionId"]}, timeout_s=2
@@ -757,6 +799,7 @@ async def _mouse(
         "Input.dispatchMouseEvent",
         {"type": kind, "x": x, "y": y, "button": button, **extra},
     )
+    page.pointer = (x, y)
 
 
 async def mouse_action(
@@ -776,8 +819,9 @@ async def mouse_action(
     The caller has validated the arguments and the viewport bounds.
     """
     pressed = _BUTTON_BITS.get(button, 1)
+    # The cursor travels from where it last was instead of jumping.
+    await cdp_dom.travel(page, x, y)
     if action in {"click", "dblclick"}:
-        await _mouse(page, "mouseMoved", x, y)
         for click_count in (1, 2) if action == "dblclick" else (1,):
             await _mouse(
                 page,
@@ -789,10 +833,7 @@ async def mouse_action(
                 clickCount=click_count,
             )
             await _mouse(page, "mouseReleased", x, y, button=button, clickCount=click_count)
-    elif action == "move":
-        await _mouse(page, "mouseMoved", x, y)
     elif action == "scroll":
-        await _mouse(page, "mouseMoved", x, y)
         await _mouse(page, "mouseWheel", x, y, deltaX=delta_x, deltaY=delta_y)
     elif action == "drag" and end_x is not None and end_y is not None:
         await _drag(page, x, y, end_x, end_y, button=button, pressed=pressed)
@@ -810,7 +851,6 @@ async def _drag(
     button is down: once Chromium reports one, the rest of the gesture is sent
     as ``dragEnter``/``dragOver``/``drop`` events with the drag's data.
     """
-    await _mouse(page, "mouseMoved", x, y)
     await _mouse(page, "mousePressed", x, y, button=button, buttons=pressed, clickCount=1)
     intercepted = page.record("Input.dragIntercepted")
     await page.send("Input.setInterceptDrags", {"enabled": True})
@@ -839,6 +879,7 @@ async def _drag(
 
 async def _drag_event(page: CDPPage, kind: str, x: float, y: float, data: dict[str, Any]) -> None:
     await page.send("Input.dispatchDragEvent", {"type": kind, "x": x, "y": y, "data": data})
+    page.pointer = (x, y)
 
 
 async def _within(awaitable: Awaitable[T], deadline: float) -> T:

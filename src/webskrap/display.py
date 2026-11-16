@@ -18,17 +18,20 @@ import asyncio
 import os
 import secrets
 import shutil
+import signal
 import struct
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for Xvfb, never a shell
 import sys
 import tempfile
 import time
+from contextlib import suppress
 from pathlib import Path
 
 from webskrap.errors import ErrorCode, WebSkrapError
 
 START_TIMEOUT_S = 10.0
 STOP_TIMEOUT_S = 5.0
+DIRECTORY_PREFIX = "webskrap-display-"
 # Xauthority family that matches any host; with an empty display number the
 # entry matches whichever display Xvfb picks, so the file can be written
 # before the server starts.
@@ -69,6 +72,16 @@ class VirtualDisplay:
         self._directory = directory
 
     @property
+    def pid(self) -> int:
+        """Return the Xvfb process ID."""
+        return self._process.pid
+
+    @property
+    def directory(self) -> Path:
+        """Return the owner-only directory that holds the server's cookie file."""
+        return self._directory
+
+    @property
     def env(self) -> dict[str, str]:
         """Return ``DISPLAY`` and ``XAUTHORITY`` for a browser on this display."""
         return {"DISPLAY": self.display, "XAUTHORITY": str(self._directory / "Xauthority")}
@@ -106,7 +119,7 @@ class VirtualDisplay:
             msg = "virtual_display needs Xvfb. Install it (Debian/Ubuntu: apt install xvfb)"
             raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
-        directory = Path(tempfile.mkdtemp(prefix="webskrap-display-"))
+        directory = Path(tempfile.mkdtemp(prefix=DIRECTORY_PREFIX))
         try:
             auth_path = directory / "Xauthority"
             write_cookie_file(auth_path, secrets.token_bytes(16))
@@ -158,6 +171,46 @@ class VirtualDisplay:
     def _stop(self) -> None:
         _terminate(self._process)
         shutil.rmtree(self._directory, ignore_errors=True)
+
+
+def stop_detached(pid: int, directory: Path) -> None:
+    """Stop a display that outlived the process that started it.
+
+    A persistent browser session keeps its display after the opening command
+    exits. The PID is signalled only while its command line still names this
+    display's cookie directory, so a recycled PID is never killed. Only a
+    directory this module created is removed.
+    """
+    if sys.platform == "win32" or not directory.name.startswith(DIRECTORY_PREFIX):
+        return
+    if _is_display(pid, directory):
+        with suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGTERM)
+            deadline = time.monotonic() + STOP_TIMEOUT_S
+            while _is_display(pid, directory) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if _is_display(pid, directory):
+                os.kill(pid, signal.SIGKILL)
+    shutil.rmtree(directory, ignore_errors=True)
+
+
+def _is_display(pid: int, directory: Path) -> bool:
+    """True while ``pid`` is the running Xvfb of ``directory``.
+
+    The process that started the display, such as a long-lived MCP server,
+    is its parent, so a stopped display stays a zombie until reaped. It is
+    reaped here when this process is the parent, and a zombie's empty
+    command line counts as stopped either way.
+    """
+    if sys.platform == "win32":
+        return False
+    with suppress(ChildProcessError):
+        os.waitpid(pid, os.WNOHANG)
+    try:
+        command = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+    return b"Xvfb" in command and str(directory).encode() in command
 
 
 def _read_display_number(fd: int, process: subprocess.Popen[bytes]) -> int:

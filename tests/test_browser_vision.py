@@ -56,6 +56,7 @@ def _fake_page(send: Any = None) -> MagicMock:
         return_value={"width": 100, "height": 50, "scroll_x": 0, "scroll_y": 0}
     )
     page.send = AsyncMock(side_effect=send)
+    page.pointer = None
     return page
 
 
@@ -65,6 +66,29 @@ async def test_outside_coordinates_send_no_mouse_input(point) -> None:
     with pytest.raises(WebSkrapError, match="outside the viewport"):
         await browser_session.mouse_action(page, "drag", 1, 2, end_x=point[0], end_y=point[1])
     page.send.assert_not_called()
+
+
+async def test_coordinate_click_travels_from_the_last_position() -> None:
+    page = _fake_page()
+    page.evaluate.return_value = {
+        "width": 100,
+        "height": 50,
+        "scroll_x": 0,
+        "scroll_y": 0,
+        "url": "about:blank",
+        "title": "",
+    }
+    page.pointer = (5.0, 5.0)
+
+    await browser_session.mouse_action(page, "click", 50, 40)
+
+    events = [args.args[1] for args in page.send.await_args_list if args.args]
+    moves = [(event["x"], event["y"]) for event in events if event.get("type") == "mouseMoved"]
+    press = next(event for event in events if event.get("type") == "mousePressed")
+    assert len(moves) >= 12
+    assert ((moves[0][0] - 5) ** 2 + (moves[0][1] - 5) ** 2) ** 0.5 < 15
+    assert (press["x"], press["y"]) == moves[-1] == (50, 40)
+    assert page.pointer == (50, 40)
 
 
 async def test_failed_drag_releases_mouse_button() -> None:

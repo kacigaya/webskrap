@@ -463,6 +463,9 @@ class CDPPage:
         connection: The browser's :class:`CDPConnection`.
         session_id: Flat session id for this target.
         target_id: The page target id, which is also its main frame id.
+        pointer: Where this page's mouse last went, in viewport CSS pixels,
+            or None before the first mouse event; see
+            :func:`webskrap.cdp_dom.travel`.
     """
 
     def __init__(self, connection: CDPConnection, session_id: str, target_id: str) -> None:
@@ -476,6 +479,7 @@ class CDPPage:
         #: Out-of-process iframes auto-attached to this page, by target id;
         #: see :func:`webskrap.cdp_dom.frames`. None until auto-attach is on.
         self.iframe_targets: dict[str, dict[str, Any]] | None = None
+        self.pointer: tuple[float, float] | None = None
 
     async def send(
         self, method: str, params: Mapping[str, Any] | None = None, **kwargs: Any

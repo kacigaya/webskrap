@@ -28,6 +28,14 @@ The CLI `fetch` command runs headless Chrome, so `doctor` checks that headless
 Chrome can launch. It also reports the host
 timezone and warns when it is UTC, which pages read as a server.
 
+The launch uses a default `fetch`'s flags, and `fingerprint` reports what pages
+read from it: `webdriver`, the user agent and platform, the client-hint
+architecture, the WebGL renderer, and the media device count. The values are
+read from a blank https page that WebSkrap serves itself, so no request leaves
+the browser. Each gap gets a warning that names a native fix, such as
+`virtual_display=True`, `gpu='mesa'`, `fake_media_devices=True`, or a host
+change. No warning suggests a JavaScript patch.
+
 ## List profiles
 
 ```bash
@@ -221,9 +229,13 @@ enable the CDP `Runtime` domain, so no `Runtime.enable` leak reaches the page or
 its workers, and the browser launches with
 `--disable-blink-features=AutomationControlled` (`navigator.webdriver` stays
 false) plus the 1920x1080 virtual screen used by headless fetches. Headless
-sessions still report `HeadlessChrome` in the user agent; pass `--headed` when
-a site checks it. `browser eval` runs in the page's own JavaScript world, so
-page globals are visible.
+sessions still report `HeadlessChrome` in the user agent. When a site checks
+it, pass `--virtual-display` (headed on a private Xvfb display that lives as
+long as the session, Linux) or `--headed`. `--gpu mesa` and
+`--profile-mode locale --profile NAME` work as for `fetch`. Session commands
+reconnect for every call and CDP emulation ends with its connection, so
+`--profile-mode full` is not offered. `browser eval` runs in the page's own
+JavaScript world, so page globals are visible.
 
 ```bash
 webskrap browser open https://example.com

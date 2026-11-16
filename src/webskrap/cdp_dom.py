@@ -970,22 +970,47 @@ async def _frame_bounds(element: _Element) -> tuple[float, float, float, float]:
 
 async def _move(page: CDPPage, x: float, y: float) -> None:
     await page.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
+    page.pointer = (x, y)
+
+
+async def travel(page: CDPPage, x: float, y: float) -> None:
+    """Move the mouse to (x, y) along a curved path from where it last was.
+
+    A cursor that jumps between actions is a robot tell, so each path starts
+    at ``page.pointer``. A page with no known position starts at a random
+    point near the target, as a hand already near the control would.
+    """
+    start = page.pointer
+    if start is None:
+        start = (max(0.0, x + uniform(-160, 160)), max(0.0, y + uniform(-90, 90)))
+        await _move(page, *start)
+    distance = ((x - start[0]) ** 2 + (y - start[1]) ** 2) ** 0.5
+    if distance < 1:
+        await _move(page, x, y)
+        return
+    steps = max(12, min(48, int(distance / 6)))
+    for px, py in bezier_path(start, (x, y), steps):
+        await _move(page, px, py)
+        await asyncio.sleep(uniform(2, 9) / 1000)
 
 
 async def _scroll_into_view(element: _Element) -> None:
     """Port of :func:`webskrap.human.scroll_into_view`: wheel notches, then a jump.
 
-    The wheel goes where a fresh connection's mouse is, the viewport origin,
-    as Patchright's ``mouse.wheel`` does after reattaching. An element from a
-    frame ref can sit in an iframe that is out of view itself, so it gets the
-    jump at once, which scrolls every frame above it too.
+    The wheel turns where the mouse last went. With no known position, or
+    over an iframe, whose document only a wheel inside it scrolls, it turns
+    just inside the frame's top-left corner. An element from a frame ref can
+    sit in an iframe that is out of view itself, so it gets the jump at once,
+    which scrolls every frame above it too.
     """
     if element.frame_id is not None:
         await _scroll_frame_element(element)
         return
     page = element.input_page
-    # Over a frame, the wheel must sit inside it to scroll its document.
-    wheel_x, wheel_y = element.offset[0] + 1, element.offset[1] + 1
+    if page.pointer is not None and element.offset == (0.0, 0.0):
+        wheel_x, wheel_y = page.pointer
+    else:
+        wheel_x, wheel_y = element.offset[0] + 1, element.offset[1] + 1
     previous_top: float | None = None
     for _ in range(MAX_WHEEL_BATCHES):
         box = await _box(element, recover=True)
@@ -1003,6 +1028,7 @@ async def _scroll_into_view(element: _Element) -> None:
                 "Input.dispatchMouseEvent",
                 {"type": "mouseWheel", "x": wheel_x, "y": wheel_y, "deltaX": 0, "deltaY": step},
             )
+            page.pointer = (wheel_x, wheel_y)
             remaining -= step
             await asyncio.sleep(uniform(16, 45) / 1000)
         await asyncio.sleep(uniform(60, 160) / 1000)
@@ -1037,13 +1063,7 @@ async def _human_pointer(element: _Element, *, click_count: int = 0) -> None:
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
     x, y = frame_x + element.offset[0], frame_y + element.offset[1]
     await asyncio.sleep(uniform(80, 220) / 1000)
-    start_x, start_y = x + uniform(-160, 160), y + uniform(-90, 90)
-    await _move(page, start_x, start_y)
-    distance = ((x - start_x) ** 2 + (y - start_y) ** 2) ** 0.5
-    steps = max(12, min(48, int(distance / 6)))
-    for px, py in bezier_path((start_x, start_y), (x, y), steps):
-        await _move(page, px, py)
-        await asyncio.sleep(uniform(2, 9) / 1000)
+    await travel(page, x, y)
     await asyncio.sleep(uniform(0.2, 0.5) if click_count else uniform(0.04, 0.14))
     for count in range(1, click_count + 1):
         # Hover handlers can move, cover, hide or disable the target.

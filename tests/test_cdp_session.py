@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from test_cdp_browser import _CDPHandler
 
-from webskrap import browser_session
+from webskrap import browser_session, cdp_session
 from webskrap.cdp import _WEBSOCKET_GUID, WebSocketTransport, _mask
 from webskrap.cdp_session import (
     PAGE_ORDER_FILE,
@@ -896,3 +896,24 @@ def test_cdp_session_navigation_reports_and_reads(
     # Cut to the iframe's content box, not the element's full width.
     assert results["wide"]["clip"]["width"] == 200
     assert results["wide"]["clip"]["height"] == 50
+
+
+def test_pointer_is_saved_per_page_and_dropped_with_closed_pages(tmp_path: Path) -> None:
+    path = tmp_path / cdp_session.POINTER_FILE
+
+    cdp_session.save_pointer(path, "a", (10.0, 20.5), {"a", "b"})
+    cdp_session.save_pointer(path, "b", (3.0, 4.0), {"a", "b"})
+    cdp_session.save_pointer(path, "b", (5.0, 6.0), {"b"})
+
+    assert cdp_session.saved_pointer(path, "a") is None
+    assert cdp_session.saved_pointer(path, "b") == (5.0, 6.0)
+
+
+@pytest.mark.parametrize(
+    "content", ["not json", "[]", '{"a": [1]}', '{"a": ["x", 2]}', '{"a": [1, NaN]}']
+)
+def test_invalid_saved_pointer_is_ignored(tmp_path: Path, content: str) -> None:
+    path = tmp_path / cdp_session.POINTER_FILE
+    path.write_text(content, encoding="utf-8")
+
+    assert cdp_session.saved_pointer(path, "a") is None

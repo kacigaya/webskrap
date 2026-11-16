@@ -42,6 +42,7 @@ from webskrap.parsing import (
     parse_load_state,
     parse_profile_mode,
     parse_resource_policy,
+    parse_session_profile_mode,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
@@ -100,7 +101,8 @@ Choose a tool
   browser_wait_for, then browser_close. Do not re-fetch to drive a flow.
 
 In a browser session
-- Headless only over MCP. Shared with the browser CLI. browser_tabs picks the tab.
+- No visible window; virtual_display=True is not headless.
+  Shared with the browser CLI. browser_tabs picks the tab.
 - browser_find(text=...) locates known controls with refs and ancestor context.
   browser_snapshot(target=..., depth=...) scopes a tree; boxes=true adds geometry.
 - browser_text reads text without an accessibility tree; pattern= greps lines.
@@ -116,8 +118,8 @@ Keep results small
 - max_chars defaults to 8000. Start lower; page via next_text_offset /
   next_snapshot_offset. browser_snapshot defaults to depth=6 (null for full).
 - Keep text_only=true; browser_eval should return a narrow value, not full DOM.
-- Fetch defaults: domcontentloaded, resource_policy="auto" (lite for text, all
-  for HTML). Use ready_selector for deferred content; networkidle only if needed.
+- Fetch defaults: domcontentloaded, resource_policy="all" ("lite" is faster for
+  text). Use ready_selector for deferred content; networkidle only if needed.
 - Opt into repeated fetch reuse with session="crawl"; cookies/storage share that
   name. Keep profile/config unchanged. fetch_session_close releases it.
   These warm sessions are separate from browser_* sessions and end on server
@@ -240,7 +242,7 @@ async def fetch(
     profile: str = "desktop-chrome",
     channel: str = "chrome",
     wait_until: str = "domcontentloaded",
-    resource_policy: str = "auto",
+    resource_policy: str = "all",
     timeout_ms: float = 60_000,
     max_chars: int = 8_000,
     offset: int = 0,
@@ -270,8 +272,9 @@ async def fetch(
         channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
             ARM64 has no build), Edge and then bundled Chromium are tried.
         wait_until: commit, domcontentloaded, load, or networkidle.
-        resource_policy: auto (lite for text, all for HTML), all, lite, or
-            documents (also blocks CSS). Explicit policies take priority.
+        resource_policy: all (default, as in stealth_fetch, so both can share
+            a warm session), auto (lite for text, all for HTML), lite, or
+            documents (also blocks CSS).
         timeout_ms: Navigation timeout in milliseconds.
         max_chars: Maximum characters of page text to return.
         offset: Character index to start the returned text at. Pass back the
@@ -333,7 +336,7 @@ async def stealth_fetch(
     *,
     ready_selector: str | None = None,
     wait_until: str = "domcontentloaded",
-    resource_policy: str = "auto",
+    resource_policy: str = "all",
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -376,8 +379,9 @@ async def stealth_fetch(
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
         wait_until: commit, domcontentloaded (default), load, or networkidle.
-        resource_policy: auto (lite for text, all for HTML), all, lite, or
-            documents (also blocks CSS). Explicit policies take priority.
+        resource_policy: all (default: page scripts can see a blocked image
+            or font), auto (lite for text, all for HTML), lite, or documents
+            (also blocks CSS).
         ready_selector: Optional CSS selector or snapshot ref that must be visible
             before extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
@@ -531,8 +535,10 @@ async def doctor() -> dict[str, Any]:
     Launches one headless Chromium and returns that result plus the installed
     versions, the Chromium binary in use, the roots screenshots and profiles
     are confined to, which WEBSKRAP_* overrides are set, and every persistent
-    browser session with its running state. Call this first when a fetch or a
-    browser_* tool fails for a reason its own error does not explain.
+    browser session with its running state. fingerprint lists what a default
+    fetch shows pages; warnings name a native fix for each uncommon value.
+    Call this first when a fetch or a browser_* tool fails for a reason its
+    own error does not explain.
     """
     with _tool_errors():
         return await diagnose()
@@ -583,8 +589,12 @@ async def browser_open(
     webrtc_ip_handling_policy: str | None = None,
     fake_media_devices: bool = False,
     decline_cookies: bool = False,
+    virtual_display: bool = False,
+    gpu: GpuBackend = GpuBackend.AUTO,
+    profile_mode: str = "native",
+    profile: str | None = None,
 ) -> dict[str, Any]:
-    """Start (or reuse) a persistent headless browser session.
+    """Start (or reuse) a persistent browser session with no visible window.
 
     The browser is a detached Chromium that keeps running between tool calls
     (and between MCP server restarts); every browser_* tool reconnects to it
@@ -610,6 +620,17 @@ async def browser_open(
         fake_media_devices: Supply Chromium's synthetic camera and microphone.
         decline_cookies: With url, click a consent notice's reject control;
             cookie_notice_declined reports the strategy or null.
+        virtual_display: Run headed Chromium on a private Xvfb display
+            instead of headless (Linux with Xvfb). No HeadlessChrome token
+            and full client hints. The display lives as long as the session.
+        gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
+            without a GPU); "mesa" uses Mesa's lavapipe (Linux).
+        profile_mode: native (default; the browser's own identity) or locale
+            (the profile's timezone and languages, set at launch; Linux).
+        profile: Bundled profile for locale mode; desktop-chrome when null.
+
+    These launch settings are fixed: reopening a running session with a
+    different requested value is refused.
 
     With url, the result has blocked: null, or {code, provider, kind, hint}
     when a known challenge or block page loaded instead.
@@ -622,6 +643,10 @@ async def browser_open(
             headless=True,
             webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
             fake_media_devices=fake_media_devices,
+            virtual_display=virtual_display,
+            gpu=gpu,
+            profile_mode=parse_session_profile_mode(profile_mode),
+            profile=profile,
         )
     if url:
         payload.update(

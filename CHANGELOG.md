@@ -9,6 +9,20 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Browser sessions take the native stealth settings of `fetch`:
+  `virtual_display`, `gpu`, and `profile_mode="locale"` with a `profile`
+  (`webskrap browser open --virtual-display --gpu --profile-mode --profile`,
+  MCP `browser_open`). The virtual display lives as long as the session, and
+  `browser close` stops it. `full` mode is not offered for sessions, because
+  CDP emulation ends with each command's connection.
+- `doctor` reports a `fingerprint` of what a default fetch shows pages:
+  `webdriver`, user agent, platform, client-hint architecture, WebGL renderer
+  and media device count. It reads them from a blank https page served over
+  CDP, with no network request, and warns about each gap with a native fix
+  (`virtual_display`, `gpu`, `fake_media_devices`, or a host change).
+
 ### Fixed
 
 - `WebSkrapClient.fetch()` and `search()` now release the browser when the
@@ -19,6 +33,19 @@ history, so they summarize each release rather than list every change.
 
 ### Changed
 
+- MCP `stealth_fetch` and `fetch` default to `resource_policy="all"`. With
+  `auto` they blocked images, fonts and media for text output, and page
+  scripts can see those failed loads. Both tools share warm sessions, so they
+  share the default. Pass `resource_policy="auto"` for the old, faster
+  behavior. The CLI and Python API keep `auto`.
+- The simulated headless screen no longer has the same 1840x1000 window at
+  0,0 for every user. A Linux desktop panel and the window's size and
+  position come from the persistent profile directory, or one process-wide
+  seed without one, so a profile keeps the same desktop.
+- The humanized cursor and `browser mouse` move from where the mouse last
+  was, instead of jumping to a random point near each target. The wheel turns
+  at the cursor. Persistent sessions keep the position per tab between
+  commands.
 - Internal cleanup with no behavior change: the MCP `fetch` tool calls
   `stealth_fetch`, and the CLI `fetch` and `search` commands share their
   option declarations. Tool schemas and `webskrap schema` output are

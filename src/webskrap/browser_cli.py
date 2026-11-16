@@ -37,9 +37,11 @@ from webskrap.cli_output import (
     stderr_console,
 )
 from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.models import GpuBackend
 from webskrap.parsing import (
     parse_element_state,
     parse_load_state,
+    parse_session_profile_mode,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
@@ -55,6 +57,42 @@ T = TypeVar("T")
 SessionOption = Annotated[str, typer.Option("--session", "-s", help="Browser session name.")]
 FormatOption = Annotated[str, typer.Option("--format", help="Output format: human or json.")]
 ActionTimeoutOption = Annotated[float, typer.Option("--timeout-ms", min=1, help="Action timeout.")]
+
+ProfileOption = Annotated[
+    str,
+    typer.Option(
+        "--profile",
+        "-p",
+        help="Bundled profile; --profile-mode decides how much of it pages see.",
+    ),
+]
+VirtualDisplayOption = Annotated[
+    bool,
+    typer.Option(
+        "--virtual-display",
+        help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
+    ),
+]
+GpuOption = Annotated[
+    GpuBackend,
+    typer.Option(
+        "--gpu",
+        help=(
+            "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
+            "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
+        ),
+    ),
+]
+SessionProfileModeOption = Annotated[
+    str,
+    typer.Option(
+        "--profile-mode",
+        help=(
+            "native (the browser's own identity, the default) or locale (--profile's "
+            "timezone and languages, set at launch; Linux)."
+        ),
+    ),
+]
 
 _ELEMENT_COMMAND_HELP = {
     "click": "Click an element.",
@@ -155,6 +193,13 @@ def open_command(
             "--decline-cookies", help="With a URL, click a cookie consent notice's reject control."
         ),
     ] = False,
+    virtual_display: VirtualDisplayOption = False,
+    gpu: GpuOption = GpuBackend.AUTO,
+    profile_mode: SessionProfileModeOption = "native",
+    profile: Annotated[
+        str | None,
+        typer.Option("--profile", "-p", help="Bundled profile for --profile-mode locale."),
+    ] = None,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -169,6 +214,9 @@ def open_command(
     running session with a different one is refused. Proxy credentials come
     from WEBSKRAP_PROXY_USERNAME and WEBSKRAP_PROXY_PASSWORD, never from the
     command line; a helper process keeps them in memory while the browser runs.
+
+    --virtual-display keeps the window invisible but runs Chrome headed on a
+    private Xvfb display that lives as long as the session (Linux).
     """
     output_format = parse_output_format(format)
     policy = parse_cli_value(
@@ -176,6 +224,7 @@ def open_command(
         parse_webrtc_ip_handling_policy,
         param_hint="--webrtc-ip-handling-policy",
     )
+    mode = parse_cli_value(profile_mode, parse_session_profile_mode, param_hint="--profile-mode")
     payload = _run(
         browser_session.open_session(
             session,
@@ -188,6 +237,10 @@ def open_command(
             fake_media_devices=fake_media_devices,
             proxy_username=os.environ.get(browser_session.PROXY_USERNAME_ENV) if proxy else None,
             proxy_password=os.environ.get(browser_session.PROXY_PASSWORD_ENV) if proxy else None,
+            virtual_display=virtual_display,
+            gpu=gpu,
+            profile_mode=mode,
+            profile=profile,
         ),
         output_format,
     )

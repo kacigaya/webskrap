@@ -19,8 +19,10 @@ spends tokens on content instead of markup (typically 5-10x fewer tokens than
 raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control. Pass
 `text_only=false` when you need the HTML.
 
-Both fetch tools default to `domcontentloaded` and `resource_policy="auto"`.
-Auto skips images, fonts and media for text; HTML loads all resources.
+Both fetch tools default to `domcontentloaded` and `resource_policy="all"`:
+page scripts can see a blocked image or font, which no real browser blocks.
+`auto` skips images, fonts and media for text, which is faster on pages that do
+not check. The two tools share warm sessions, so they share the default.
 Explicit `all`, `lite`, or `documents` policies take priority. Use `documents`
 only when removing CSS preserves the required result. Use `ready_selector` for
 deferred content. Keep cookie rejection on unless the page is known not to need it.
@@ -54,8 +56,8 @@ python -m webskrap.mcp_server
 | `stealth_fetch` | Same stealth path with finer fingerprint/WebRTC/UA controls. |
 | `fetch_session_close` | Close an idle warm fetch session; persistent profile files survive. |
 | `search` | Find URLs for a query on Bing (default) or DuckDuckGo, with the `stealth_fetch` stealth controls. |
-| `doctor` | Check that Chromium can launch. |
-| `browser_open` | Start (or reuse) a persistent headless browser session. |
+| `doctor` | Check that Chromium can launch, and report fingerprint gaps with native fixes. |
+| `browser_open` | Start (or reuse) a persistent browser session with no visible window. |
 | `browser_goto` | Navigate the session's current page. |
 | `browser_text` | Visible body text, windowed in the browser without an accessibility tree. |
 | `browser_find` | Find accessible elements by text or regex with minimal ancestor context. |
@@ -91,7 +93,7 @@ leave the notice in place.
 | `profile` | `desktop-chrome` | Profile label; the browser's native identity is kept unless `profile_mode` asks for more. |
 | `channel` | `chrome` | Browser channel; use `chromium` on Linux ARM64. |
 | `wait_until` | `domcontentloaded` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
-| `resource_policy` | `auto` | `auto`, `all`, `lite`, or `documents`. |
+| `resource_policy` | `all` | `all`, `auto`, `lite`, or `documents`. |
 | `timeout_ms` | `60000` | Timeout applied separately to navigation and readiness. |
 | `ready_selector` | `null` | CSS selector or snapshot ref that must become visible after consent dismissal. |
 | `max_chars` | `8000` | Maximum returned text characters. |
@@ -112,7 +114,7 @@ Example arguments:
 ```
 
 `stealth_fetch` accepts the same URL/profile/timeout/output-size/session controls,
-`resource_policy` (default `auto`) and `wait_until` (default `domcontentloaded`),
+`resource_policy` (default `all`) and `wait_until` (default `domcontentloaded`),
 plus stealth options:
 
 ```json
@@ -201,6 +203,15 @@ switch: page text can steer a model, and a model-chosen proxy could reroute all
 of a session's traffic. Open a proxied session from the CLI with
 `webskrap browser open --proxy URL`; the browser tools then reuse it, and
 `browser_open` reports its `proxy_server`.
+
+`browser_open` also takes the native stealth settings of `stealth_fetch`:
+`virtual_display` (headed Chromium on a private Xvfb display that lives as long
+as the session, Linux), `gpu` (`mesa` renders WebGL through Mesa's lavapipe),
+and `profile_mode` `locale` with a `profile` (timezone and languages set at
+launch, Linux). Session commands reconnect for every call, and CDP emulation
+ends with its connection, so `full` mode is not offered. These settings are
+fixed at launch: reopening a running session with a different requested value
+is refused.
 
 A typical flow:
 

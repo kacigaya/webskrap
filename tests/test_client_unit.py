@@ -767,8 +767,10 @@ async def test_doctor_tries_edge_before_bundled_chromium(monkeypatch: pytest.Mon
             )
         return Path(f"/b/{channel}")
 
+    browser = _fake_browser()
+    browser.new_page = AsyncMock(side_effect=WebSkrapError("target closed"))
     monkeypatch.setattr(client_module, "find_executable", fake_find)
-    monkeypatch.setattr(client_module, "launch", AsyncMock(return_value=_fake_browser()))
+    monkeypatch.setattr(client_module, "launch", AsyncMock(return_value=browser))
 
     report = await browser_doctor()
 
@@ -777,6 +779,22 @@ async def test_doctor_tries_edge_before_bundled_chromium(monkeypatch: pytest.Mon
     assert report["browser_identity"] == "Edge"
     assert report["browser_version"] == "Chrome/150.0"
     assert channels == ["chrome", "msedge"]
+    # A probe that cannot open its page reports nothing and fails nothing.
+    assert report["fingerprint"] is None
+
+
+async def test_doctor_launches_with_one_shot_fetch_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    browser = _fake_browser()
+    browser.new_page = AsyncMock(side_effect=WebSkrapError("target closed"))
+    launch = AsyncMock(return_value=browser)
+    monkeypatch.setattr(client_module, "find_executable", lambda channel: Path(f"/b/{channel}"))
+    monkeypatch.setattr(client_module, "launch", launch)
+
+    await browser_doctor(chromium_sandbox=False)
+
+    args = launch.await_args.kwargs["args"]
+    assert "--disable-blink-features=AutomationControlled" in args
+    assert "--no-sandbox" in args
 
 
 def test_lavapipe_is_found_by_its_vulkan_icd(

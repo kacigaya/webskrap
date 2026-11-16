@@ -516,6 +516,45 @@ def test_open_passes_the_proxy_and_webrtc_policy(
     assert json.loads(result.output)["proxy_server"] == "socks5://proxy.test:1080"
 
 
+def test_open_passes_the_stealth_launch_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls = _capture_open(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "browser",
+            "open",
+            "--virtual-display",
+            "--gpu",
+            "mesa",
+            "--profile-mode",
+            "locale",
+            "--profile",
+            "desktop-edge",
+            "--format",
+            "json",
+        ],
+        env=_env(tmp_path),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0]["virtual_display"] is True
+    assert calls[0]["gpu"] == "mesa"
+    assert calls[0]["profile_mode"] == "locale"
+    assert calls[0]["profile"] == "desktop-edge"
+
+
+def test_open_refuses_full_profile_mode(tmp_path: Path) -> None:
+    result = runner.invoke(
+        cli.app, ["browser", "open", "--profile-mode", "full"], env=_env(tmp_path)
+    )
+
+    assert result.exit_code == 2
+    assert "native, locale" in result.output
+
+
 def test_open_reads_proxy_credentials_from_the_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

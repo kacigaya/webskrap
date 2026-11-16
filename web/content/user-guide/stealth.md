@@ -15,7 +15,8 @@ settings instead.
 ## Establish a baseline
 
 Check `webskrap doctor --format json` and the MCP `doctor` result before comparing
-configurations. Compare package versions and executable paths: a connected MCP
+configurations. Its `fingerprint` and `warnings` list the values a default fetch
+shows pages that are not common, with a native fix for each. Compare package versions and executable paths: a connected MCP
 process can run a different installation from the checkout being edited. Restart
 that process using the intended installation before testing a code change.
 
@@ -221,9 +222,13 @@ Headless Chrome has no physical display, so screen and window metrics
 (`screen.width`, `window.outerWidth`, ...) otherwise leak as headless tells,
 defaulting to an 800x600 screen with zero outer dimensions. For chromium headless
 runs WebSkrap configures a virtual screen at launch via browser flags
-(`--screen-info`, `--window-size`, `--window-position`). The window is 80 pixels
-smaller in each dimension, and `screen.availHeight` leaves 80 pixels at the
-bottom for a taskbar. The default
+(`--screen-info`, `--window-size`, `--window-position`). The work area leaves
+room for a common Linux desktop panel (GNOME, Ubuntu, Xfce or Plasma), and the
+window is maximized in it or floats inside it. A fixed geometry would be one
+more value shared by every WebSkrap user, so the panel and window come from the
+persistent profile directory: the same profile keeps the same desktop. Runs
+without a persistent profile share one geometry for the life of the process.
+On a virtual display the X server is the screen, with no panel. The default
 screen is 1920x1080; set
 `headless_screen` to a `Viewport` to change it, or to `None` to disable:
 

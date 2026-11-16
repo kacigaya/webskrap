@@ -125,6 +125,8 @@ def test_diagnose_probes_a_real_browser(monkeypatch: Any, sandbox_supported: boo
     assert report["ok"] is True
     assert report["channel"] in ("chrome", "msedge", "chromium")
     assert Path(str(report["executable_path"])).exists()
+    assert report["fingerprint"]["webdriver"] is False
+    assert report["fingerprint"]["architecture"] in ("x86", "arm", "")
 
 
 @pytest.mark.parametrize("zone", ["UTC", ":Etc/UTC", "Etc/Universal"])
@@ -178,3 +180,47 @@ def test_bare_chromium_is_a_warning(monkeypatch: Any) -> None:
 
     assert len(report["warnings"]) == 1
     assert "Sec-CH-UA" in report["warnings"][0]
+
+
+_CLEAN_FINGERPRINT = {
+    "webdriver": False,
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/156.0.0.0 Safari/537.36",
+    "platform": "Linux x86_64",
+    "architecture": "x86",
+    "webgl_renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060)",
+    "media_devices": 3,
+}
+
+
+def test_a_clean_fingerprint_has_no_warning() -> None:
+    assert diagnostics.fingerprint_warnings(_CLEAN_FINGERPRINT) == []
+    assert diagnostics.fingerprint_warnings(None) == []
+
+
+@pytest.mark.parametrize(
+    ("change", "fix"),
+    [
+        ({"webdriver": True}, "AutomationControlled"),
+        ({"user_agent": "Mozilla/5.0 HeadlessChrome/156.0.0.0"}, "virtual_display=True"),
+        ({"webgl_renderer": None}, "gpu='mesa'"),
+        ({"webgl_renderer": "ANGLE (Google, SwiftShader Device)"}, "gpu='mesa'"),
+        ({"webgl_renderer": "ANGLE (Mesa, llvmpipe)"}, "host with a GPU"),
+        ({"media_devices": 0}, "fake_media_devices=True"),
+        ({"architecture": "arm"}, "x86_64 host"),
+    ],
+)
+def test_each_fingerprint_gap_names_a_native_fix(change: dict[str, Any], fix: str) -> None:
+    warnings = diagnostics.fingerprint_warnings({**_CLEAN_FINGERPRINT, **change})
+
+    assert len(warnings) == 1
+    assert fix in warnings[0]
+
+
+def test_diagnose_reports_fingerprint_warnings(monkeypatch: Any) -> None:
+    _stub_probe(monkeypatch, fingerprint={**_CLEAN_FINGERPRINT, "media_devices": 0})
+    monkeypatch.setenv("TZ", "Europe/Paris")
+
+    report = asyncio.run(diagnostics.diagnose())
+
+    assert report["fingerprint"]["media_devices"] == 0
+    assert any("fake_media_devices" in warning for warning in report["warnings"])

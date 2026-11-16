@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from webskrap.browser_cli import browser_app
+from webskrap.browser_cli import GpuOption, ProfileOption, VirtualDisplayOption, browser_app
 from webskrap.browser_session import sandbox_enabled
 from webskrap.cli_output import (
     OutputFormat,
@@ -62,14 +62,6 @@ console = Console()
 
 T = TypeVar("T")
 
-ProfileOption = Annotated[
-    str,
-    typer.Option(
-        "--profile",
-        "-p",
-        help="Bundled profile; --profile-mode decides how much of it pages see.",
-    ),
-]
 ChannelOption = Annotated[
     str | None,
     typer.Option("--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."),
@@ -114,23 +106,6 @@ MaskHeadlessUserAgentOption = Annotated[
         help=(
             "Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag. "
             "Empties high-entropy client hints; prefer --virtual-display."
-        ),
-    ),
-]
-VirtualDisplayOption = Annotated[
-    bool,
-    typer.Option(
-        "--virtual-display",
-        help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
-    ),
-]
-GpuOption = Annotated[
-    GpuBackend,
-    typer.Option(
-        "--gpu",
-        help=(
-            "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
-            "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
         ),
     ),
 ]
