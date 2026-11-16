@@ -1,10 +1,9 @@
 """Persistent-session page operations on WebSkrap's own CDP driver.
 
 :func:`attach` reconnects to a session's running browser over the WebSocket on
-its debugging port, the same port Patchright attaches to. The other functions
-mirror :mod:`webskrap.browser_session`'s page operations for a
-:class:`~webskrap.cdp.CDPPage`; that module dispatches here when a session was
-opened with ``driver="cdp"``.
+its debugging port. The other functions implement
+:mod:`webskrap.browser_session`'s page operations for a
+:class:`~webskrap.cdp.CDPPage`; that module calls them for every session.
 
 Like the fetch backend, nothing here sends ``Runtime.enable``. Reads run in
 isolated worlds. Only :func:`evaluate` touches the page's own world, because a
@@ -372,7 +371,7 @@ async def close_tab(
         return all(info["targetId"] != target for info in listed["targetInfos"])
 
     with suppress(WebSkrapError):
-        await _poll(gone, CLOSE_TAB_TIMEOUT_MS, "the closed tab to go away")
+        await poll(gone, CLOSE_TAB_TIMEOUT_MS, "the closed tab to go away")
     left = [tab for tab in tabs if tab["targetId"] != target]
     _ordered_pages(directory / PAGE_ORDER_FILE, [tab["targetId"] for tab in left])
     return _listing(directory, left)
@@ -851,7 +850,7 @@ async def _within(awaitable: Awaitable[T], deadline: float) -> T:
     return await asyncio.wait_for(awaitable, max(0.0, deadline - time.monotonic()))
 
 
-async def _poll(check: Callable[[], Awaitable[bool]], timeout_ms: float, what: str) -> None:
+async def poll(check: Callable[[], Awaitable[bool]], timeout_ms: float, what: str) -> None:
     """Poll the async predicate ``check`` until it is true or time runs out."""
     deadline = time.monotonic() + timeout_ms / 1000
     while True:
@@ -890,14 +889,14 @@ async def wait_for(
         async def text_visible() -> bool:
             return bool(await page.evaluate(_TEXT_VISIBLE_SCRIPT, {"needle": needle}))
 
-        await _poll(text_visible, timeout_ms, f"text '{text}'")
+        await poll(text_visible, timeout_ms, f"text '{text}'")
     if text_gone is not None:
         gone = text_gone
 
         async def text_hidden() -> bool:
             return not await page.evaluate(_TEXT_VISIBLE_SCRIPT, {"needle": gone})
 
-        await _poll(text_hidden, timeout_ms, f"text '{text_gone}' to disappear")
+        await poll(text_hidden, timeout_ms, f"text '{text_gone}' to disappear")
     if selector is not None:
         # Imported here: cdp_dom builds on this module's key handling.
         from webskrap.cdp_dom import element_state
@@ -913,7 +912,7 @@ async def wait_for(
                 return state != "visible"
             return state == wanted
 
-        await _poll(selector_reached, timeout_ms, f"{selector} to be {selector_state}")
+        await poll(selector_reached, timeout_ms, f"{selector} to be {selector_state}")
     if load_state is not None:
         await _wait_load_state(page, load_state, timeout_ms)
     return {**await page_state(page), "matched": condition}
@@ -954,7 +953,7 @@ async def _wait_load_state(page: CDPPage, load_state: LoadState, timeout_ms: flo
             state = await page.evaluate("document.readyState")
             return state == "complete" or state == wanted
 
-        await _poll(ready, max(0.0, deadline - time.monotonic()) * 1000, f"load state {load_state}")
+        await poll(ready, max(0.0, deadline - time.monotonic()) * 1000, f"load state {load_state}")
         if network is None:
             return
         count_script = "performance.getEntriesByType('resource').length"

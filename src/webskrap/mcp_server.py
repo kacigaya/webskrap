@@ -199,6 +199,41 @@ async def _run_fetch(
     )
 
 
+def _stealth_config(
+    *,
+    channel: str,
+    headless: bool,
+    user_data_dir: str | None,
+    timeout_ms: float,
+    profile_mode: str,
+    reduce_fingerprint_surface: bool,
+    mask_headless_user_agent: bool,
+    virtual_display: bool,
+    gpu: GpuBackend,
+    fake_media_devices: bool,
+    webrtc_ip_handling_policy: str | None,
+    decline_cookies: bool,
+    resource_policy: str = "auto",
+) -> SessionConfig:
+    """Build the session config the stealth_fetch and search tools share."""
+    return SessionConfig(
+        channel=channel,
+        headless=headless,
+        chromium_sandbox=browser_session.sandbox_enabled(None),
+        user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
+        navigation_timeout_ms=timeout_ms,
+        profile_mode=parse_profile_mode(profile_mode),
+        reduce_fingerprint_surface=reduce_fingerprint_surface,
+        mask_headless_user_agent=mask_headless_user_agent,
+        virtual_display=virtual_display,
+        gpu=gpu,
+        fake_media_devices=fake_media_devices,
+        webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+        decline_cookies=decline_cookies,
+        resource_policy=parse_resource_policy(resource_policy),
+    )
+
+
 @mcp.tool(title="Fetch a page", annotations=_hints(read_only=True, open_world=True))
 async def fetch(
     url: str,
@@ -255,30 +290,23 @@ async def fetch(
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
     """
-    with _tool_errors():
-        url = await validate_mcp_url(url)
-        config = SessionConfig(
-            channel=channel,
-            headless=True,
-            chromium_sandbox=browser_session.sandbox_enabled(None),
-            navigation_timeout_ms=timeout_ms,
-            resource_policy=parse_resource_policy(resource_policy),
-            decline_cookies=decline_cookies,
-        )
-        result = await _run_fetch(
-            url,
-            profile=get_profile(profile),
-            config=config,
-            wait_until=parse_wait_until(wait_until),
-            timeout_ms=timeout_ms,
-            text_only=text_only,
-            include_links=include_links,
-            max_links=max_links,
-            session=session,
-            ctx=ctx,
-            ready_selector=ready_selector,
-        )
-        return shape_fetch_result(result, max_chars, offset)
+    return await stealth_fetch(
+        url,
+        profile=profile,
+        channel=channel,
+        timeout_ms=timeout_ms,
+        max_chars=max_chars,
+        offset=offset,
+        text_only=text_only,
+        include_links=include_links,
+        max_links=max_links,
+        decline_cookies=decline_cookies,
+        ready_selector=ready_selector,
+        wait_until=wait_until,
+        resource_policy=resource_policy,
+        session=session,
+        ctx=ctx,
+    )
 
 
 @mcp.tool(title="Stealth-fetch a page", annotations=_hints(read_only=True, open_world=True))
@@ -358,21 +386,20 @@ async def stealth_fetch(
     """
     with _tool_errors():
         url = await validate_mcp_url(url)
-        config = SessionConfig(
+        config = _stealth_config(
             channel=channel,
             headless=headless,
-            chromium_sandbox=browser_session.sandbox_enabled(None),
-            user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
-            navigation_timeout_ms=timeout_ms,
-            profile_mode=parse_profile_mode(profile_mode),
+            user_data_dir=user_data_dir,
+            timeout_ms=timeout_ms,
+            profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
             gpu=gpu,
             fake_media_devices=fake_media_devices,
-            webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+            webrtc_ip_handling_policy=webrtc_ip_handling_policy,
             decline_cookies=decline_cookies,
-            resource_policy=parse_resource_policy(resource_policy),
+            resource_policy=resource_policy,
         )
         result = await _run_fetch(
             url,
@@ -465,19 +492,18 @@ async def search(
             results page before reading it.
     """
     with _tool_errors():
-        config = SessionConfig(
+        config = _stealth_config(
             channel=channel,
             headless=headless,
-            chromium_sandbox=browser_session.sandbox_enabled(None),
-            user_data_dir=resolve_mcp_profile_path(user_data_dir) if user_data_dir else None,
-            navigation_timeout_ms=timeout_ms,
-            profile_mode=parse_profile_mode(profile_mode),
+            user_data_dir=user_data_dir,
+            timeout_ms=timeout_ms,
+            profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
             virtual_display=virtual_display,
             gpu=gpu,
             fake_media_devices=fake_media_devices,
-            webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
+            webrtc_ip_handling_policy=webrtc_ip_handling_policy,
             decline_cookies=decline_cookies,
         )
         selected_engine = parse_engine(engine)

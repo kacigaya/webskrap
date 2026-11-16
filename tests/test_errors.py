@@ -58,7 +58,7 @@ def test_untagged_messages_are_classified(message: str, expected: ErrorCode) -> 
 
 
 def test_a_sandbox_failure_outranks_the_launch_failure_wrapping_it() -> None:
-    # `_wait_for_devtools_port` appends the sandbox hint to a launch message;
+    # `_wait_for_startup` appends the sandbox hint to a launch message;
     # the sandbox is the actionable half, so it must win.
     message = (
         "browser exited during startup; see /tmp/browser.log. Chromium's sandbox could not start. "

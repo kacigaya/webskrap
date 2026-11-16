@@ -136,8 +136,6 @@ _MESSAGE_CODES: tuple[tuple[str, ErrorCode], ...] = (
     ("devtools port", ErrorCode.BROWSER_LAUNCH),
     ("chromium is not installed", ErrorCode.BROWSER_LAUNCH),
     ("net::err_", ErrorCode.NAVIGATION),
-    ("err_name_not_resolved", ErrorCode.NAVIGATION),
-    ("err_connection", ErrorCode.NAVIGATION),
     ("navigation failed", ErrorCode.NAVIGATION),
     ("timeout", ErrorCode.TIMEOUT),
     ("timed out", ErrorCode.TIMEOUT),
