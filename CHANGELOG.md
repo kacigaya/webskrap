@@ -28,6 +28,10 @@ history, so they summarize each release rather than list every change.
 
 ### Changed
 
+- The humanized cursor and `browser mouse` move from where the mouse last
+  was, instead of jumping to a random point near each target. The wheel turns
+  at the cursor. Persistent sessions keep the position per tab between
+  commands.
 - Internal cleanup with no behavior change: the MCP `fetch` tool calls
   `stealth_fetch`, and the CLI `fetch` and `search` commands share their
   option declarations. Tool schemas and `webskrap schema` output are

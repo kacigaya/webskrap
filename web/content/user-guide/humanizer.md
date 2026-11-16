@@ -31,6 +31,13 @@ straight, evenly spaced line. The algorithm is adapted from
 [HumanCursor](https://github.com/riflosnake/HumanCursor) and reimplemented
 without adding a dependency.
 
+Each path starts where the previous mouse event left the cursor, so the
+cursor never jumps between actions. Only a page with no earlier mouse event
+starts at a random point near the target. The wheel turns at the cursor's
+position. Persistent browser sessions save the position per tab between
+commands, and `browser mouse` coordinates are reached along the same kind of
+path.
+
 What a page's scripts see, compared with mechanical input (`human=False`):
 
 | Signal | Mechanical | Humanizer |

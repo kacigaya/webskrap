@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from itertools import pairwise
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -27,6 +28,7 @@ def test_click_jitter_stays_inside_small_targets(monkeypatch, width, height, edg
 def pointer(monkeypatch):
     page = MagicMock(spec=CDPPage)
     page.send = AsyncMock(return_value={})
+    page.pointer = None
     element = cdp_dom._Element(page, "node", "#go")
     box = {"x": 100, "y": 100, "width": 60, "height": 40, "viewportHeight": 600}
 
@@ -120,6 +122,54 @@ async def test_hover_finishes_inside_a_small_target(pointer) -> None:
     await cdp_dom._human_pointer(element)
     last = element.input_page.send.await_args.args[1]
     assert last == {"type": "mouseMoved", "x": 100.5, "y": 100.5}
+
+
+def _moves(page) -> list[tuple[float, float]]:
+    return [
+        (args.args[1]["x"], args.args[1]["y"])
+        for args in page.send.await_args_list
+        if args.args[1]["type"] == "mouseMoved"
+    ]
+
+
+async def test_travel_continues_from_the_last_position(pointer) -> None:
+    element, _ = pointer
+    page = element.input_page
+    page.pointer = (10.0, 10.0)
+
+    await cdp_dom.travel(page, 300, 200)
+
+    moves = _moves(page)
+    path = [(10.0, 10.0), *moves]
+    gaps = [((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5 for (ax, ay), (bx, by) in pairwise(path)]
+    assert max(gaps) < 30
+    assert moves[-1] == (300, 200)
+    assert page.pointer == (300, 200)
+
+
+async def test_travel_without_a_position_starts_near_the_target(pointer, monkeypatch) -> None:
+    element, _ = pointer
+    page = element.input_page
+    monkeypatch.setattr(cdp_dom, "uniform", lambda _low, high: high)
+
+    await cdp_dom.travel(page, 300, 200)
+
+    moves = _moves(page)
+    assert moves[0] == (460, 290)
+    assert moves[-1] == (300, 200)
+
+
+async def test_second_click_starts_where_the_first_ended(pointer) -> None:
+    element, _ = pointer
+    page = element.input_page
+    await cdp_dom._human_pointer(element, click_count=1)
+    first_end = page.pointer
+    page.send.reset_mock()
+
+    await cdp_dom._human_pointer(element, click_count=1)
+
+    moves = _moves(page)
+    assert ((moves[0][0] - first_end[0]) ** 2 + (moves[0][1] - first_end[1]) ** 2) ** 0.5 < 30
 
 
 async def test_consent_click_timeout_stops_before_mouse_input(pointer, monkeypatch) -> None:
