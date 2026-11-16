@@ -427,6 +427,7 @@ def _session_config(
     gpu: GpuBackend,
     profile_mode: SessionProfileMode,
     profile: str | None,
+    user_data_dir: Path | None = None,
 ) -> tuple[SessionConfig, BrowserProfile | None]:
     """Return a detached session's config and the profile its launch applies.
 
@@ -451,6 +452,7 @@ def _session_config(
         virtual_display=virtual_display,
         gpu=gpu,
         profile_mode=profile_mode,
+        user_data_dir=user_data_dir,
     )
     if profile_mode == "native":
         return config, None
@@ -539,6 +541,7 @@ def launch_browser(
         gpu=gpu,
         profile_mode=profile_mode,
         profile=profile,
+        user_data_dir=directory / "user-data",
     )
     env = {**_child_env(), **(config.browser_env(native_profile) or {}), **(display_env or {})}
     user_data_dir = secure_directory(directory / "user-data")

@@ -8,8 +8,10 @@ CDP commands, which is where their per-field comments matter.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import secrets
 import sys
 from enum import StrEnum
 from pathlib import Path
@@ -272,6 +274,20 @@ REMOVED_CONFIG_FIELDS: dict[str, str] = {
 }
 
 
+#: Panels common Linux desktops reserve, as ``--screen-info`` work-area insets:
+#: GNOME's top bar, Ubuntu's top bar and dock, Xfce's top panel, and Plasma's
+#: bottom panel at two sizes.
+_DESKTOP_PANELS: tuple[dict[str, int], ...] = (
+    {"workAreaTop": 32},
+    {"workAreaLeft": 64, "workAreaTop": 32},
+    {"workAreaTop": 28},
+    {"workAreaBottom": 44},
+    {"workAreaBottom": 48},
+)
+#: Window geometry seed for runs without a persistent profile.
+_PROCESS_GEOMETRY_SEED = secrets.token_bytes(32)
+
+
 class SessionConfig(BaseModel):
     """How a session's browser is launched and how its pages behave.
 
@@ -304,8 +320,9 @@ class SessionConfig(BaseModel):
     # Simulated screen for headless chromium. Headless Chrome has no physical
     # display, so screen/window metrics (screen.width, outerWidth, ...) leak as
     # headless tells. A virtual screen of this size is configured at launch via
-    # browser flags (not JS spoofing). The window leaves 80 px at the right
-    # and bottom of this screen. Set to None to disable.
+    # browser flags (not JS spoofing). A Linux desktop panel and the window's
+    # size and position come from the persistent profile directory, or one
+    # process-wide seed without one. Set to None to disable.
     headless_screen: Viewport | None = Field(
         default_factory=lambda: Viewport(width=1920, height=1080)
     )
@@ -589,25 +606,60 @@ class SessionConfig(BaseModel):
         if not (self.headless and self.headless_screen):
             return []
         width, height = self.headless_screen.width, self.headless_screen.height
-        # Leave space at the right and bottom, as a normal desktop window
-        # does. The screen itself keeps its full configured dimensions.
-        bottom_gap = min(80, height - 1)
-        window_width, window_height = max(1, width - 80), height - bottom_gap
+        insets, (window_width, window_height, x, y) = self._window_geometry(width, height)
         candidates = {
             "--window-size": f"--window-size={window_width},{window_height}",
-            "--window-position": "--window-position=0,0",
+            "--window-position": f"--window-position={x},{y}",
         }
         if not self.virtual_display:
             # Headless-only flag defining a screen at 0,0. Under a virtual
             # display the X server is the screen.
-            candidates["--screen-info"] = (
-                f"--screen-info={{{width}x{height} workAreaBottom={bottom_gap}}}"
-            )
+            area = "".join(f" {key}={value}" for key, value in insets.items())
+            candidates["--screen-info"] = f"--screen-info={{{width}x{height}{area}}}"
         return [
             arg
             for prefix, arg in candidates.items()
             if not any(a.startswith(prefix) for a in self.launch_args)
         ]
+
+    def _window_geometry(
+        self, width: int, height: int
+    ) -> tuple[dict[str, int], tuple[int, int, int, int]]:
+        """Return the screen's work-area insets and the window's size and position.
+
+        A fixed geometry would be one more value shared by every WebSkrap
+        run. A desktop keeps one panel layout, and a profile keeps its
+        window, so both come from a seed: the persistent profile directory,
+        or else one value for the whole process. A virtual display has no
+        window manager, so no panel. The window is maximized in its work
+        area or floats inside it.
+        """
+        seed = (
+            hashlib.sha256(str(self.user_data_dir).encode()).digest()
+            if self.user_data_dir is not None
+            else _PROCESS_GEOMETRY_SEED
+        )
+        panel = {} if self.virtual_display else _DESKTOP_PANELS[seed[0] % len(_DESKTOP_PANELS)]
+        left = min(panel.get("workAreaLeft", 0), width - 1)
+        top = min(panel.get("workAreaTop", 0), height - 1)
+        bottom = min(panel.get("workAreaBottom", 0), height - 1 - top)
+        insets = {
+            key: value
+            for key, value in (
+                ("workAreaLeft", left),
+                ("workAreaTop", top),
+                ("workAreaBottom", bottom),
+            )
+            if key in panel
+        }
+        area_width, area_height = width - left, height - top - bottom
+        if seed[1] % 2:
+            return insets, (area_width, area_height, left, top)
+        window_width = max(1, area_width - 40 - seed[2] % 360)
+        window_height = max(1, area_height - 30 - seed[3] % 210)
+        x = left + (area_width - window_width) * seed[4] // 255
+        y = top + (area_height - window_height) * seed[5] // 255
+        return insets, (window_width, window_height, x, y)
 
     def effective_webrtc_ip_handling_policy(self) -> WebRtcIPHandlingPolicy | None:
         """Return the WebRTC policy the browser gets, filling in the proxy default.

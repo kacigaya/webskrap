@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import sys
+from pathlib import Path
 from typing import Any, get_args
 
 import pytest
@@ -235,14 +237,58 @@ def test_profile_mode_rejects_unknown_values() -> None:
         SessionConfig(profile_mode="everything")  # type: ignore[arg-type]
 
 
+def _window_in_work_area(args: list[str], width: int, height: int) -> tuple[int, ...]:
+    """Assert the launch window fits the screen's work area; return its geometry."""
+    flags = dict(arg.split("=", 1) for arg in args if arg.startswith("--window-"))
+    window_width, window_height = map(int, flags["--window-size"].split(","))
+    x, y = map(int, flags["--window-position"].split(","))
+    screen = next((arg for arg in args if arg.startswith("--screen-info=")), None)
+    insets: dict[str, int] = {}
+    if screen is not None:
+        assert screen.startswith(f"--screen-info={{{width}x{height}")
+        insets = {key: int(value) for key, value in re.findall(r"(workArea\w+)=(\d+)", screen)}
+    left, top = insets.get("workAreaLeft", 0), insets.get("workAreaTop", 0)
+    assert left <= x and x + window_width <= width
+    assert top <= y and y + window_height <= height - insets.get("workAreaBottom", 0)
+    return window_width, window_height, x, y
+
+
 def test_headless_chromium_gets_simulated_screen() -> None:
     config = SessionConfig(channel="chrome", headless=True)
 
     args = config.browser_args()
 
-    assert "--window-size=1840,1000" in args
-    assert "--window-position=0,0" in args
-    assert "--screen-info={1920x1080 workAreaBottom=80}" in args
+    _window_in_work_area(args, 1920, 1080)
+    assert any(arg.startswith("--screen-info={1920x1080 workArea") for arg in args)
+
+
+def test_window_geometry_is_stable_per_profile_and_varies_between_profiles() -> None:
+    def geometry(directory: str | None) -> tuple[int, ...]:
+        path = Path(directory) if directory is not None else None
+        return _window_in_work_area(
+            SessionConfig(headless=True, user_data_dir=path).browser_args(), 1920, 1080
+        )
+
+    profiles = [f"/profiles/{index}" for index in range(20)]
+
+    assert geometry("/profiles/a") == geometry("/profiles/a")
+    assert geometry(None) == geometry(None)
+    assert len({geometry(directory) for directory in profiles}) > 3
+
+
+@pytest.mark.parametrize("size", [(1, 1), (50, 40), (800, 600), (3840, 2160)])
+def test_window_geometry_fits_any_screen(size: tuple[int, int]) -> None:
+    width, height = size
+    for index in range(20):
+        config = SessionConfig(
+            headless=True,
+            headless_screen=Viewport(width=width, height=height),
+            user_data_dir=Path(f"/profiles/{index}"),
+        )
+        window_width, window_height, _, _ = _window_in_work_area(
+            config.browser_args(), width, height
+        )
+        assert window_width >= 1 and window_height >= 1
 
 
 def test_fake_media_devices_are_opt_in() -> None:
@@ -259,8 +305,7 @@ def test_headless_screen_size_is_configurable() -> None:
 
     args = config.browser_args()
 
-    assert "--window-size=1286,688" in args
-    assert "--screen-info={1366x768 workAreaBottom=80}" in args
+    _window_in_work_area(args, 1366, 768)
 
 
 def test_headless_screen_can_be_disabled() -> None:
@@ -282,10 +327,9 @@ def test_user_launch_args_override_simulated_screen() -> None:
 
     args = config.browser_args()
 
-    assert "--window-size=800,600" in args
-    assert "--window-size=1840,1000" not in args
+    assert [arg for arg in args if arg.startswith("--window-size")] == ["--window-size=800,600"]
     # untouched flags still applied
-    assert "--screen-info={1920x1080 workAreaBottom=80}" in args
+    assert any(arg.startswith("--screen-info={1920x1080") for arg in args)
 
 
 def test_chromium_disables_automation_controlled() -> None:
@@ -617,8 +661,7 @@ def test_virtual_display_launches_headed_with_window_but_no_headless_screen() ->
     args = config.browser_args()
 
     assert config.launch_headless is False
-    assert "--window-size=1840,1000" in args
-    assert "--window-position=0,0" in args
+    _window_in_work_area(args, 1920, 1080)
     # --screen-info only exists in headless mode; Xvfb supplies the screen.
     assert not any(a.startswith("--screen-info") for a in args)
     assert config.uses_virtual_display()

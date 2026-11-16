@@ -245,7 +245,7 @@ def test_browser_args_hide_webdriver_and_carry_proxy_flags() -> None:
 
     assert args[0] == "--disable-blink-features=AutomationControlled"
     assert "--no-sandbox" in args
-    assert "--window-size=1840,1000" in args
+    assert any(arg.startswith("--window-size=") for arg in args)
     assert "--proxy-server=http://proxy.test:8080" in args
     assert "--proxy-bypass-list=localhost" in args
     assert "--ignore-certificate-errors" in args

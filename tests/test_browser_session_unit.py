@@ -560,9 +560,9 @@ def test_launch_hides_automation_and_sets_a_virtual_screen(
 
     command = commands[0]
     assert "--disable-blink-features=AutomationControlled" in command
-    assert "--screen-info={1920x1080 workAreaBottom=80}" in command
-    assert "--window-size=1840,1000" in command
-    assert "--window-position=0,0" in command
+    assert any(arg.startswith("--screen-info={1920x1080 workArea") for arg in command)
+    assert any(arg.startswith("--window-size=") for arg in command)
+    assert any(arg.startswith("--window-position=") for arg in command)
     assert command.count("--no-sandbox") == 0
 
 
@@ -878,7 +878,7 @@ def test_launch_on_a_virtual_display_runs_headed_there(
 
     command, env = launched[0]
     assert "--headless=new" not in command
-    assert "--window-size=1840,1000" in command
+    assert any(arg.startswith("--window-size=") for arg in command)
     assert not any(arg.startswith("--screen-info") for arg in command)
     assert env["DISPLAY"] == ":42"
     assert env["XAUTHORITY"] == "/private/Xauthority"

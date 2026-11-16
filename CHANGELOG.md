@@ -28,6 +28,10 @@ history, so they summarize each release rather than list every change.
 
 ### Changed
 
+- The simulated headless screen no longer has the same 1840x1000 window at
+  0,0 for every user. A Linux desktop panel and the window's size and
+  position come from the persistent profile directory, or one process-wide
+  seed without one, so a profile keeps the same desktop.
 - The humanized cursor and `browser mouse` move from where the mouse last
   was, instead of jumping to a random point near each target. The wheel turns
   at the cursor. Persistent sessions keep the position per tab between
