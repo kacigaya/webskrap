@@ -416,47 +416,6 @@ def kill_browser(pid: int, *, force: bool) -> None:
             os.kill(pid, sig)
 
 
-def stealth_launch_args(
-    *,
-    headless: bool,
-    chromium_sandbox: bool,
-    proxy_server: str | None = None,
-    webrtc_ip_handling_policy: WebRtcIPHandlingPolicy | None = None,
-    fake_media_devices: bool = False,
-    virtual_display: bool = False,
-    gpu: GpuBackend = GpuBackend.AUTO,
-    profile_mode: SessionProfileMode = "native",
-    profile: str | None = None,
-) -> list[str]:
-    """Return the browser flags a one-shot fetch would get, for a detached launch.
-
-    Built from :class:`~webskrap.models.SessionConfig` so both paths share one
-    definition: ``--disable-blink-features=AutomationControlled`` (otherwise a
-    remote-debugging port sets ``navigator.webdriver``), the headless virtual
-    screen and smaller window (otherwise 800x600 at 10,10), ``--no-sandbox`` only
-    when the sandbox is off, ``--proxy-server`` for the proxy, the WebRTC
-    policy, which defaults to ``disable_non_proxied_udp`` behind a proxy, the
-    GL flags of ``gpu`` and the profile's ``--accept-lang`` in locale mode.
-
-    Raises:
-        WebSkrapError: If ``proxy_server`` is not a proxy URL WebSkrap accepts
-            or embeds credentials (see :func:`persistent_proxy_server`), or if
-            ``profile`` is unknown (``usage``).
-    """
-    config, native_profile = _session_config(
-        headless=headless,
-        chromium_sandbox=chromium_sandbox,
-        proxy_server=proxy_server,
-        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
-        fake_media_devices=fake_media_devices,
-        virtual_display=virtual_display,
-        gpu=gpu,
-        profile_mode=profile_mode,
-        profile=profile,
-    )
-    return config.browser_args(native_profile)
-
-
 def _session_config(
     *,
     headless: bool,
@@ -470,6 +429,13 @@ def _session_config(
     profile: str | None,
 ) -> tuple[SessionConfig, BrowserProfile | None]:
     """Return a detached session's config and the profile its launch applies.
+
+    Built from :class:`~webskrap.models.SessionConfig`, so a session gets the
+    flags a one-shot fetch would: ``--disable-blink-features=AutomationControlled``
+    (otherwise a remote-debugging port sets ``navigator.webdriver``), the
+    headless virtual screen, ``--no-sandbox`` only when the sandbox is off,
+    the proxy and its WebRTC default, the GL flags of ``gpu``, and the
+    profile's ``--accept-lang`` in locale mode.
 
     Raises:
         WebSkrapError: ``usage`` for an invalid proxy, an unknown profile, or

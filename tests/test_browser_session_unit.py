@@ -912,23 +912,29 @@ def test_launch_applies_mesa_and_the_locale_natively(
     assert env["LC_ALL"] == "en_US.UTF-8"
 
 
-def test_locale_session_needs_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_locale_session_needs_linux(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(sys, "platform", "darwin")
 
     with pytest.raises(WebSkrapError, match="needs Linux") as caught:
-        browser_session.stealth_launch_args(
-            headless=True, chromium_sandbox=True, profile_mode="locale"
+        browser_session.launch_browser(
+            tmp_path, executable="/bin/chromium", headless=True, profile_mode="locale"
         )
 
     assert caught.value.code is ErrorCode.USAGE
 
 
-def test_session_rejects_an_unknown_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_session_rejects_an_unknown_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
 
     with pytest.raises(WebSkrapError, match="unknown profile") as caught:
-        browser_session.stealth_launch_args(
-            headless=True, chromium_sandbox=True, profile_mode="locale", profile="nope"
+        browser_session.launch_browser(
+            tmp_path,
+            executable="/bin/chromium",
+            headless=True,
+            profile_mode="locale",
+            profile="nope",
         )
 
     assert caught.value.code is ErrorCode.USAGE
