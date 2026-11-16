@@ -19,10 +19,10 @@ spends tokens on content instead of markup (typically 5-10x fewer tokens than
 raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control. Pass
 `text_only=false` when you need the HTML.
 
-Both fetch tools default to `domcontentloaded`. `fetch` defaults to
-`resource_policy="auto"`: it skips images, fonts and media for text, and HTML
-loads all resources. `stealth_fetch` defaults to `all`, because page scripts can
-see a blocked image or font, which no real browser blocks.
+Both fetch tools default to `domcontentloaded` and `resource_policy="all"`:
+page scripts can see a blocked image or font, which no real browser blocks.
+`auto` skips images, fonts and media for text, which is faster on pages that do
+not check. The two tools share warm sessions, so they share the default.
 Explicit `all`, `lite`, or `documents` policies take priority. Use `documents`
 only when removing CSS preserves the required result. Use `ready_selector` for
 deferred content. Keep cookie rejection on unless the page is known not to need it.
@@ -93,7 +93,7 @@ leave the notice in place.
 | `profile` | `desktop-chrome` | Profile label; the browser's native identity is kept unless `profile_mode` asks for more. |
 | `channel` | `chrome` | Browser channel; use `chromium` on Linux ARM64. |
 | `wait_until` | `domcontentloaded` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
-| `resource_policy` | `auto` | `auto`, `all`, `lite`, or `documents`. |
+| `resource_policy` | `all` | `all`, `auto`, `lite`, or `documents`. |
 | `timeout_ms` | `60000` | Timeout applied separately to navigation and readiness. |
 | `ready_selector` | `null` | CSS selector or snapshot ref that must become visible after consent dismissal. |
 | `max_chars` | `8000` | Maximum returned text characters. |

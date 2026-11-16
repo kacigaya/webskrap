@@ -91,7 +91,7 @@ def _hints(
     )
 
 
-INSTRUCTIONS = """WebSkrap drives real Chromium over its own CDP client.
+INSTRUCTIONS = """WebSkrap drives real Chromium over its own CDP client (no Playwright).
 
 Choose a tool
 - One known page: stealth_fetch. Prefer it over fetch; fetch has fewer controls.
@@ -118,9 +118,8 @@ Keep results small
 - max_chars defaults to 8000. Start lower; page via next_text_offset /
   next_snapshot_offset. browser_snapshot defaults to depth=6 (null for full).
 - Keep text_only=true; browser_eval should return a narrow value, not full DOM.
-- Fetch defaults: domcontentloaded; resource_policy "auto" (lite for text)
-  in fetch, "all" in stealth_fetch. ready_selector for deferred content;
-  networkidle only if needed.
+- Fetch defaults: domcontentloaded, resource_policy="all" ("lite" is faster for
+  text). Use ready_selector for deferred content; networkidle only if needed.
 - Opt into repeated fetch reuse with session="crawl"; cookies/storage share that
   name. Keep profile/config unchanged. fetch_session_close releases it.
   These warm sessions are separate from browser_* sessions and end on server
@@ -243,7 +242,7 @@ async def fetch(
     profile: str = "desktop-chrome",
     channel: str = "chrome",
     wait_until: str = "domcontentloaded",
-    resource_policy: str = "auto",
+    resource_policy: str = "all",
     timeout_ms: float = 60_000,
     max_chars: int = 8_000,
     offset: int = 0,
@@ -273,8 +272,9 @@ async def fetch(
         channel: Browser channel, e.g. chrome. If chrome cannot launch (Linux
             ARM64 has no build), Edge and then bundled Chromium are tried.
         wait_until: commit, domcontentloaded, load, or networkidle.
-        resource_policy: auto (lite for text, all for HTML), all, lite, or
-            documents (also blocks CSS). Explicit policies take priority.
+        resource_policy: all (default, as in stealth_fetch, so both can share
+            a warm session), auto (lite for text, all for HTML), lite, or
+            documents (also blocks CSS).
         timeout_ms: Navigation timeout in milliseconds.
         max_chars: Maximum characters of page text to return.
         offset: Character index to start the returned text at. Pass back the
@@ -379,9 +379,9 @@ async def stealth_fetch(
         decline_cookies: Click a cookie consent notice's reject button after
             load, so the banner does not bury the page text.
         wait_until: commit, domcontentloaded (default), load, or networkidle.
-        resource_policy: all (default: a blocked image or font is a signal
-            page scripts can read), auto (lite for text, all for HTML), lite,
-            or documents (also blocks CSS).
+        resource_policy: all (default: page scripts can see a blocked image
+            or font), auto (lite for text, all for HTML), lite, or documents
+            (also blocks CSS).
         ready_selector: Optional CSS selector or snapshot ref that must be visible
             before extraction. Uses timeout_ms after consent dismissal.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;

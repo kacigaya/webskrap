@@ -27,10 +27,11 @@ eight named fetch sessions stay open. A busy session cannot be closed. These
 sessions end when the MCP server stops and are separate from `browser_*`
 sessions. Persistent `user_data_dir` files survive closing.
 
-Both fetch tools default to `domcontentloaded`. `fetch` defaults to
-`resource_policy="auto"`: it skips images, fonts and media for text, and HTML
-loads all resources. `stealth_fetch` defaults to `all`, because page scripts can
-see blocked resources. Explicit
+Both fetch tools default to `domcontentloaded` and `resource_policy="all"`:
+page scripts can see a blocked image or font, which a real browser never
+blocks. `auto` skips images, fonts and media for text, which is faster on pages
+that do not check. The two tools share warm sessions, so they share the
+default. Explicit
 `all`, `lite`, or `documents` policies take priority. Use `documents` only when
 removing CSS preserves the required result. Use `ready_selector` for deferred
 content. Reserve `networkidle`, screenshots and full snapshots for tasks that

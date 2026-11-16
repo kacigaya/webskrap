@@ -1019,14 +1019,12 @@ def test_browser_screenshot_rejects_a_target_with_full_page(
     assert not (tmp_path / "out").exists()
 
 
-@pytest.mark.parametrize(
-    ("tool", "policy"), [(mcp_server.fetch, "auto"), (mcp_server.stealth_fetch, "all")]
-)
-def test_fetch_task_defaults_and_explicit_overrides(monkeypatch, tool, policy):
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_task_defaults_and_explicit_overrides(monkeypatch, tool):
     _fake_client(monkeypatch)
     asyncio.run(tool("https://example.test"))
     call = _FakeClient.calls[-1]
-    assert call["config"].resource_policy.value == policy
+    assert call["config"].resource_policy.value == "all"
     assert call["config"].decline_cookies is True
     assert call["wait_until"] == "domcontentloaded"
     asyncio.run(tool("https://example.test", resource_policy="lite", wait_until="networkidle"))
