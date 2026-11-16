@@ -535,8 +535,10 @@ async def doctor() -> dict[str, Any]:
     Launches one headless Chromium and returns that result plus the installed
     versions, the Chromium binary in use, the roots screenshots and profiles
     are confined to, which WEBSKRAP_* overrides are set, and every persistent
-    browser session with its running state. Call this first when a fetch or a
-    browser_* tool fails for a reason its own error does not explain.
+    browser session with its running state. fingerprint lists what a default
+    fetch shows pages; warnings name a native fix for each uncommon value.
+    Call this first when a fetch or a browser_* tool fails for a reason its
+    own error does not explain.
     """
     with _tool_errors():
         return await diagnose()

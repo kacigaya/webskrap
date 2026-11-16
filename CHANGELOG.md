@@ -17,6 +17,11 @@ history, so they summarize each release rather than list every change.
   MCP `browser_open`). The virtual display lives as long as the session, and
   `browser close` stops it. `full` mode is not offered for sessions, because
   CDP emulation ends with each command's connection.
+- `doctor` reports a `fingerprint` of what a default fetch shows pages:
+  `webdriver`, user agent, platform, client-hint architecture, WebGL renderer
+  and media device count. It reads them from a blank https page served over
+  CDP, with no network request, and warns about each gap with a native fix
+  (`virtual_display`, `gpu`, `fake_media_devices`, or a host change).
 
 ### Fixed
 

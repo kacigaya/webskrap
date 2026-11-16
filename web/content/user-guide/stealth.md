@@ -15,7 +15,8 @@ settings instead.
 ## Establish a baseline
 
 Check `webskrap doctor --format json` and the MCP `doctor` result before comparing
-configurations. Compare package versions and executable paths: a connected MCP
+configurations. Its `fingerprint` and `warnings` list the values a default fetch
+shows pages that are not common, with a native fix for each. Compare package versions and executable paths: a connected MCP
 process can run a different installation from the checkout being edited. Restart
 that process using the intended installation before testing a code change.
 

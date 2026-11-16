@@ -7,8 +7,9 @@ which browser sessions exist, plus host facts pages can read, such as a
 UTC timezone. A caller debugging a failure otherwise has to ask
 five separate questions and already know which five.
 
-Only paths and version strings are reported. Nothing here reads cookies,
-storage state, or proxy credentials.
+Only paths, version strings and the browser's own identity values are
+reported. Nothing here reads cookies, storage state, or proxy credentials,
+and the fingerprint probe makes no network request.
 """
 
 from __future__ import annotations
@@ -96,6 +97,55 @@ def font_count() -> int | None:
     )
 
 
+def fingerprint_warnings(fingerprint: object) -> list[str]:
+    """Return advice for values a default one-shot fetch shows pages.
+
+    Each warning names a native fix: a launch setting or a host change,
+    never a JavaScript patch, which pages can detect.
+    """
+    if not isinstance(fingerprint, dict) or not fingerprint:
+        return []
+    warnings: list[str] = []
+    if fingerprint.get("webdriver"):
+        warnings.append(
+            "navigator.webdriver is true. Keep the default launch flags; a caller "
+            "--disable-blink-features flag replaces AutomationControlled."
+        )
+    if "HeadlessChrome" in str(fingerprint.get("user_agent", "")):
+        warnings.append(
+            "Headless fetches report HeadlessChrome in the user agent. Use "
+            "virtual_display=True (Linux with Xvfb) or headed mode."
+        )
+    renderer = fingerprint.get("webgl_renderer")
+    if renderer is None:
+        warnings.append(
+            "WebGL is unavailable, which few desktop browsers report. Use gpu='mesa' "
+            "(Linux with mesa-vulkan-drivers) or a host with a GPU."
+        )
+    elif "SwiftShader" in str(renderer):
+        warnings.append(
+            "WebGL renders with SwiftShader, which current Chrome no longer reports "
+            "without a GPU. Use gpu='mesa' or a host with a GPU."
+        )
+    elif "llvmpipe" in str(renderer):
+        warnings.append(
+            "WebGL renders with Mesa llvmpipe, an uncommon software renderer. Only a "
+            "host with a GPU reports a common one."
+        )
+    if fingerprint.get("media_devices") == 0:
+        warnings.append(
+            "No camera, microphone or speaker is listed; most desktops list some. "
+            "Use fake_media_devices=True."
+        )
+    if fingerprint.get("architecture") == "arm" and "x86" in str(fingerprint.get("platform", "")):
+        warnings.append(
+            "Client hints report an ARM CPU while navigator.platform reports x86_64. "
+            "Chrome does this on ARM Linux, but few visitors do; an x86_64 host "
+            "removes it."
+        )
+    return warnings
+
+
 async def diagnose() -> dict[str, Any]:
     """Return the full readiness report.
 
@@ -121,6 +171,7 @@ async def diagnose() -> dict[str, Any]:
             '"Google Chrome", which some detectors score as a weak bot signal. '
             "Install Google Chrome or Microsoft Edge where available."
         )
+    warnings.extend(fingerprint_warnings(probe.get("fingerprint")))
     return {
         **probe,
         "versions": {

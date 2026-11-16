@@ -56,7 +56,7 @@ python -m webskrap.mcp_server
 | `stealth_fetch` | Same stealth path with finer fingerprint/WebRTC/UA controls. |
 | `fetch_session_close` | Close an idle warm fetch session; persistent profile files survive. |
 | `search` | Find URLs for a query on Bing (default) or DuckDuckGo, with the `stealth_fetch` stealth controls. |
-| `doctor` | Check that Chromium can launch. |
+| `doctor` | Check that Chromium can launch, and report fingerprint gaps with native fixes. |
 | `browser_open` | Start (or reuse) a persistent browser session with no visible window. |
 | `browser_goto` | Navigate the session's current page. |
 | `browser_text` | Visible body text, windowed in the browser without an accessibility tree. |

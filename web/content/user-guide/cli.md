@@ -28,6 +28,14 @@ The CLI `fetch` command runs headless Chrome, so `doctor` checks that headless
 Chrome can launch. It also reports the host
 timezone and warns when it is UTC, which pages read as a server.
 
+The launch uses a default `fetch`'s flags, and `fingerprint` reports what pages
+read from it: `webdriver`, the user agent and platform, the client-hint
+architecture, the WebGL renderer, and the media device count. The values are
+read from a blank https page that WebSkrap serves itself, so no request leaves
+the browser. Each gap gets a warning that names a native fix, such as
+`virtual_display=True`, `gpu='mesa'`, `fake_media_devices=True`, or a host
+change. No warning suggests a JavaScript patch.
+
 ## List profiles
 
 ```bash

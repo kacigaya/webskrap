@@ -31,8 +31,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from collections.abc import Callable
-from contextlib import suppress
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -432,6 +432,21 @@ async def apply_storage_state(browser: CDPBrowser, state: Path | dict[str, Any])
 
 
 async def _write_local_storage(browser: CDPBrowser, origin: str, entries: list[list[str]]) -> None:
+    async with served_page(browser, origin.rstrip("/") + "/") as page:
+        await page.evaluate(
+            "(entries) => { for (const [k, v] of entries) localStorage.setItem(k, v); }",
+            entries,
+        )
+
+
+@asynccontextmanager
+async def served_page(browser: CDPBrowser, url: str) -> AsyncIterator[CDPPage]:
+    """Open a throwaway page at ``url`` with a blank document served from here.
+
+    Nothing is fetched, so no request leaves the browser, yet the page has
+    ``url``'s origin: an https URL is a secure context. The page closes on
+    exit.
+    """
     page = await browser.new_page()
     tasks: set[asyncio.Task[Any]] = set()
     try:
@@ -446,11 +461,8 @@ async def _write_local_storage(browser: CDPBrowser, origin: str, entries: list[l
 
         page.connection.on("Fetch.requestPaused", serve_blank, session_id=page.session_id)
         await page.send("Fetch.enable", {"patterns": [{"urlPattern": "*"}]})
-        await page.goto(origin.rstrip("/") + "/", wait_until="load", timeout_s=30)
-        await page.evaluate(
-            "(entries) => { for (const [k, v] of entries) localStorage.setItem(k, v); }",
-            entries,
-        )
+        await page.goto(url, wait_until="load", timeout_s=30)
+        yield page
     finally:
         await browser.connection.send(
             "Target.closeTarget", {"targetId": page.target_id}, timeout_s=5
