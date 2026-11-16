@@ -9,6 +9,21 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- `WebSkrapClient.fetch()` and `search()` now release the browser when the
+  call is cancelled during launch, as `fetch_many()` already did. Before, the
+  browser stayed open until `WebSkrapClient.close()`.
+- `scripts/driver_parity.py` runs again. Since 3.2.0 it imported a detection
+  script that no longer exists, so it failed at import.
+
+### Changed
+
+- Internal cleanup with no behavior change: the MCP `fetch` tool calls
+  `stealth_fetch`, and the CLI `fetch` and `search` commands share their
+  option declarations. Tool schemas and `webskrap schema` output are
+  unchanged.
+
 ## [3.4.0] - 2026-11-15
 
 ### Added

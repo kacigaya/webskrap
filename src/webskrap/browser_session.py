@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, TypedDict, TypeVar
 
 from webskrap import cdp_dom, cdp_session, text_search
-from webskrap.cdp import CDPPage, find_executable
+from webskrap.cdp import CDPPage, base_args, find_executable
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
     ElementState,
@@ -68,9 +68,10 @@ SANDBOX_ENV = "WEBSKRAP_CHROMIUM_SANDBOX"
 PROXY_USERNAME_ENV = "WEBSKRAP_PROXY_USERNAME"
 PROXY_PASSWORD_ENV = "WEBSKRAP_PROXY_PASSWORD"  # nosec B105  # noqa: S105 - a variable name
 PROXY_AUTH_MODULE = "webskrap.proxy_auth"
-# Chromium prints one of these when its setuid/namespace sandbox cannot start
+# Chromium logs one of these when its setuid/namespace sandbox cannot start
 # (unprivileged user namespaces off, or running as root in a container).
-SANDBOX_FAILURE_MARKERS = (
+# Matched against the browser log, unlike errors.SANDBOX_FAILURE_MARKERS.
+_LOG_SANDBOX_MARKERS = (
     "no usable sandbox",
     "sandboxhelper",
     "setuid sandbox",
@@ -81,16 +82,16 @@ SANDBOX_FAILURE_MARKERS = (
 #: Actions :func:`tabs` accepts.
 TAB_ACTIONS = ("list", "new", "select", "close")
 
-# name -> (Locator method, value arity: "none" | "one" | "many")
-ELEMENT_ACTIONS: dict[str, tuple[str, str]] = {
-    "click": ("click", "none"),
-    "dblclick": ("dblclick", "none"),
-    "hover": ("hover", "none"),
-    "check": ("check", "none"),
-    "uncheck": ("uncheck", "none"),
-    "fill": ("fill", "one"),
-    "type": ("press_sequentially", "one"),
-    "select": ("select_option", "many"),
+#: Element action name -> value arity: "none", "one" or "many".
+ELEMENT_ACTIONS: dict[str, str] = {
+    "click": "none",
+    "dblclick": "none",
+    "hover": "none",
+    "check": "none",
+    "uncheck": "none",
+    "fill": "one",
+    "type": "one",
+    "select": "many",
 }
 
 
@@ -504,22 +505,12 @@ def launch_browser(
     command = [
         executable,
         "--remote-debugging-port=0",
-        f"--user-data-dir={user_data_dir}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        # Chrome for Testing is unsigned on macOS, so every launch asks the
-        # user for the "Chromium Safe Storage" keychain item. The mock keychain
-        # keeps cookie encryption profile-local; pages cannot see it.
-        *(["--use-mock-keychain"] if sys.platform == "darwin" else []),
+        *base_args(user_data_dir),
         # A bfcache restore re-fires no load events, stranding the
         # go_back/go_forward load wait. Each command attaches anew and cannot
         # track restores across attachments, so trade bfcache for
         # deterministic load events.
         "--disable-features=BackForwardCache",
-        # As in webskrap.cdp.launch: Chromium builds apply testing field
-        # trials that stable Chrome never runs, one of which trims
-        # navigator.languages to a single entry.
-        "--disable-field-trial-config",
         *stealth_launch_args(
             headless=headless,
             chromium_sandbox=chromium_sandbox,
@@ -545,8 +536,18 @@ def launch_browser(
             start_new_session=True,
         )
     try:
-        port = _wait_for_devtools_port(port_file, process, log_path)
-        _wait_for_startup_page(port, process, log_path)
+        port = _wait_for_startup(
+            process, log_path, lambda: _devtools_port(port_file), "report a DevTools port"
+        )
+        # Chromium can report its DevTools port before it creates the startup
+        # tab, most often on Windows. An attach in that gap finds no page and
+        # opens a second one, and later commands may then pick the blank tab.
+        _wait_for_startup(
+            process,
+            log_path,
+            lambda: True if _has_page_target(port) else None,
+            "open its startup page",
+        )
         return process.pid, port
     except BaseException:
         # Ctrl-C or a startup failure must not orphan a detached browser that
@@ -633,7 +634,7 @@ def _sandbox_hint(log_path: Path) -> str:
         log = log_path.read_text(encoding="utf-8", errors="replace").lower()
     except OSError:
         return ""
-    if not any(marker in log for marker in SANDBOX_FAILURE_MARKERS):
+    if not any(marker in log for marker in _LOG_SANDBOX_MARKERS):
         return ""
     return (
         ". Chromium's sandbox could not start. Enable unprivileged user "
@@ -642,9 +643,10 @@ def _sandbox_hint(log_path: Path) -> str:
     )
 
 
-def _wait_for_devtools_port(
-    port_file: Path, process: subprocess.Popen[bytes], log_path: Path
-) -> int:
+def _wait_for_startup(
+    process: subprocess.Popen[bytes], log_path: Path, check: Callable[[], T | None], what: str
+) -> T:
+    """Poll ``check`` until it returns a value, failing if the browser exits."""
     deadline = time.monotonic() + LAUNCH_TIMEOUT_S
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -652,31 +654,19 @@ def _wait_for_devtools_port(
             # No explicit code: a sandbox failure appends its own hint to this
             # message, and `classify` reads that to report SANDBOX instead.
             raise WebSkrapError(msg)
-        try:
-            first_line = port_file.read_text(encoding="utf-8").splitlines()[0].strip()
-        except (OSError, IndexError):
-            first_line = ""
-        if first_line.isdigit():
-            return int(first_line)
+        if (value := check()) is not None:
+            return value
         time.sleep(0.05)
-    msg = f"browser did not report a DevTools port within {LAUNCH_TIMEOUT_S:.0f}s"
+    msg = f"browser did not {what} within {LAUNCH_TIMEOUT_S:.0f}s"
     raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
 
-def _wait_for_startup_page(port: int, process: subprocess.Popen[bytes], log_path: Path) -> None:
-    # Chromium can report its DevTools port before it creates the startup tab,
-    # most often on Windows. An attach in that gap finds no page and opens a
-    # second one, and later commands may then pick the blank startup tab.
-    deadline = time.monotonic() + LAUNCH_TIMEOUT_S
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            msg = f"browser exited during startup; see {log_path}{_sandbox_hint(log_path)}"
-            raise WebSkrapError(msg)
-        if _has_page_target(port):
-            return
-        time.sleep(0.05)
-    msg = f"browser did not open its startup page within {LAUNCH_TIMEOUT_S:.0f}s"
-    raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
+def _devtools_port(port_file: Path) -> int | None:
+    try:
+        first_line = port_file.read_text(encoding="utf-8").splitlines()[0].strip()
+    except (OSError, IndexError):
+        return None
+    return int(first_line) if first_line.isdigit() else None
 
 
 def _has_page_target(port: int) -> bool:
@@ -922,18 +912,16 @@ def list_sessions() -> list[dict[str, Any]]:
     for name in list_session_names():
         directory = sessions_root() / name
         state = read_state(directory)
-        running = session_running(directory, state)
+        live = state if state is not None and session_running(directory, state) else None
         sessions.append(
             {
                 "session": name,
-                "running": running,
-                "pid": state["pid"] if running and state else None,
-                "port": state["port"] if running and state else None,
-                "chromium_sandbox": (
-                    bool(state.get("chromium_sandbox", False)) if running and state else None
-                ),
-                "proxy_server": state.get("proxy_server") if running and state else None,
-                "proxy_auth": bool(state.get("proxy_auth_pid")) if running and state else None,
+                "running": live is not None,
+                "pid": live and live["pid"],
+                "port": live and live["port"],
+                "chromium_sandbox": live and bool(live.get("chromium_sandbox", False)),
+                "proxy_server": live and live.get("proxy_server"),
+                "proxy_auth": live and bool(live.get("proxy_auth_pid")),
             }
         )
     return sessions
@@ -1039,7 +1027,7 @@ def element_arguments(action: str, values: list[str]) -> list[Any]:
         supported = ", ".join(ELEMENT_ACTIONS)
         msg = f"unknown action '{action}': use one of {supported}"
         raise WebSkrapError(msg, code=ErrorCode.USAGE)
-    arity = ELEMENT_ACTIONS[action][1]
+    arity = ELEMENT_ACTIONS[action]
     if arity == "none":
         if values:
             msg = f"'{action}' takes no value argument"

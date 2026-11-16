@@ -108,8 +108,8 @@ companions) through `--launch-arg`: those flags are blocked.
 
 Commands act on the current tab. `tab-list`, `tab-new [url]`,
 `tab-select <index>` and `tab-close [index]` manage tabs; a popup or a new tab
-becomes current. Current limitations are Chrome for Testing only, no network
-mocking, tracing, or video, and history navigation that reloads.
+becomes current. Current limitations are no network mocking, tracing, or
+video, and history navigation that reloads.
 
 ## Vision and coordinate input
 

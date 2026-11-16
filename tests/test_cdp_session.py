@@ -24,11 +24,11 @@ from webskrap.cdp_session import (
     PAGE_ORDER_FILE,
     TAB_SELECTION_FILE,
     _ordered_pages,
-    _poll,
     _select,
     current_page,
     devtools_path,
     key_events,
+    poll,
 )
 from webskrap.errors import ErrorCode, WebSkrapError
 
@@ -199,7 +199,7 @@ async def test_poll_stops_a_stalled_check_at_the_deadline() -> None:
 
     started = asyncio.get_running_loop().time()
     with pytest.raises(WebSkrapError) as error:
-        await _poll(stalled, 200, "a stalled renderer")
+        await poll(stalled, 200, "a stalled renderer")
     assert error.value.code is ErrorCode.TIMEOUT
     assert asyncio.get_running_loop().time() - started < 2
 

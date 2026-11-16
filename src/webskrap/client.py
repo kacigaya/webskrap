@@ -22,8 +22,8 @@ from uuid import uuid4
 
 from anyio import CancelScope
 
-from webskrap import cdp_dom, cdp_setup
-from webskrap.cdp import CDPBrowser, CDPError, CDPPage, find_executable, launch
+from webskrap import cdp_dom, cdp_session, cdp_setup
+from webskrap.cdp import CDPBrowser, CDPPage, find_executable, launch
 from webskrap.challenges import (
     raise_for_challenge,
     record_documents,
@@ -103,7 +103,6 @@ _EXTRACT_SCRIPT = """({ text_only, max_links }) => {
     links_total: collected.total,
   };
 }""".replace("CONTENT", _CONTENT_SCRIPT).replace("LINKS", LINKS_SCRIPT)
-_POLL_S = 0.1
 
 
 async def browser_doctor(
@@ -420,7 +419,7 @@ class WebSkrapSession:
                     else state["url"]
                 ),
                 status=status,
-                ok=status is not None and 200 <= status < 400,
+                ok=_http_ok(status),
                 headers=headers,
                 text=state["text"],
                 title=state["title"],
@@ -502,7 +501,7 @@ class WebSkrapSession:
             url=url,
             final_url=state["url"],
             status=status,
-            ok=status is not None and 200 <= status < 400,
+            ok=_http_ok(status),
             hits=hits[: max(0, max_results)],
             hits_total=len(hits),
             timings={"elapsed_ms": (time.perf_counter() - started) * 1000},
@@ -774,8 +773,8 @@ class WebSkrapClient:
             WebSkrapError: If the client is closing or the browser cannot start.
         """
         name = f"_single_{uuid4().hex}"
-        session = await self.session(name, config=config, profile=profile)
         try:
+            session = await self.session(name, config=config, profile=profile)
             return await session.fetch(
                 url,
                 wait_until=wait_until,
@@ -788,8 +787,9 @@ class WebSkrapClient:
                 ready_selector=ready_selector,
             )
         finally:
-            await session.close()
-            self._sessions.pop(name, None)
+            # A cancelled waiter can leave its shielded browser launch running.
+            with CancelScope(shield=True):
+                await self.close_session(name)
 
     async def fetch_many(
         self,
@@ -896,14 +896,14 @@ class WebSkrapClient:
                 the query is blank, or the engine served a bot challenge.
         """
         name = f"_single_{uuid4().hex}"
-        session = await self.session(name, config=config, profile=profile)
         try:
+            session = await self.session(name, config=config, profile=profile)
             return await session.search(
                 query, engine=engine, max_results=max_results, timeout_ms=timeout_ms
             )
         finally:
-            await session.close()
-            self._sessions.pop(name, None)
+            with CancelScope(shield=True):
+                await self.close_session(name)
 
     async def session(
         self,
@@ -1137,33 +1137,33 @@ def require_lavapipe() -> None:
         raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
 
+def _http_ok(status: int | None) -> bool:
+    return status is not None and 200 <= status < 400
+
+
 async def _wait_visible(
     page: CDPPage, target: str, *, timeout_s: float, headers: dict[str, str], status: int | None
 ) -> None:
     """Wait for ``target`` (CSS or ref) to be visible; check for a challenge on timeout."""
-    deadline = time.monotonic() + timeout_s
-    while True:
-        with suppress(CDPError):  # a navigation destroyed the world mid-call
-            if await cdp_dom.element_state(page, target) == "visible":
-                return
-        if time.monotonic() >= deadline:
-            # A challenge can replace the page while readiness is pending.
-            await raise_for_challenge(page, headers, status, deadline=deadline)
-            msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {target} to be visible"
-            raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
-        await asyncio.sleep(_POLL_S)
+
+    async def visible() -> bool:
+        return await cdp_dom.element_state(page, target) == "visible"
+
+    try:
+        await cdp_session.poll(visible, timeout_s * 1000, f"{target} to be visible")
+    except WebSkrapError as exc:
+        if exc.code is not ErrorCode.TIMEOUT:
+            raise
+        # A challenge can replace the page while readiness is pending.
+        await raise_for_challenge(page, headers, status, deadline=time.monotonic())
+        raise
 
 
 async def _wait_attached(page: CDPPage, selector: str, *, timeout_s: float) -> None:
-    deadline = time.monotonic() + timeout_s
-    while True:
-        with suppress(CDPError):  # a navigation destroyed the world mid-call
-            if await cdp_dom.element_state(page, selector) != "detached":
-                return
-        if time.monotonic() >= deadline:
-            msg = f"timed out after {timeout_s * 1000:.0f}ms waiting for {selector}"
-            raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
-        await asyncio.sleep(_POLL_S)
+    async def attached() -> bool:
+        return await cdp_dom.element_state(page, selector) != "detached"
+
+    await cdp_session.poll(attached, timeout_s * 1000, selector)
 
 
 async def _maybe_screenshot(page: CDPPage, screenshot: bool | str | Path) -> Path | None:

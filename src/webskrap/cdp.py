@@ -825,6 +825,23 @@ def _exit_error(log_path: Path) -> WebSkrapError:
     )
 
 
+def base_args(user_data_dir: Path) -> list[str]:
+    """Return the flags every WebSkrap launch passes after its debugging channel."""
+    return [
+        f"--user-data-dir={user_data_dir}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        # Chrome for Testing is unsigned on macOS, so every launch asks the
+        # user for the "Chromium Safe Storage" keychain item. The mock keychain
+        # keeps cookie encryption profile-local; pages cannot see it.
+        *(["--use-mock-keychain"] if sys.platform == "darwin" else []),
+        # Chromium builds (not branded Chrome) apply their testing field
+        # trials by default. Stable Chrome never runs that config, and one of
+        # its trials trims navigator.languages to a single entry.
+        "--disable-field-trial-config",
+    ]
+
+
 async def launch(
     executable: str | Path,
     *,
@@ -837,8 +854,8 @@ async def launch(
 ) -> CDPBrowser:
     """Start Chromium and wait until it answers over CDP.
 
-    The command line is deliberately short: the debugging channel, the
-    profile, first-run suppression, no testing field trials, ``args``, and
+    The command line is deliberately short: the debugging channel,
+    :func:`base_args`, ``args``, and
     ``--headless`` when requested. Playwright's long default flag list is not
     copied, since each extra flag is a difference from a real Chrome that a
     site might measure.
@@ -871,22 +888,7 @@ async def launch(
     profile.mkdir(parents=True, exist_ok=True)
     log_path = temp_dir / "browser.log"
     channel_flag = "--remote-debugging-pipe" if transport == "pipe" else "--remote-debugging-port=0"
-    command = [
-        str(executable),
-        channel_flag,
-        f"--user-data-dir={profile}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        # Chrome for Testing is unsigned on macOS, so every launch asks the
-        # user for the "Chromium Safe Storage" keychain item. The mock keychain
-        # keeps cookie encryption profile-local; pages cannot see it.
-        *(["--use-mock-keychain"] if sys.platform == "darwin" else []),
-        # Chromium builds (not branded Chrome) apply their testing field
-        # trials by default. Stable Chrome never runs that config, and one of
-        # its trials trims navigator.languages to a single entry.
-        "--disable-field-trial-config",
-        *args,
-    ]
+    command = [str(executable), channel_flag, *base_args(profile), *args]
     if headless:
         command.append("--headless")
     command.append("about:blank")

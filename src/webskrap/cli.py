@@ -62,6 +62,107 @@ console = Console()
 
 T = TypeVar("T")
 
+ProfileOption = Annotated[
+    str,
+    typer.Option(
+        "--profile",
+        "-p",
+        help="Bundled profile; --profile-mode decides how much of it pages see.",
+    ),
+]
+ChannelOption = Annotated[
+    str | None,
+    typer.Option("--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."),
+]
+UserDataDirOption = Annotated[
+    Path | None,
+    typer.Option("--user-data-dir", help="Persistent browser profile directory."),
+]
+OutputFormatOption = Annotated[
+    str,
+    typer.Option("--format", help="Output format: human or json."),
+]
+DeclineCookiesTimeoutMsOption = Annotated[
+    float,
+    typer.Option(
+        "--decline-cookies-timeout-ms",
+        min=0,
+        help="How long to wait for a cookie consent notice to appear.",
+    ),
+]
+ProfileModeOption = Annotated[
+    str,
+    typer.Option(
+        "--profile-mode",
+        help=(
+            "How much of --profile pages see: native (none, the default), locale "
+            "(locale, timezone, media, headers) or full (also viewport and user agent)."
+        ),
+    ),
+]
+ReduceFingerprintSurfaceOption = Annotated[
+    bool,
+    typer.Option(
+        "--reduce-fingerprint-surface",
+        help="Disable Chromium WebGL and canvas readback with native browser flags.",
+    ),
+]
+MaskHeadlessUserAgentOption = Annotated[
+    bool,
+    typer.Option(
+        "--mask-headless-user-agent",
+        help=(
+            "Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag. "
+            "Empties high-entropy client hints; prefer --virtual-display."
+        ),
+    ),
+]
+VirtualDisplayOption = Annotated[
+    bool,
+    typer.Option(
+        "--virtual-display",
+        help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
+    ),
+]
+GpuOption = Annotated[
+    GpuBackend,
+    typer.Option(
+        "--gpu",
+        help=(
+            "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
+            "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
+        ),
+    ),
+]
+FakeMediaDevicesOption = Annotated[
+    bool,
+    typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
+]
+LaunchArgsOption = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--launch-arg",
+        help="Additional browser launch argument. Repeat for multiple args.",
+    ),
+]
+NoSandboxOption = Annotated[
+    bool,
+    typer.Option(
+        "--no-sandbox",
+        help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
+    ),
+]
+WebrtcIpHandlingPolicyOption = Annotated[
+    str | None,
+    typer.Option(
+        "--webrtc-ip-handling-policy",
+        help=(
+            "Chromium WebRTC IP policy: default, default_public_and_private_interfaces, "
+            "default_public_interface_only, or disable_non_proxied_udp."
+        ),
+    ),
+]
+
 
 @app.command("install")
 def install_command(
@@ -185,24 +286,9 @@ async def _doctor() -> dict[str, Any]:
 @app.command("fetch")
 def fetch_command(
     url: Annotated[str, typer.Argument(help="URL to fetch.")],
-    profile: Annotated[
-        str,
-        typer.Option(
-            "--profile",
-            "-p",
-            help="Bundled profile; --profile-mode decides how much of it pages see.",
-        ),
-    ] = "desktop-chrome",
-    channel: Annotated[
-        str | None,
-        typer.Option(
-            "--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."
-        ),
-    ] = "chrome",
-    user_data_dir: Annotated[
-        Path | None,
-        typer.Option("--user-data-dir", help="Persistent browser profile directory."),
-    ] = None,
+    profile: ProfileOption = "desktop-chrome",
+    channel: ChannelOption = "chrome",
+    user_data_dir: UserDataDirOption = None,
     screenshot: Annotated[
         Path | None,
         typer.Option("--screenshot", help="Write a full-page screenshot to this path."),
@@ -211,10 +297,7 @@ def fetch_command(
         Path | None,
         typer.Option("--output", "-o", help="Write fetched content to this file."),
     ] = None,
-    output_format: Annotated[
-        str,
-        typer.Option("--format", help="Output format: human or json."),
-    ] = "human",
+    output_format: OutputFormatOption = "human",
     max_chars: Annotated[
         int,
         typer.Option("--max-chars", min=0, help="Maximum JSON text characters."),
@@ -273,86 +356,16 @@ def fetch_command(
             help="Click the reject button of a cookie consent notice after load.",
         ),
     ] = True,
-    decline_cookies_timeout_ms: Annotated[
-        float,
-        typer.Option(
-            "--decline-cookies-timeout-ms",
-            min=0,
-            help="How long to wait for a cookie consent notice to appear.",
-        ),
-    ] = 2_000,
-    profile_mode: Annotated[
-        str,
-        typer.Option(
-            "--profile-mode",
-            help=(
-                "How much of --profile pages see: native (none, the default), locale "
-                "(locale, timezone, media, headers) or full (also viewport and user agent)."
-            ),
-        ),
-    ] = "native",
-    reduce_fingerprint_surface: Annotated[
-        bool,
-        typer.Option(
-            "--reduce-fingerprint-surface",
-            help="Disable Chromium WebGL and canvas readback with native browser flags.",
-        ),
-    ] = False,
-    mask_headless_user_agent: Annotated[
-        bool,
-        typer.Option(
-            "--mask-headless-user-agent",
-            help=(
-                "Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag. "
-                "Empties high-entropy client hints; prefer --virtual-display."
-            ),
-        ),
-    ] = False,
-    virtual_display: Annotated[
-        bool,
-        typer.Option(
-            "--virtual-display",
-            help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
-        ),
-    ] = False,
-    gpu: Annotated[
-        GpuBackend,
-        typer.Option(
-            "--gpu",
-            help=(
-                "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
-                "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
-            ),
-        ),
-    ] = GpuBackend.AUTO,
-    fake_media_devices: Annotated[
-        bool,
-        typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
-    ] = False,
-    launch_args: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--launch-arg",
-            help="Additional browser launch argument. Repeat for multiple args.",
-        ),
-    ] = None,
-    no_sandbox: Annotated[
-        bool,
-        typer.Option(
-            "--no-sandbox",
-            help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
-        ),
-    ] = False,
-    webrtc_ip_handling_policy: Annotated[
-        str | None,
-        typer.Option(
-            "--webrtc-ip-handling-policy",
-            help=(
-                "Chromium WebRTC IP policy: default, default_public_and_private_interfaces, "
-                "default_public_interface_only, or disable_non_proxied_udp."
-            ),
-        ),
-    ] = None,
+    decline_cookies_timeout_ms: DeclineCookiesTimeoutMsOption = 2_000,
+    profile_mode: ProfileModeOption = "native",
+    reduce_fingerprint_surface: ReduceFingerprintSurfaceOption = False,
+    mask_headless_user_agent: MaskHeadlessUserAgentOption = False,
+    virtual_display: VirtualDisplayOption = False,
+    gpu: GpuOption = GpuBackend.AUTO,
+    fake_media_devices: FakeMediaDevicesOption = False,
+    launch_args: LaunchArgsOption = None,
+    no_sandbox: NoSandboxOption = False,
+    webrtc_ip_handling_policy: WebrtcIpHandlingPolicyOption = None,
 ) -> None:
     """Fetch a URL in headless Chromium and report the result."""
     asyncio.run(
@@ -424,40 +437,41 @@ async def _fetch(
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
     selected_profile = get_profile(profile)
-    config = SessionConfig(
-        headless=True,
+    config = _session_config(
         channel=channel,
-        chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
+        no_sandbox=no_sandbox,
         user_data_dir=user_data_dir,
-        navigation_timeout_ms=timeout_ms,
+        timeout_ms=timeout_ms,
         resource_policy=resource_policy,
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-        profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
+        profile_mode=profile_mode,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
         gpu=gpu,
         fake_media_devices=fake_media_devices,
         launch_args=launch_args,
-        webrtc_ip_handling_policy=parse_cli_value(
-            webrtc_ip_handling_policy, parse_webrtc_ip_handling_policy
-        ),
+        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
     )
 
     try:
-        result = await _fetch_with_channel_fallback(
+        parsed_wait_until = parse_cli_value(wait_until, parse_wait_until)
+        result = await _with_channel_fallback(
+            lambda resolved: _run_fetch(
+                resolved,
+                url=url,
+                profile=selected_profile,
+                wait_until=parsed_wait_until,
+                ready_selector=ready_selector,
+                screenshot=screenshot or False,
+                timeout_ms=timeout_ms,
+                text_only=text_only,
+                include_links=links,
+                max_links=max_links,
+            ),
             config,
             parsed_output_format,
-            url=url,
-            profile=selected_profile,
-            wait_until=parse_cli_value(wait_until, parse_wait_until),
-            ready_selector=ready_selector,
-            screenshot=screenshot or False,
-            timeout_ms=timeout_ms,
-            text_only=text_only,
-            include_links=links,
-            max_links=max_links,
         )
     except (typer.Exit, typer.Abort, typer.BadParameter):
         raise
@@ -507,28 +521,10 @@ def search_command(
         int,
         typer.Option("--max-results", "-n", min=0, help="Maximum hits to return."),
     ] = 10,
-    profile: Annotated[
-        str,
-        typer.Option(
-            "--profile",
-            "-p",
-            help="Bundled profile; --profile-mode decides how much of it pages see.",
-        ),
-    ] = "desktop-chrome",
-    channel: Annotated[
-        str | None,
-        typer.Option(
-            "--channel", help="Browser: chrome, msedge, or chromium (Chrome for Testing)."
-        ),
-    ] = "chrome",
-    user_data_dir: Annotated[
-        Path | None,
-        typer.Option("--user-data-dir", help="Persistent browser profile directory."),
-    ] = None,
-    output_format: Annotated[
-        str,
-        typer.Option("--format", help="Output format: human or json."),
-    ] = "human",
+    profile: ProfileOption = "desktop-chrome",
+    channel: ChannelOption = "chrome",
+    user_data_dir: UserDataDirOption = None,
+    output_format: OutputFormatOption = "human",
     timeout_ms: Annotated[
         float,
         typer.Option("--timeout-ms", min=1, help="Navigation timeout."),
@@ -544,86 +540,16 @@ def search_command(
             help="Click the reject button of a cookie consent notice on the results page.",
         ),
     ] = True,
-    decline_cookies_timeout_ms: Annotated[
-        float,
-        typer.Option(
-            "--decline-cookies-timeout-ms",
-            min=0,
-            help="How long to wait for a cookie consent notice to appear.",
-        ),
-    ] = 2_000,
-    profile_mode: Annotated[
-        str,
-        typer.Option(
-            "--profile-mode",
-            help=(
-                "How much of --profile pages see: native (none, the default), locale "
-                "(locale, timezone, media, headers) or full (also viewport and user agent)."
-            ),
-        ),
-    ] = "native",
-    reduce_fingerprint_surface: Annotated[
-        bool,
-        typer.Option(
-            "--reduce-fingerprint-surface",
-            help="Disable Chromium WebGL and canvas readback with native browser flags.",
-        ),
-    ] = False,
-    mask_headless_user_agent: Annotated[
-        bool,
-        typer.Option(
-            "--mask-headless-user-agent",
-            help=(
-                "Rewrite HeadlessChrome to Chrome via Chromium's user-agent flag. "
-                "Empties high-entropy client hints; prefer --virtual-display."
-            ),
-        ),
-    ] = False,
-    virtual_display: Annotated[
-        bool,
-        typer.Option(
-            "--virtual-display",
-            help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
-        ),
-    ] = False,
-    gpu: Annotated[
-        GpuBackend,
-        typer.Option(
-            "--gpu",
-            help=(
-                "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
-                "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
-            ),
-        ),
-    ] = GpuBackend.AUTO,
-    fake_media_devices: Annotated[
-        bool,
-        typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
-    ] = False,
-    launch_args: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--launch-arg",
-            help="Additional browser launch argument. Repeat for multiple args.",
-        ),
-    ] = None,
-    no_sandbox: Annotated[
-        bool,
-        typer.Option(
-            "--no-sandbox",
-            help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
-        ),
-    ] = False,
-    webrtc_ip_handling_policy: Annotated[
-        str | None,
-        typer.Option(
-            "--webrtc-ip-handling-policy",
-            help=(
-                "Chromium WebRTC IP policy: default, default_public_and_private_interfaces, "
-                "default_public_interface_only, or disable_non_proxied_udp."
-            ),
-        ),
-    ] = None,
+    decline_cookies_timeout_ms: DeclineCookiesTimeoutMsOption = 2_000,
+    profile_mode: ProfileModeOption = "native",
+    reduce_fingerprint_surface: ReduceFingerprintSurfaceOption = False,
+    mask_headless_user_agent: MaskHeadlessUserAgentOption = False,
+    virtual_display: VirtualDisplayOption = False,
+    gpu: GpuOption = GpuBackend.AUTO,
+    fake_media_devices: FakeMediaDevicesOption = False,
+    launch_args: LaunchArgsOption = None,
+    no_sandbox: NoSandboxOption = False,
+    webrtc_ip_handling_policy: WebrtcIpHandlingPolicyOption = None,
 ) -> None:
     """Search the web through the stealth browser and list the organic hits.
 
@@ -682,25 +608,22 @@ async def _search(
     webrtc_ip_handling_policy: str | None,
 ) -> None:
     parsed_output_format = parse_output_format(output_format)
-    config = SessionConfig(
-        headless=True,
+    config = _session_config(
         channel=channel,
-        chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
+        no_sandbox=no_sandbox,
         user_data_dir=user_data_dir,
-        navigation_timeout_ms=timeout_ms,
+        timeout_ms=timeout_ms,
         resource_policy=resource_policy,
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
-        profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
+        profile_mode=profile_mode,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
         virtual_display=virtual_display,
         gpu=gpu,
         fake_media_devices=fake_media_devices,
         launch_args=launch_args,
-        webrtc_ip_handling_policy=parse_cli_value(
-            webrtc_ip_handling_policy, parse_webrtc_ip_handling_policy
-        ),
+        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
     )
 
     try:
@@ -737,6 +660,47 @@ async def _search(
         console.print(f"   {escape(hit.url)}")
         if hit.snippet:
             console.print(f"   {escape(hit.snippet)}")
+
+
+def _session_config(
+    *,
+    channel: str | None,
+    no_sandbox: bool,
+    user_data_dir: Path | None,
+    timeout_ms: float,
+    resource_policy: ResourcePolicy,
+    decline_cookies: bool,
+    decline_cookies_timeout_ms: float,
+    profile_mode: str,
+    reduce_fingerprint_surface: bool,
+    mask_headless_user_agent: bool,
+    virtual_display: bool,
+    gpu: GpuBackend,
+    fake_media_devices: bool,
+    launch_args: list[str],
+    webrtc_ip_handling_policy: str | None,
+) -> SessionConfig:
+    """Build the headless session config that ``fetch`` and ``search`` share."""
+    return SessionConfig(
+        headless=True,
+        channel=channel,
+        chromium_sandbox=sandbox_enabled(False if no_sandbox else None),
+        user_data_dir=user_data_dir,
+        navigation_timeout_ms=timeout_ms,
+        resource_policy=resource_policy,
+        decline_cookies=decline_cookies,
+        decline_cookies_timeout_ms=decline_cookies_timeout_ms,
+        profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
+        reduce_fingerprint_surface=reduce_fingerprint_surface,
+        mask_headless_user_agent=mask_headless_user_agent,
+        virtual_display=virtual_display,
+        gpu=gpu,
+        fake_media_devices=fake_media_devices,
+        launch_args=launch_args,
+        webrtc_ip_handling_policy=parse_cli_value(
+            webrtc_ip_handling_policy, parse_webrtc_ip_handling_policy
+        ),
+    )
 
 
 def _fail_launch(exc: Exception, output_format: OutputFormat) -> NoReturn:
@@ -778,14 +742,6 @@ async def _with_channel_fallback(
         if is_launch_failure(exc) or is_sandbox_failure(exc):
             _fail_launch(exc, output_format)
         raise
-
-
-async def _fetch_with_channel_fallback(
-    config: SessionConfig, output_format: OutputFormat, **kwargs: Any
-) -> FetchResult:
-    return await _with_channel_fallback(
-        lambda resolved: _run_fetch(resolved, **kwargs), config, output_format
-    )
 
 
 def _print_doctor_result(result: dict[str, Any]) -> None:

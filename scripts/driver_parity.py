@@ -37,7 +37,7 @@ from uuid import uuid4
 from webskrap import SessionConfig, WebSkrapClient, browser_session, cdp_dom
 from webskrap.browser_session import sandbox_enabled
 from webskrap.cdp import CDPPage, find_executable, launch
-from webskrap.challenges import _CHALLENGE_SCRIPT
+from webskrap.challenges import _DETECT_SCRIPT
 from webskrap.display import VirtualDisplay
 from webskrap.profiles import get_profile
 
@@ -46,9 +46,11 @@ REPORT = Path(".webskrap/reports/driver-parity.json")
 # A page passes when no known challenge is on it and its title is not a
 # challenge or block title.
 _GENERIC_CHECK = f"""(() => {{
-  const provider = ({_CHALLENGE_SCRIPT})();
+  const detected = ({_DETECT_SCRIPT})(
+    {{ status: null, ray: null, cloudflare: false, akamai: false }});
   const title = document.title.trim();
-  if (provider) return {{ state: 'challenge', detail: provider }};
+  if (detected)
+    return {{ state: 'challenge', detail: `${{detected.provider}} ${{detected.kind}}` }};
   if (/just a moment|attention required|access denied|blocked/i.test(title))
     return {{ state: 'challenge', detail: title.slice(0, 60) }};
   if (document.readyState !== 'complete' || !title) return {{ state: 'pending', detail: title }};

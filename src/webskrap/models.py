@@ -277,7 +277,7 @@ class SessionConfig(BaseModel):
     well as a benefit.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config = ConfigDict(extra="forbid")
 
     channel: str | None = None
     headless: bool = True
@@ -710,8 +710,6 @@ class FetchResult(BaseModel):
     wanted. ``cookies`` are the whole context's, not just this page's.
     :meth:`css` and :meth:`css_first` query ``text`` as HTML.
     """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     url: str
     final_url: str

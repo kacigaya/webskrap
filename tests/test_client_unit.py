@@ -1054,7 +1054,16 @@ async def test_fetch_many_stops_and_closes_on_page_failure(monkeypatch, failure)
     assert client._sessions == {}
 
 
-async def test_fetch_many_cleans_up_cancelled_launch(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda client: client.fetch_many(["https://example.test"]),
+        lambda client: client.fetch("https://example.test"),
+        lambda client: client.search("webskrap"),
+    ],
+    ids=["fetch_many", "fetch", "search"],
+)
+async def test_one_shot_calls_clean_up_cancelled_launch(monkeypatch, call) -> None:
     client = WebSkrapClient()
     started, release = asyncio.Event(), asyncio.Event()
     session = _session()
@@ -1065,7 +1074,7 @@ async def test_fetch_many_cleans_up_cancelled_launch(monkeypatch) -> None:
         return session
 
     monkeypatch.setattr(client, "_create_session", create)
-    task = asyncio.create_task(client.fetch_many(["https://example.test"]))
+    task = asyncio.create_task(call(client))
     await started.wait()
     task.cancel()
     release.set()
