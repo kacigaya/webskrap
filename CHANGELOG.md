@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-11-16
+
 ### Added
 
 - Browser sessions take the native stealth settings of `fetch`:
@@ -22,14 +24,6 @@ history, so they summarize each release rather than list every change.
   and media device count. It reads them from a blank https page served over
   CDP, with no network request, and warns about each gap with a native fix
   (`virtual_display`, `gpu`, `fake_media_devices`, or a host change).
-
-### Fixed
-
-- `WebSkrapClient.fetch()` and `search()` now release the browser when the
-  call is cancelled during launch, as `fetch_many()` already did. Before, the
-  browser stayed open until `WebSkrapClient.close()`.
-- `scripts/driver_parity.py` runs again. Since 3.2.0 it imported a detection
-  script that no longer exists, so it failed at import.
 
 ### Changed
 
@@ -50,6 +44,14 @@ history, so they summarize each release rather than list every change.
   `stealth_fetch`, and the CLI `fetch` and `search` commands share their
   option declarations. Tool schemas and `webskrap schema` output are
   unchanged.
+
+### Fixed
+
+- `WebSkrapClient.fetch()` and `search()` now release the browser when the
+  call is cancelled during launch, as `fetch_many()` already did. Before, the
+  browser stayed open until `WebSkrapClient.close()`.
+- `scripts/driver_parity.py` runs again. Since 3.2.0 it imported a detection
+  script that no longer exists, so it failed at import.
 
 ## [3.4.0] - 2026-11-15
 
@@ -1094,7 +1096,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/kacigaya/webskrap/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/kacigaya/webskrap/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/kacigaya/webskrap/compare/v3.2.4...v3.3.0
 [3.2.4]: https://github.com/kacigaya/webskrap/compare/v3.2.3...v3.2.4
