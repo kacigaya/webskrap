@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://kacigaya.github.io/webskrap/docs/user-guide/mcp/",
-  "version": "3.6.0",
+  "version": "3.6.1",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "webskrap",
-      "version": "3.6.0",
+      "version": "3.6.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
