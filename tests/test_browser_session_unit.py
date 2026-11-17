@@ -986,8 +986,20 @@ class _FakeDisplay:
         return args
 
 
+def _stub_macos_placement(monkeypatch: pytest.MonkeyPatch) -> None:
+    from webskrap.display import _macos
+
+    @contextlib.asynccontextmanager
+    async def connect(*_args: object, **_kwargs: object):
+        yield object()
+
+    monkeypatch.setattr(browser_session.cdp_session, "connect", connect)
+    monkeypatch.setattr(_macos, "place_browser", AsyncMock())
+
+
 def _stub_virtual_display(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, Path]]:
     stops: list[tuple[int, Path]] = []
+    _stub_macos_placement(monkeypatch)
 
     async def fake_start(_width: int, _height: int, **_kwargs: object) -> _FakeDisplay:
         return _FakeDisplay()
@@ -1027,6 +1039,7 @@ def test_open_places_the_window_on_a_helper_display_and_detaches_it(
         return _HelperDisplay()
 
     monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
+    _stub_macos_placement(monkeypatch)
 
     asyncio.run(browser_session.open_session("vd", virtual_display=True))
 

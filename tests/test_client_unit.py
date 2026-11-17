@@ -142,7 +142,10 @@ def _launch_client(
     async def no_probe(*_args: object) -> str:
         raise AssertionError("the UA probe must not run here")
 
+    from webskrap.display import _macos
+
     monkeypatch.setattr("webskrap.client.VirtualDisplay.start", fake_start)
+    monkeypatch.setattr(_macos, "place_browser", AsyncMock())
     monkeypatch.setattr(client_module, "launch", launcher)
     monkeypatch.setattr(client_module, "find_executable", lambda _channel: EXECUTABLE)
     client = WebSkrapClient()
