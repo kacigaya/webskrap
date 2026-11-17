@@ -78,7 +78,8 @@ GpuOption = Annotated[
     typer.Option(
         "--gpu",
         help=(
-            "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU) or "
+            "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU; "
+            "mesa under --virtual-display without a GPU when lavapipe is installed) or "
             "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
         ),
     ),

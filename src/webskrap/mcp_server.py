@@ -364,8 +364,9 @@ async def stealth_fetch(
             instead of headless (Linux with Xvfb). No HeadlessChrome token
             and full client hints, without any override.
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
-            without a GPU, a known headless tell); "mesa" uses Mesa's
-            lavapipe (Linux with mesa-vulkan-drivers).
+            without a GPU, a known headless tell), and "mesa" under
+            virtual_display without a GPU when lavapipe is installed; "mesa"
+            uses Mesa's lavapipe (Linux with mesa-vulkan-drivers).
         fake_media_devices: Provide Chromium's synthetic camera and microphone.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
@@ -486,8 +487,9 @@ async def search(
             instead of headless (Linux with Xvfb). No HeadlessChrome token
             and full client hints, without any override.
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
-            without a GPU, a known headless tell); "mesa" uses Mesa's
-            lavapipe (Linux with mesa-vulkan-drivers).
+            without a GPU, a known headless tell), and "mesa" under
+            virtual_display without a GPU when lavapipe is installed; "mesa"
+            uses Mesa's lavapipe (Linux with mesa-vulkan-drivers).
         fake_media_devices: Provide Chromium's synthetic camera and microphone.
         webrtc_ip_handling_policy: Chromium WebRTC ICE policy, e.g.
             disable_non_proxied_udp.
@@ -624,7 +626,9 @@ async def browser_open(
             instead of headless (Linux with Xvfb). No HeadlessChrome token
             and full client hints. The display lives as long as the session.
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
-            without a GPU); "mesa" uses Mesa's lavapipe (Linux).
+            without a GPU), and "mesa" under virtual_display without a GPU
+            when lavapipe is installed; "mesa" uses Mesa's lavapipe (Linux).
+            The result reports the backend the browser launched with.
         profile_mode: native (default; the browser's own identity) or locale
             (the profile's timezone and languages, set at launch; Linux).
         profile: Bundled profile for locale mode; desktop-chrome when null.

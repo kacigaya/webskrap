@@ -35,7 +35,7 @@ from typing import Any, BinaryIO, TypedDict, TypeVar
 
 from webskrap import cdp_dom, cdp_session, display, text_search
 from webskrap.cdp import CDPPage, base_args, find_executable
-from webskrap.client import require_lavapipe
+from webskrap.client import effective_gpu, require_lavapipe
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import (
     BrowserProfile,
@@ -844,7 +844,8 @@ async def open_session(
             if existing is not None:
                 # A crashed browser leaves its display running.
                 _stop_display(existing)
-            if gpu is GpuBackend.MESA:
+            launch_gpu = effective_gpu(gpu, virtual_display=config.uses_virtual_display())
+            if launch_gpu is GpuBackend.MESA:
                 require_lavapipe()
             executable = await chromium_executable()
             sandboxed = sandbox_enabled(chromium_sandbox)
@@ -862,7 +863,7 @@ async def open_session(
                     webrtc_ip_handling_policy=webrtc_ip_handling_policy,
                     fake_media_devices=fake_media_devices,
                     virtual_display=virtual_display,
-                    gpu=gpu,
+                    gpu=launch_gpu,
                     profile_mode=profile_mode,
                     profile=profile,
                     display_env=virtual.env if virtual is not None else None,
@@ -902,6 +903,7 @@ async def open_session(
                     webrtc_ip_handling_policy=webrtc_ip_handling_policy,
                 ).effective_webrtc_ip_handling_policy(),
                 **launch,
+                "gpu": str(launch_gpu),
                 **display_state,
                 "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
             }

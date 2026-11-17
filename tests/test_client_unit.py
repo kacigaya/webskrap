@@ -17,13 +17,15 @@ from webskrap.client import (
     WebSkrapError,
     WebSkrapSession,
     browser_doctor,
+    effective_gpu,
+    hardware_gpu_available,
     lavapipe_available,
     with_channel_fallback,
 )
 from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
 from webskrap.errors import ErrorCode
 from webskrap.human import bezier_path
-from webskrap.models import ProxyConfig, SearchEngine, SessionConfig
+from webskrap.models import GpuBackend, ProxyConfig, SearchEngine, SessionConfig
 from webskrap.profiles import get_profile
 
 SEARCH_FIXTURES = Path(__file__).parent / "fixtures" / "search"
@@ -816,6 +818,74 @@ def test_lavapipe_is_never_available_off_linux(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("sys.platform", "darwin")
 
     assert not lavapipe_available()
+
+
+def _render_node(drm: Path, name: str, vendor: str) -> None:
+    device = drm / name / "device"
+    device.mkdir(parents=True)
+    (device / "vendor").write_text(f"{vendor}\n")
+
+
+def test_hardware_gpu_is_found_by_its_render_node_vendor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(client_module, "DRM_CLASS_DIR", tmp_path)
+    monkeypatch.setattr(client_module, "NVIDIA_DEVICE", tmp_path / "nvidia0")
+    _render_node(tmp_path, "renderD128", "0x1af4")
+
+    assert not hardware_gpu_available()
+    _render_node(tmp_path, "renderD129", "0x1002")
+    assert hardware_gpu_available()
+
+
+def test_nvidia_device_node_counts_as_hardware_gpu(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(client_module, "DRM_CLASS_DIR", tmp_path)
+    monkeypatch.setattr(client_module, "NVIDIA_DEVICE", tmp_path / "nvidia0")
+    (tmp_path / "nvidia0").touch()
+
+    assert hardware_gpu_available()
+
+
+@pytest.mark.parametrize(
+    ("gpu", "virtual_display", "lavapipe", "hardware", "expected"),
+    [
+        (GpuBackend.AUTO, True, True, False, GpuBackend.MESA),
+        (GpuBackend.AUTO, True, True, True, GpuBackend.AUTO),
+        (GpuBackend.AUTO, True, False, False, GpuBackend.AUTO),
+        (GpuBackend.AUTO, False, True, False, GpuBackend.AUTO),
+        (GpuBackend.MESA, False, True, True, GpuBackend.MESA),
+    ],
+)
+def test_virtual_display_renders_webgl_through_mesa_without_a_gpu(
+    monkeypatch: pytest.MonkeyPatch,
+    gpu: GpuBackend,
+    virtual_display: bool,
+    lavapipe: bool,
+    hardware: bool,
+    expected: GpuBackend,
+) -> None:
+    monkeypatch.setattr(client_module, "lavapipe_available", lambda: lavapipe)
+    monkeypatch.setattr(client_module, "hardware_gpu_available", lambda: hardware)
+
+    assert effective_gpu(gpu, virtual_display=virtual_display) is expected
+
+
+async def test_auto_gpu_launches_mesa_under_a_gpuless_virtual_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = _Launcher()
+    client, _displays, _sizes = _launch_client(monkeypatch, launcher)
+    monkeypatch.setattr(client_module, "lavapipe_available", lambda: True)
+    monkeypatch.setattr(client_module, "hardware_gpu_available", lambda: False)
+    config = SessionConfig(virtual_display=True)
+
+    session = await client._create_session("gpu", config, get_profile("desktop-chrome"))
+
+    assert "--use-angle=vulkan" in launcher.options["args"]
+    assert session.config.gpu is GpuBackend.AUTO
+    await session.close()
 
 
 def test_bezier_path_curves_and_lands_on_target() -> None:

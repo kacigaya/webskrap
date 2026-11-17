@@ -1051,7 +1051,8 @@ class WebSkrapClient:
         profile: BrowserProfile,
     ) -> WebSkrapSession:
         try:
-            args = config.browser_args(profile)
+            gpu = effective_gpu(config.gpu, virtual_display=config.uses_virtual_display())
+            args = config.model_copy(update={"gpu": gpu}).browser_args(profile)
             env = config.browser_env(profile)
         except ValueError as exc:
             raise WebSkrapError(str(exc), code=ErrorCode.USAGE) from exc
@@ -1164,6 +1165,39 @@ def lavapipe_available() -> bool:
     return any(
         any(directory.glob("lvp_icd*.json")) for directory in VULKAN_ICD_DIRS if directory.is_dir()
     )
+
+
+DRM_CLASS_DIR = Path("/sys/class/drm")
+NVIDIA_DEVICE = Path("/dev/nvidia0")
+HARDWARE_GPU_VENDORS = frozenset({"0x8086", "0x1002", "0x10de"})
+
+
+def hardware_gpu_available() -> bool:
+    """True when an Intel, AMD or NVIDIA GPU is present on this Linux host."""
+    if NVIDIA_DEVICE.exists():
+        return True
+    for node in DRM_CLASS_DIR.glob("renderD*"):
+        with suppress(OSError):
+            if (node / "device" / "vendor").read_text().strip() in HARDWARE_GPU_VENDORS:
+                return True
+    return False
+
+
+def effective_gpu(gpu: GpuBackend, *, virtual_display: bool) -> GpuBackend:
+    """Return the GL backend a launch uses for the requested ``gpu``.
+
+    Headed Chrome on a GPU-less host has no WebGL, so ``auto`` under a
+    virtual display becomes ``mesa`` when lavapipe is installed and no
+    hardware GPU is found.
+    """
+    if (
+        gpu is GpuBackend.AUTO
+        and virtual_display
+        and lavapipe_available()
+        and not hardware_gpu_available()
+    ):
+        return GpuBackend.MESA
+    return gpu
 
 
 def require_lavapipe() -> None:

@@ -190,7 +190,9 @@ installed), so no `HeadlessChrome` token or empty client hints reach the site.
 `--mask-headless-user-agent` rewrites the token under headless mode instead,
 but Chromium then empties the high-entropy client hints. `--gpu mesa` renders
 WebGL with Mesa's lavapipe instead of SwiftShader (Linux,
-`mesa-vulkan-drivers`); see the Stealth guide's WebGL renderer section.
+`mesa-vulkan-drivers`). With `--virtual-display` on a host without a GPU, the
+default `--gpu auto` already uses Mesa when lavapipe is installed; see the
+Stealth guide's WebGL renderer section.
 
 For fingerprint-statistics or WebRTC leak-test pages, apply profile
 locale/timezone/media metadata and block non-proxied WebRTC UDP candidates
