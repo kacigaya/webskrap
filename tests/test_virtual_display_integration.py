@@ -41,6 +41,10 @@ _PROBE = """async () => {
         gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
         glPixel = Array.from(pixel);
     }
+    const webglVendor = info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) :
+        gl ? gl.getParameter(gl.VENDOR) : null;
+    const webglRenderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) :
+        gl ? gl.getParameter(gl.RENDERER) : null;
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     context.fillStyle = 'rgb(255, 0, 0)';
@@ -86,10 +90,9 @@ _PROBE = """async () => {
         finePointer: matchMedia('(pointer: fine)').matches,
         visibility: document.visibilityState,
         webglUnmasked: Boolean(info),
-        webglVendor: info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) :
-            gl ? gl.getParameter(gl.VENDOR) : null,
-        webglRenderer: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) :
-            gl ? gl.getParameter(gl.RENDERER) : null,
+        webglVendor,
+        webglRenderer,
+        glContextLostAfterWebgpu: gl ? gl.isContextLost() : null,
         glPixel,
         canvasPixel: Array.from(context.getImageData(1, 1, 1, 1).data),
         webgpu: gpu,
