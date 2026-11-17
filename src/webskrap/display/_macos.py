@@ -351,18 +351,31 @@ def _layout_lock() -> Iterator[None]:
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-def _arrange(runtime: _Runtime, display_id: int) -> CGRect:
-    """Extend the desktop to the right in logical points, without changing other displays.
+def _overlaps(a: CGRect, b: CGRect) -> bool:
+    return (
+        a.origin.x < b.origin.x + b.size.width
+        and b.origin.x < a.origin.x + a.size.width
+        and a.origin.y < b.origin.y + b.size.height
+        and b.origin.y < a.origin.y + a.size.height
+    )
 
-    Returns only after WindowServer reports the move to every app. This
-    process sees its own change at once, but a browser launched before that
-    report keeps the old layout and cannot place its window on the display.
+
+def _arrange(runtime: _Runtime, display_id: int) -> CGRect:
+    """Keep macOS's own placement, or extend the desktop to the right if it overlaps.
+
+    Every arrangement change makes macOS redraw all displays, which blanks
+    the screen, so a display that macOS placed beside the others stays put.
+    A mirrored or overlapping one moves right of the desktop in logical
+    points, without changing other displays. That returns only after
+    WindowServer reports the move to every app: this process sees its own
+    change at once, but a browser launched before that report keeps the old
+    layout and cannot place its window on the display.
     """
     others = [runtime.cg.CGDisplayBounds(i) for i in runtime.displays() if i != display_id]
-    right = round(max((b.origin.x + b.size.width for b in others), default=0))
     bounds = runtime.cg.CGDisplayBounds(display_id)
-    if (round(bounds.origin.x), round(bounds.origin.y)) == (right, 0):
+    if not any(_overlaps(bounds, other) for other in others):
         return bounds
+    right = round(max(b.origin.x + b.size.width for b in others))
     moved: list[bool] = []
 
     def reconfigured(changed: int, flags: int, _info: int | None) -> None:

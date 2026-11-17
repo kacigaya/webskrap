@@ -22,6 +22,10 @@ history, so they summarize each release rather than list every change.
   to other apps before Chrome launches, and placement retries really move the
   window. Chrome no longer sometimes stays on the physical screen. The backend
   now fails fast when "Displays have separate Spaces" is on.
+- macOS blanks the screen less often. A new virtual display keeps the place
+  macOS gives it unless it overlaps another display. Back-to-back temporary
+  sessions of the same size reuse one display, which is removed after 15 idle
+  seconds or by `webskrap.display.release_idle()`.
 
 ## [3.6.1] - 2026-11-17
 

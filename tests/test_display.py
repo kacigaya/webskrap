@@ -182,3 +182,40 @@ async def test_display_requires_the_cookie_and_cleans_up() -> None:
 
     assert not auth.parent.exists()
     await virtual.stop()  # idempotent
+
+
+async def test_macos_reuses_a_stopped_display_until_it_idles(monkeypatch, tmp_path) -> None:
+    # Each macOS display change blanks the desktop, so sessions share one.
+    started, stopped = [], []
+
+    class Helper:
+        def poll(self) -> None:
+            return None
+
+    def start(width: int, height: int, *, detached: bool):
+        started.append((width, height, detached))
+        return Helper(), tmp_path / str(len(started)), (-width, 0)
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(display._helper, "start", start)
+    monkeypatch.setattr(display._helper, "stop", lambda _p, directory: stopped.append(directory))
+    monkeypatch.setattr(display, "IDLE_TIMEOUT_S", 0.05)
+
+    first = await display.VirtualDisplay.start(1280, 720)
+    await first.stop()
+    assert await display.VirtualDisplay.start(1280, 720) is first
+    other = await display.VirtualDisplay.start(1366, 768)
+    persistent = await display.VirtualDisplay.start(1280, 720, detached=True)
+    await persistent.stop()
+    assert stopped == [persistent.directory]
+
+    await first.stop()
+    await other.stop()
+    await asyncio.sleep(0.3)
+    assert sorted(stopped) == sorted([persistent.directory, first.directory, other.directory])
+
+    again = await display.VirtualDisplay.start(1280, 720)
+    await again.stop()
+    display.release_idle()
+    assert again.directory in stopped
+    assert len(started) == 4

@@ -124,13 +124,13 @@ def test_apply_settings_failure_releases_mode_and_settings(runtime):
     runtime.send.assert_any_call(9, "release")
 
 
-def test_arrangement_uses_retina_logical_bounds_and_does_not_move_other_displays(runtime):
+def test_arrangement_moves_an_overlapping_display_right_in_logical_points(runtime):
     runtime.cg.CGBeginDisplayConfiguration.return_value = 0
     runtime.cg.CGConfigureDisplayMirrorOfDisplay.return_value = 0
     runtime.cg.CGConfigureDisplayOrigin.return_value = 0
     runtime.displays.return_value = [1, 42]
     physical = _macos.CGRect(_macos.CGPoint(0, 0), _macos.CGSize(1792, 1120))
-    virtual = _macos.CGRect(_macos.CGPoint(-1280, 0), _macos.CGSize(1280, 720))
+    virtual = _macos.CGRect(_macos.CGPoint(0, 0), _macos.CGSize(1280, 720))
     moved = _macos.CGRect(_macos.CGPoint(1792, 0), _macos.CGSize(1280, 720))
     state = {"virtual": virtual}
 
@@ -160,11 +160,16 @@ def test_arrangement_waits_for_the_move_to_reach_other_apps(runtime, monkeypatch
     runtime.cg.CGBeginDisplayConfiguration.return_value = 0
     runtime.cg.CGConfigureDisplayMirrorOfDisplay.return_value = 0
     runtime.cg.CGConfigureDisplayOrigin.return_value = 0
-    runtime.cg.CGCompleteDisplayConfiguration.return_value = 0
-    runtime.displays.return_value = []
-    bounds = iter([(1920, 0), (0, 0)])
-    runtime.cg.CGDisplayBounds.side_effect = lambda _: _macos.CGRect(
-        _macos.CGPoint(*next(bounds, (0, 0))), _macos.CGSize(1280, 720)
+    runtime.displays.return_value = [1, 42]
+    state = {"x": 0}
+
+    def complete(*_):
+        state["x"] = 1280  # applied here, but never reported to other apps
+        return 0
+
+    runtime.cg.CGCompleteDisplayConfiguration.side_effect = complete
+    runtime.cg.CGDisplayBounds.side_effect = lambda i: _macos.CGRect(
+        _macos.CGPoint(0 if i == 1 else state["x"], 0), _macos.CGSize(1280, 720)
     )
     ticks = iter([0, 0, 0, 11])
     monkeypatch.setattr(_macos, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
@@ -173,10 +178,10 @@ def test_arrangement_waits_for_the_move_to_reach_other_apps(runtime, monkeypatch
     runtime.cg.CGDisplayRemoveReconfigurationCallback.assert_called_once()
 
 
-def test_arrangement_leaves_a_display_already_in_place(runtime):
+def test_arrangement_keeps_the_placement_macos_chose(runtime):
     runtime.displays.return_value = [1, 42]
     physical = _macos.CGRect(_macos.CGPoint(0, 0), _macos.CGSize(1792, 1120))
-    virtual = _macos.CGRect(_macos.CGPoint(1792, 0), _macos.CGSize(1280, 720))
+    virtual = _macos.CGRect(_macos.CGPoint(-1280, 0), _macos.CGSize(1280, 720))
     runtime.cg.CGDisplayBounds.side_effect = lambda i: physical if i == 1 else virtual
     assert _ARRANGE(runtime, 42) is virtual
     runtime.cg.CGBeginDisplayConfiguration.assert_not_called()
@@ -184,7 +189,7 @@ def test_arrangement_leaves_a_display_already_in_place(runtime):
 
 def test_arrangement_cancels_a_failed_configuration(runtime):
     runtime.cg.CGBeginDisplayConfiguration.return_value = 0
-    runtime.displays.return_value = []
+    runtime.displays.return_value = [1, 42]
     runtime.cg.CGConfigureDisplayMirrorOfDisplay.return_value = 1006
     with pytest.raises(WebSkrapError, match="could not arrange"):
         _ARRANGE(runtime, 42)
@@ -254,7 +259,7 @@ async def test_cdp_placement_rejects_a_browser_left_on_the_physical_screen(
 
 def test_arrangement_does_not_cancel_an_already_completed_configuration(runtime):
     runtime.cg.CGBeginDisplayConfiguration.return_value = 0
-    runtime.displays.return_value = []
+    runtime.displays.return_value = [1, 42]
     runtime.cg.CGConfigureDisplayMirrorOfDisplay.return_value = 0
     runtime.cg.CGConfigureDisplayOrigin.return_value = 0
     runtime.cg.CGCompleteDisplayConfiguration.return_value = 1006

@@ -19,6 +19,10 @@ Each platform has its own backend behind :class:`VirtualDisplay`:
 On macOS and Windows a helper process (:mod:`webskrap.display._helper`) holds
 the display, so it outlives the command that opened a persistent session,
 and the browser window is placed on it with ``--window-position``.
+
+Adding or removing a macOS display makes the whole desktop blank for a
+moment, so a stopped temporary macOS display waits :data:`IDLE_TIMEOUT_S`
+for the next session of the same size before it is released.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import asyncio
 import shutil
 import subprocess  # nosec B404  # noqa: S404 - only types and a terminate call
 import sys
+import threading
 from pathlib import Path
 
 from webskrap.display import _helper, _xvfb
@@ -38,13 +43,20 @@ from webskrap.display._xvfb import (
 )
 from webskrap.errors import ErrorCode, WebSkrapError
 
+#: Seconds a stopped temporary macOS display waits for reuse.
+IDLE_TIMEOUT_S = 15.0
+_idle: dict[tuple[int, int], list[tuple[VirtualDisplay, threading.Timer]]] = {}
+_idle_lock = threading.Lock()
+
 __all__ = [
     "DIRECTORY_PREFIX",
+    "IDLE_TIMEOUT_S",
     "START_TIMEOUT_S",
     "STOP_TIMEOUT_S",
     "VirtualDisplay",
     "available",
     "place_window",
+    "release_idle",
     "stop_detached",
     "write_cookie_file",
 ]
@@ -73,6 +85,7 @@ class VirtualDisplay:
         self.display = display
         self._directory = directory
         self.origin = origin
+        self._reuse_size: tuple[int, int] | None = None
 
     @property
     def pid(self) -> int:
@@ -125,9 +138,15 @@ class VirtualDisplay:
                 raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
             process, display, directory = _xvfb.start(width, height)
             return cls(process, display, directory)
+        reusable = sys.platform == "darwin" and not detached
+        if reusable and (idle := _take_idle(width, height)) is not None:
+            return idle
         if sys.platform in ("darwin", "win32"):
             process, directory, origin = _helper.start(width, height, detached=detached)
-            return cls(process, f"{sys.platform}:{origin[0]},{origin[1]}", directory, origin)
+            started = cls(process, f"{sys.platform}:{origin[0]},{origin[1]}", directory, origin)
+            if reusable:
+                started._reuse_size = (width, height)
+            return started
         msg = "virtual_display needs Linux, macOS or Windows; use headless or headed mode here"
         raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
 
@@ -142,10 +161,52 @@ class VirtualDisplay:
         await asyncio.to_thread(self._stop)
 
     def _stop(self) -> None:
+        if self._reuse_size is not None and self._process.poll() is None:
+            with _idle_lock:
+                idle = _idle.setdefault(self._reuse_size, [])
+                if all(display is not self for display, _ in idle):
+                    timer = threading.Timer(IDLE_TIMEOUT_S, self._release_if_idle)
+                    timer.daemon = True
+                    idle.append((self, timer))
+                    timer.start()
+            return
+        self._release()
+
+    def _release_if_idle(self) -> None:
+        with _idle_lock:
+            idle = _idle.get(self._reuse_size or (0, 0), [])
+            entry = next((e for e in idle if e[0] is self), None)
+            if entry is None:
+                return
+            idle.remove(entry)
+        self._release()
+
+    def _release(self) -> None:
         if self.display.startswith(":"):
             _xvfb.stop(self._process, self._directory)
         else:
             _helper.stop(self._process, self._directory)
+
+
+def _take_idle(width: int, height: int) -> VirtualDisplay | None:
+    with _idle_lock:
+        idle = _idle.get((width, height), [])
+        while idle:
+            display, timer = idle.pop()
+            timer.cancel()
+            if display._process.poll() is None:  # noqa: SLF001 - same module
+                return display
+    return None
+
+
+def release_idle() -> None:
+    """Release every display waiting for reuse now, instead of after the timeout."""
+    with _idle_lock:
+        entries = [entry for idle in _idle.values() for entry in idle]
+        _idle.clear()
+    for display, timer in entries:
+        timer.cancel()
+        display._release()  # noqa: SLF001 - same module
 
 
 def place_window(args: list[str], origin: tuple[int, int], width: int, height: int) -> list[str]:

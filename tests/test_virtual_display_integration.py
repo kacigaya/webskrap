@@ -162,6 +162,7 @@ def backend() -> Iterator[None]:
         pytest.skip("no virtual display backend on this host")
     before = _native_displays()
     yield
+    display.release_idle()
     deadline = time.monotonic() + 10
     while _native_displays() != before:
         assert time.monotonic() < deadline, "native virtual display state was not restored"
@@ -233,6 +234,7 @@ async def test_session_runs_headed_with_webgl_at_the_requested_size(
 
     _assert_headed_and_rendering(seen, 1280, 720)
     _assert_assigned(seen, virtual.origin, 1280, 720)
+    display.release_idle()  # macOS keeps a stopped display briefly for reuse
     assert _gone(directory)
     assert virtual._process.poll() is not None
 
@@ -263,6 +265,7 @@ async def test_concurrent_sessions_get_separate_displays(
     for result, virtual, (width, height) in zip(seen, virtuals, sizes, strict=True):
         _assert_headed_and_rendering(result, width, height)
         _assert_assigned(result, virtual.origin, width, height)
+    display.release_idle()
     assert all(_gone(directory) for directory in directories)
     assert all(v._process.poll() is not None for v in virtuals)
 

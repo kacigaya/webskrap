@@ -58,12 +58,19 @@ Creation is checked at runtime. No PyObjC package or compiled helper is required
 A Python helper keeps the native object alive for persistent browser sessions.
 The OS owns display removal when that helper exits.
 
-Display creation alone does not assign Chrome to it. The backend explicitly
-extends the new display to the right of the desktop using logical CoreGraphics
-bounds, not Retina pixel dimensions, for the login session. It waits until
-WindowServer reports the move, because a browser launched earlier keeps the old
-layout. A per-user lock serializes these changes. Each display's random serial
-leaves a stale entry in `com.apple.spaces`.
+Adding, moving or removing a display makes macOS redraw every display, and
+the screen goes black for a moment. The backend keeps these changes few. It
+keeps the place macOS gives a new display, usually left of the desktop. Only a
+mirrored or overlapping display moves right of the desktop, in logical
+CoreGraphics points, for the login session. That move waits until WindowServer
+reports it, because a browser launched earlier keeps the old layout. A per-user
+lock serializes these changes. A stopped temporary session's display then
+waits 15 seconds for the next session of the same size before macOS removes
+it, so back-to-back sessions share one display. `webskrap.display.release_idle()`
+removes waiting displays at once. Persistent sessions always get their own.
+Each display's random serial leaves a stale entry in `com.apple.spaces`.
+
+Display creation alone does not assign Chrome to it.
 After launch, both temporary and persistent sessions move Chrome's native window
 through CDP and read its real screen dimensions and window position. A session
 fails and cleans up if Chrome remains on the physical screen. No screen values
