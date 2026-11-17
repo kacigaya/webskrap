@@ -85,8 +85,11 @@ _PROBE = """async () => {
         hover: matchMedia('(hover: hover)').matches,
         finePointer: matchMedia('(pointer: fine)').matches,
         visibility: document.visibilityState,
-        webglVendor: info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) : null,
-        webglRenderer: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null,
+        webglUnmasked: Boolean(info),
+        webglVendor: info ? gl.getParameter(info.UNMASKED_VENDOR_WEBGL) :
+            gl ? gl.getParameter(gl.VENDOR) : null,
+        webglRenderer: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) :
+            gl ? gl.getParameter(gl.RENDERER) : null,
         glPixel,
         canvasPixel: Array.from(context.getImageData(1, 1, 1, 1).data),
         webgpu: gpu,
