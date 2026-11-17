@@ -16,6 +16,10 @@
   <a href="https://github.com/kacigaya/webskrap/blob/main/LICENSE"><img alt="Apache 2.0 License" src="https://shieldcn.dev/github/license/kacigaya/webskrap.svg?variant=secondary"></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/kacigaya/webskrap/blob/main/assets/demo.mp4"><img src="https://raw.githubusercontent.com/kacigaya/webskrap/main/assets/demo-poster.jpg" alt="Play the 24-second WebSkrap demo video: real Chrome passes public bot tests, and an AI agent drives it through the WebSkrap MCP server." width="760"></a>
+</p>
+
 ## Install
 
 ```bash
