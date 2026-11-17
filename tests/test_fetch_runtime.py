@@ -295,11 +295,11 @@ async def test_navigation_timeout_can_vary_without_relaunch(runtime) -> None:
     await runtime.close()
 
 
-async def test_cookie_decline_can_vary_without_relaunch(runtime) -> None:
+async def test_per_call_options_can_vary_without_relaunch(runtime) -> None:
     async with runtime.use("crawl", SessionConfig(), get_profile(None)) as first:
         pass
     async with runtime.use(
-        "crawl", SessionConfig(decline_cookies=True), get_profile(None)
+        "crawl", SessionConfig(decline_cookies=True, solve_cloudflare=True), get_profile(None)
     ) as second:
         assert second is first
     await runtime.close()

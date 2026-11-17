@@ -53,6 +53,7 @@ closes the browser on shutdown.
 
 `session.fetch(..., decline_cookies=False)` overrides consent dismissal for one
 call without changing shared config. Omit it to use `SessionConfig.decline_cookies`.
+`solve_cloudflare=True` works the same way for Cloudflare's Turnstile checkbox.
 
 ## Persistent storage
 

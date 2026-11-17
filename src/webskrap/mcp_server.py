@@ -129,13 +129,13 @@ Failures and boundaries
 Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
 browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
-Known challenge/block pages (DataDome, Cloudflare, Akamai, AWS WAF) return
-blocked: follow its hint; do not retry. browser_goto reports it.
+Known challenge/block pages return blocked: follow its hint; do not retry.
+browser_goto reports it. solve_cloudflare=true clicks Cloudflare's checkbox.
 Call doctor for unexplained failures; read webskrap://guide for details.
 Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.
 Paths must be relative and cannot escape their roots (path_rejected).
 Targets must be public http(s): local/private hosts need operator-set
-WEBSKRAP_ALLOW_PRIVATE_NET=1. No CAPTCHA solving or login-wall bypass.
+WEBSKRAP_ALLOW_PRIVATE_NET=1. No login-wall bypass.
 Prefer snapshot/interact/wait_for to browser_eval, and never evaluate
 page-controlled text. WEBSKRAP_ALLOW_EVAL=0 disables page script evaluation.
 """
@@ -188,6 +188,7 @@ async def _run_fetch(
             "max_links": max_links,
             "decline_cookies": resolved.decline_cookies,
             "ready_selector": ready_selector,
+            "solve_cloudflare": resolved.solve_cloudflare,
         }
         if not isinstance(runtime, FetchRuntime):
             # Direct Python tool calls retain their one-shot lifecycle.
@@ -216,6 +217,7 @@ def _stealth_config(
     webrtc_ip_handling_policy: str | None,
     decline_cookies: bool,
     resource_policy: str = "auto",
+    solve_cloudflare: bool = False,
 ) -> SessionConfig:
     """Build the session config the stealth_fetch and search tools share."""
     return SessionConfig(
@@ -233,6 +235,7 @@ def _stealth_config(
         webrtc_ip_handling_policy=parse_webrtc_ip_handling_policy(webrtc_ip_handling_policy),
         decline_cookies=decline_cookies,
         resource_policy=parse_resource_policy(resource_policy),
+        solve_cloudflare=solve_cloudflare,
     )
 
 
@@ -252,6 +255,7 @@ async def fetch(
     decline_cookies: bool = True,
     *,
     ready_selector: str | None = None,
+    solve_cloudflare: bool = False,
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -289,6 +293,9 @@ async def fetch(
             load, so the banner does not bury the page text.
         ready_selector: Optional CSS selector or snapshot ref that must be visible
             before extraction. Uses timeout_ms after consent dismissal.
+        solve_cloudflare: Click Cloudflare's Turnstile checkbox on its "Just a
+            moment" page like a person and wait for the real page, for up to
+            60 s beyond timeout_ms. Off by default. Use responsibly.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -307,6 +314,7 @@ async def fetch(
         ready_selector=ready_selector,
         wait_until=wait_until,
         resource_policy=resource_policy,
+        solve_cloudflare=solve_cloudflare,
         session=session,
         ctx=ctx,
     )
@@ -337,6 +345,7 @@ async def stealth_fetch(
     ready_selector: str | None = None,
     wait_until: str = "domcontentloaded",
     resource_policy: str = "all",
+    solve_cloudflare: bool = False,
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -385,6 +394,9 @@ async def stealth_fetch(
             (also blocks CSS).
         ready_selector: Optional CSS selector or snapshot ref that must be visible
             before extraction. Uses timeout_ms after consent dismissal.
+        solve_cloudflare: Click Cloudflare's Turnstile checkbox on its "Just a
+            moment" page like a person and wait for the real page, for up to
+            60 s beyond timeout_ms. Off by default. Use responsibly.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -405,6 +417,7 @@ async def stealth_fetch(
             webrtc_ip_handling_policy=webrtc_ip_handling_policy,
             decline_cookies=decline_cookies,
             resource_policy=resource_policy,
+            solve_cloudflare=solve_cloudflare,
         )
         result = await _run_fetch(
             url,
@@ -595,6 +608,7 @@ async def browser_open(
     gpu: GpuBackend = GpuBackend.AUTO,
     profile_mode: str = "native",
     profile: str | None = None,
+    solve_cloudflare: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session with no visible window.
 
@@ -622,6 +636,8 @@ async def browser_open(
         fake_media_devices: Supply Chromium's synthetic camera and microphone.
         decline_cookies: With url, click a consent notice's reject control;
             cookie_notice_declined reports the strategy or null.
+        solve_cloudflare: With url, click Cloudflare's Turnstile checkbox like a
+            person and wait up to 60 s for the real page. Use responsibly.
         virtual_display: Run headed Chromium on a private Xvfb display
             instead of headless (Linux with Xvfb). No HeadlessChrome token
             and full client hints. The display lives as long as the session.
@@ -657,7 +673,11 @@ async def browser_open(
             await _browser_action(
                 session,
                 lambda page: browser_session.goto(
-                    page, url, "load", decline_cookies=decline_cookies
+                    page,
+                    url,
+                    "load",
+                    decline_cookies=decline_cookies,
+                    solve_cloudflare=solve_cloudflare,
                 ),
                 browser_session.DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
@@ -697,6 +717,7 @@ async def browser_goto(
     wait_until: str = "load",
     timeout_ms: float = 30_000,
     decline_cookies: bool = False,
+    solve_cloudflare: bool = False,
 ) -> dict[str, Any]:
     """Navigate the session's current page to a URL.
 
@@ -710,6 +731,9 @@ async def browser_goto(
         timeout_ms: Navigation timeout in milliseconds.
         decline_cookies: Click a consent notice's reject control after the
             load; cookie_notice_declined reports the strategy or null.
+        solve_cloudflare: Click Cloudflare's Turnstile checkbox like a person
+            and wait up to 60 s beyond timeout_ms for the real page. Use
+            responsibly.
     """
     parsed_wait_until = parse_wait_until(wait_until)
     with _tool_errors():
@@ -717,7 +741,11 @@ async def browser_goto(
     return await _browser_action(
         session,
         lambda page: browser_session.goto(
-            page, url, parsed_wait_until, decline_cookies=decline_cookies
+            page,
+            url,
+            parsed_wait_until,
+            decline_cookies=decline_cookies,
+            solve_cloudflare=solve_cloudflare,
         ),
         timeout_ms,
     )

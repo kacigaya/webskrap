@@ -81,7 +81,7 @@ RECOVERY_HINTS: dict[ErrorCode, str] = {
     ErrorCode.BLOCKED: (
         "The site served a bot challenge or block page instead of content. Try another "
         "engine or exit IP (proxy), virtual_display=True, a persistent user_data_dir, or "
-        "headed mode. WebSkrap does not solve CAPTCHAs."
+        "headed mode. WebSkrap only clicks Cloudflare's Turnstile checkbox by itself."
     ),
     ErrorCode.INTERNAL: "Unexpected failure. Re-run with `webskrap doctor` to check the install.",
 }

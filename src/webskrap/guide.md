@@ -63,6 +63,29 @@ or refusal remains. A plain 403, 404 or 202 without these provider markers is no
 returns `ok: false` or `ok: true` as usual. The localized title of a block
 page is never a signal.
 
+`solve_cloudflare=True` (CLI `--solve-cloudflare`) handles Cloudflare's "Just
+a moment" page, like Scrapling's option of the same name. It is off by default;
+without it a Cloudflare challenge fails fast with `blocked`. With it, WebSkrap
+waits on the challenge page. When Cloudflare draws its Turnstile checkbox, the
+cursor wanders for 1.5 to 3 seconds, follows a curved path to the checkbox and
+clicks with a mouse-like button hold. The checkbox position is read from the
+widget's own DOM before each click. If the page has not cleared 20 seconds
+later, WebSkrap clicks again, at most three times. The checkbox gets up to 60
+seconds from when it first appears, on top of `timeout_ms`. Success is reported
+only after the real page loads and no challenge is detected on it; otherwise
+the call fails with `blocked`.
+
+It works in headless, headed and `virtual_display` modes. A click only answers
+the widget: Cloudflare still scores the browser and the exit IP, so a headless
+browser or a flagged IP can still be refused. No token is read, copied or
+injected, and no outside solving service is used. Other CAPTCHAs, such as
+DataDome's slider or image and audio puzzles, are reported as `blocked` and
+never touched.
+
+Use it responsibly: only on sites whose terms and applicable law allow
+automated access, and at a polite rate. Passing a challenge does not grant
+permission to collect data you may not collect.
+
 `profile_mode="native"` keeps the browser's own identity across documents and
 workers. On Linux, `virtual_display=True` runs that browser headed on Xvfb.
 This avoids headless-specific values without replacing JavaScript APIs.
@@ -95,10 +118,8 @@ host needs a desktop connection; Xvfb alone does not provide one. Load all
 resources when a person must see a CAPTCHA. The `lite` and `documents`
 policies intentionally block resources that its widget can need.
 
-Some sites challenge a datacenter exit IP whatever the browser does. For
-example, a deal forum behind Cloudflare still challenged `virtual_display=True`
-from a cloud VM. There, only a residential or mobile exit IP helps. WebSkrap
-does not solve CAPTCHAs.
+Some sites refuse a datacenter exit IP whatever the browser does. There, only a
+residential or mobile exit IP helps.
 
 `search` loads Bing's results page (`engine="bing"`, the default) or
 DuckDuckGo's HTML page (`engine="ddg"`) in the same stealth browser and
@@ -209,7 +230,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_launch` | Run `webskrap install`. Fetch and search already fall back from `chrome` to Edge and bundled Chromium. |
 | `sandbox` | Check user namespaces and AppArmor for the browser executable; restore sandbox support. |
 | `path_rejected` | Paths are relative to a confined root. |
-| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. No CAPTCHA solving. |
+| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. For Cloudflare's checkbox, `solve_cloudflare=True`. |
 | `usage` | Re-read the argument's documented values. |
 
 ## Limits
@@ -218,7 +239,8 @@ Screenshots are written under `./webskrap-output` and persistent profiles under
 `~/.webskrap/profiles` (`WEBSKRAP_OUTPUT_DIR` and `WEBSKRAP_MCP_PROFILE_DIR` move
 those roots). Absolute paths and traversal are rejected. The sandbox switch is an
 environment variable and never a tool argument, so a page cannot argue a model
-into disabling it. No CAPTCHA solving and no login-wall bypass.
+into disabling it. The only CAPTCHA handling is the opt-in Turnstile click; no
+login-wall bypass. Use it responsibly.
 
 ## Python batch fetching
 

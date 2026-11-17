@@ -9,6 +9,22 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `solve_cloudflare` (CLI `--solve-cloudflare`; MCP `fetch`, `stealth_fetch`,
+  `browser_open` and `browser_goto`) clicks Cloudflare's Turnstile checkbox on
+  its "Just a moment" page, like Scrapling's option of the same name. Off by
+  default. The checkbox is found in the widget's closed shadow root through
+  CDP and clicked along a human cursor path, again after 20 s if the page has
+  not cleared, at most three times within 60 s. Success needs the real page to
+  load with no challenge left on it.
+
+### Fixed
+
+- The wait after a self-clearing interstitial reloaded could return on the
+  previous document's lifecycle event, so a fetch could read the new page
+  before it finished loading.
+
 ## [3.6.1] - 2026-11-17
 
 ### Changed

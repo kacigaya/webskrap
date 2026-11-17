@@ -54,13 +54,15 @@ For deferred content, pass `ready_selector="#content"` to a Python fetch or
 `ready_selector` too. The selector must become visible after consent dismissal.
 Known challenge pages (DataDome, Cloudflare, Akamai, AWS WAF) and provider block
 pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
-checks that reload the page. It does not retry refusals or solve CAPTCHAs.
+checks that reload the page. It does not retry refusals. With
+`solve_cloudflare=True` (CLI `--solve-cloudflare`), it clicks Cloudflare's
+Turnstile checkbox; see [Cloudflare Turnstile](#cloudflare-turnstile).
 Ordinary HTTP errors still return `ok=False`.
 For an empty HTTP error body, Chromium can show its own error page. The returned
 text or HTML is that rendered page. The status, headers, and `final_url` still
 come from the HTTP response.
 
-For manual CAPTCHA completion, open a persistent browser with
+For any other CAPTCHA, complete it by hand: open a persistent browser with
 `webskrap browser open --headed --session manual --proxy http://localhost:8888 URL`.
 Complete the check in that browser. Keep the same session, profile, and proxy
 for later commands. On a remote host, use a desktop connection to its display.
@@ -127,8 +129,36 @@ webskrap search "example domain" --engine ddg --max-results 10 --format json
 
 When an engine distrusts the exit address it serves a bot challenge. That
 comes back as a `blocked` error, not as zero hits. Switch engine, reuse a
-persistent profile, or change the exit IP. WebSkrap does not retry and does
-not solve CAPTCHAs.
+persistent profile, or change the exit IP. WebSkrap does not retry.
+
+## Cloudflare Turnstile
+
+`solve_cloudflare=True` (CLI `--solve-cloudflare`) handles Cloudflare's "Just
+a moment" page, like Scrapling's option of the same name. It is off by default;
+without it a Cloudflare challenge fails fast with `blocked`. With it, WebSkrap
+waits on the challenge page. When Cloudflare draws its Turnstile checkbox, the
+cursor wanders for 1.5 to 3 seconds, follows a curved path to the checkbox and
+clicks with a mouse-like button hold. The checkbox position is read from the
+widget's own DOM before each click. If the page has not cleared 20 seconds
+later, WebSkrap clicks again, at most three times. The checkbox gets up to 60
+seconds from when it first appears, on top of `timeout_ms`. Success is reported
+only after the real page loads and no challenge is detected on it; otherwise
+the call fails with `blocked`.
+
+It works in headless, headed and `virtual_display` modes. A click only answers
+the widget: Cloudflare still scores the browser and the exit IP, so a headless
+browser or a flagged IP can still be refused. No token is read, copied or
+injected, and no outside solving service is used. Other CAPTCHAs, such as
+DataDome's slider or image and audio puzzles, are reported as `blocked` and
+never touched.
+
+Use it responsibly: only on sites whose terms and applicable law allow
+automated access, and at a polite rate. Passing a challenge does not grant
+permission to collect data you may not collect.
+
+```bash
+webskrap fetch https://example.com --virtual-display --solve-cloudflare
+```
 
 ## Visual browser interaction
 

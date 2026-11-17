@@ -103,6 +103,10 @@ jobs:
         env:
           COVERAGE_FILE: .coverage.browser
         run: uv run --extra dev pytest -q -m "browser and not live" --cov
+      - name: Cloudflare Turnstile official test sitekey
+        env:
+          WEBSKRAP_LIVE: "1"
+        run: uv run --extra dev pytest -q tests/test_turnstile_live.py
       - if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:

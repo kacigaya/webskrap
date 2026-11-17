@@ -426,14 +426,20 @@ async def page_state(page: CDPPage) -> dict[str, Any]:
 
 
 async def goto(
-    page: CDPPage, url: str, wait_until: str, *, decline_cookies: bool = False
+    page: CDPPage,
+    url: str,
+    wait_until: str,
+    *,
+    decline_cookies: bool = False,
+    solve_cloudflare: bool = False,
 ) -> dict[str, Any]:
     """Navigate and return ``{"status", "url", "title", "blocked"}``.
 
     Uses the fetch tools' challenge and block detection, including the wait
     for a self-clearing interstitial. A detected page is reported in
     ``blocked`` rather than raised, so the session stays usable for a person
-    to look at. With ``decline_cookies``, a consent notice is dismissed and
+    to look at. With ``solve_cloudflare``, Cloudflare's Turnstile checkbox is
+    clicked first. With ``decline_cookies``, a consent notice is dismissed and
     ``cookie_notice_declined`` names the strategy that clicked, or is None.
     """
     url = validate_url(url)
@@ -443,7 +449,12 @@ async def goto(
     try:
         response = await page.goto(url, wait_until=wait_until, timeout_s=timeout_s)
         response = await challenges.settle(
-            page, documents, response, wait_until=wait_until, deadline=deadline
+            page,
+            documents,
+            response,
+            wait_until=wait_until,
+            deadline=deadline,
+            solve_cloudflare=solve_cloudflare,
         )
     finally:
         documents.stop()

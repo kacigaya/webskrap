@@ -340,6 +340,13 @@ def fetch_command(
         ),
     ] = True,
     decline_cookies_timeout_ms: DeclineCookiesTimeoutMsOption = 2_000,
+    solve_cloudflare: Annotated[
+        bool,
+        typer.Option(
+            "--solve-cloudflare",
+            help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     profile_mode: ProfileModeOption = "native",
     reduce_fingerprint_surface: ReduceFingerprintSurfaceOption = False,
     mask_headless_user_agent: MaskHeadlessUserAgentOption = False,
@@ -373,6 +380,7 @@ def fetch_command(
             resource_policy=resource_policy,
             decline_cookies=decline_cookies,
             decline_cookies_timeout_ms=decline_cookies_timeout_ms,
+            solve_cloudflare=solve_cloudflare,
             profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
@@ -408,6 +416,7 @@ async def _fetch(
     resource_policy: ResourcePolicy,
     decline_cookies: bool,
     decline_cookies_timeout_ms: float,
+    solve_cloudflare: bool,
     profile_mode: str,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
@@ -428,6 +437,7 @@ async def _fetch(
         resource_policy=resource_policy,
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
+        solve_cloudflare=solve_cloudflare,
         profile_mode=profile_mode,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
@@ -662,6 +672,7 @@ def _session_config(
     fake_media_devices: bool,
     launch_args: list[str],
     webrtc_ip_handling_policy: str | None,
+    solve_cloudflare: bool = False,
 ) -> SessionConfig:
     """Build the headless session config that ``fetch`` and ``search`` share."""
     return SessionConfig(
@@ -673,6 +684,7 @@ def _session_config(
         resource_policy=resource_policy,
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
+        solve_cloudflare=solve_cloudflare,
         profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,

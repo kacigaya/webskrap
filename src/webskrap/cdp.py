@@ -579,6 +579,7 @@ class CDPPage:
         ``Page.frameNavigated``, a main-frame document that commits after
         ``loader_id`` counts too: a page that reloads itself before its first
         document reaches ``wait_until`` would otherwise never get there.
+        Documents recorded before ``loader_id`` committed never count.
 
         Returns:
             The loader that reached ``wait_until``.
@@ -587,12 +588,17 @@ class CDPPage:
         if name is None:
             return loader_id
         loaders = {loader_id}
+        committed = False
 
         def reached(method: str, params: dict[str, Any]) -> bool:
+            nonlocal committed
             if method == "Page.frameNavigated":
                 frame = params.get("frame", {})
                 if loader_id is not None and frame.get("id") == self.target_id:
-                    loaders.add(frame.get("loaderId"))
+                    if frame.get("loaderId") == loader_id:
+                        committed = True
+                    elif committed:
+                        loaders.add(frame.get("loaderId"))
                 return False
             return (
                 method == "Page.lifecycleEvent"

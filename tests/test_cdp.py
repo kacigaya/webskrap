@@ -137,6 +137,28 @@ async def test_recorder_keeps_events_that_fire_before_the_wait() -> None:
     await connection.close()
 
 
+async def test_wait_lifecycle_ignores_documents_from_before_the_loader() -> None:
+    connection, reader, _writer = _connection()
+    page = CDPPage(connection, "S1", "F1")
+    recorder = page.record("Page.lifecycleEvent", "Page.frameNavigated")
+
+    def event(method: str, params: dict[str, Any]) -> None:
+        _feed(reader, {"method": method, "sessionId": "S1", "params": params})
+
+    event("Page.frameNavigated", {"frame": {"id": "F1", "loaderId": "L0"}})
+    event("Page.lifecycleEvent", {"frameId": "F1", "loaderId": "L0", "name": "DOMContentLoaded"})
+    event("Page.frameNavigated", {"frame": {"id": "F1", "loaderId": "L1"}})
+    await asyncio.sleep(0.01)
+    with pytest.raises(WebSkrapError) as error:
+        await page.wait_lifecycle(recorder, "L1", "domcontentloaded", 0.0, "the page")
+    assert error.value.code is ErrorCode.TIMEOUT
+    event("Page.lifecycleEvent", {"frameId": "F1", "loaderId": "L1", "name": "DOMContentLoaded"})
+    await asyncio.sleep(0.01)
+    assert await page.wait_lifecycle(recorder, "L1", "domcontentloaded", 0.0, "x") == "L1"
+    recorder.stop()
+    await connection.close()
+
+
 class _FakeConnection:
     """Answers isolated-world and evaluate calls for :class:`CDPPage` tests."""
 

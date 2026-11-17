@@ -22,7 +22,7 @@ export default function TermsPage() {
     <>
       <h1>Terms of use</h1>
       <p className="text-xs text-muted-foreground tabular-nums">
-        Last updated <time dateTime="2026-10-26">26 October 2026</time>
+        Last updated <time dateTime="2026-11-17">17 November 2026</time>
       </p>
       <h2>Scope</h2>
       <p>
@@ -65,9 +65,10 @@ export default function TermsPage() {
         you are not authorized to use, to defeat authentication or access
         controls, or to overload a service. Its stealth features exist to make
         automation behave like an ordinary browser for testing, research, and
-        permitted collection. WebSkrap does not solve CAPTCHAs, and the
-        maintainer does not endorse using it to evade a site’s decision to
-        refuse automated traffic.
+        permitted collection. Its only CAPTCHA handling is an opt-in click on
+        Cloudflare’s Turnstile checkbox; use it responsibly. The maintainer
+        does not endorse using WebSkrap to evade a site’s decision to refuse
+        automated traffic.
       </p>
       <h2>Your liability</h2>
       <p>

@@ -46,6 +46,8 @@ or `full`) to set how much of the profile pages see.
   computes full body text to report its length. `pattern` returns only matching
   lines with `context`, capped by `max_matches`; the regex runs in Python with
   a 2-second limit.
+- `fetch`, `stealth_fetch`, `browser_goto` and `browser_open` take
+  `solve_cloudflare` to click Cloudflare's Turnstile checkbox (off by default).
 - `browser_goto` and `browser_open` take `decline_cookies`;
   `browser_screenshot` takes `target` for one element.
 - Both fetch tools default to `domcontentloaded` and `resource_policy="all"`,

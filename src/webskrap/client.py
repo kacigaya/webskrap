@@ -380,6 +380,7 @@ class WebSkrapSession:
         max_links: int = 50,
         decline_cookies: bool | None = None,
         ready_selector: str | None = None,
+        solve_cloudflare: bool | None = None,
     ) -> FetchResult:
         """Open ``url`` in a new page, read it, and close the page.
 
@@ -407,6 +408,10 @@ class WebSkrapSession:
             ready_selector: Optional CSS selector or snapshot ref that must
                 become visible after consent dismissal. Uses the navigation
                 timeout separately.
+            solve_cloudflare: Per-call override of
+                ``SessionConfig.solve_cloudflare``; None uses the config. When
+                on, Cloudflare's Turnstile checkbox is clicked and the real page
+                is awaited for up to 60 s, apart from the navigation timeout.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
@@ -430,7 +435,14 @@ class WebSkrapSession:
             deadline = time.monotonic() + timeout_s
             response = await page.goto(url, wait_until=wait_until, timeout_s=timeout_s)
             response = await settle(
-                page, documents, response, wait_until=wait_until, deadline=deadline
+                page,
+                documents,
+                response,
+                wait_until=wait_until,
+                deadline=deadline,
+                solve_cloudflare=(
+                    self.config.solve_cloudflare if solve_cloudflare is None else solve_cloudflare
+                ),
             )
             headers = response_headers(response)
             status = response_status(response)
@@ -525,7 +537,12 @@ class WebSkrapSession:
             await _wait_attached(page, "body > *", timeout_s=timeout_s)
             # The same provider check as fetch, before the engine's own markers.
             response = await settle(
-                page, documents, response, wait_until="domcontentloaded", deadline=deadline
+                page,
+                documents,
+                response,
+                wait_until="domcontentloaded",
+                deadline=deadline,
+                solve_cloudflare=self.config.solve_cloudflare,
             )
             await raise_for_challenge(
                 page, response_headers(response), response_status(response), deadline=deadline
@@ -788,6 +805,7 @@ class WebSkrapClient:
         max_links: int = 50,
         decline_cookies: bool | None = None,
         ready_selector: str | None = None,
+        solve_cloudflare: bool | None = None,
     ) -> FetchResult:
         """Fetch one URL in a throwaway session.
 
@@ -807,6 +825,8 @@ class WebSkrapClient:
             max_links: How many links to keep.
             decline_cookies: Per-call consent override; None uses the config.
             ready_selector: Optional selector to wait for; see
+                :meth:`WebSkrapSession.fetch`.
+            solve_cloudflare: Per-call Turnstile override; see
                 :meth:`WebSkrapSession.fetch`.
 
         Returns:
@@ -828,6 +848,7 @@ class WebSkrapClient:
                 max_links=max_links,
                 decline_cookies=decline_cookies,
                 ready_selector=ready_selector,
+                solve_cloudflare=solve_cloudflare,
             )
         finally:
             # A cancelled waiter can leave its shielded browser launch running.
