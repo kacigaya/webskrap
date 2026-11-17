@@ -352,7 +352,9 @@ class SessionConfig(BaseModel):
     # software Vulkan driver (lavapipe), reporting "llvmpipe": uncommon,
     # since stock Chrome blocklists software drivers, but not specific to
     # automation. It needs Linux with the lavapipe Vulkan ICD (Debian/Ubuntu:
-    # mesa-vulkan-drivers). Keep "auto" on a machine with a real GPU.
+    # mesa-vulkan-drivers). Under virtual_display, "auto" launches as "mesa"
+    # when lavapipe is installed and no Intel, AMD or NVIDIA GPU is found.
+    # Keep "auto" on a machine with a real GPU.
     gpu: GpuBackend = GpuBackend.AUTO
     # Native Chromium rendering reduction. When enabled, canvas readback and
     # WebGL are disabled through browser flags. This avoids high-entropy

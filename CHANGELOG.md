@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Changed
+
+- Under `virtual_display`, the default `gpu="auto"` now launches with Mesa's
+  lavapipe when it is installed and no Intel, AMD or NVIDIA GPU is found.
+  Headed Chrome on a GPU-less host otherwise has no WebGL, which bot tests flag.
+  `browser_open` and `webskrap browser open` report the launched backend.
+
 ## [3.6.0] - 2026-11-17
 
 ### Added

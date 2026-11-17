@@ -1066,6 +1066,26 @@ def test_reopen_without_stealth_settings_reuses_the_running_ones(
     assert reused["profile"] == "desktop-edge"
 
 
+def test_virtual_display_session_records_mesa_chosen_for_auto(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("webskrap.client.lavapipe_available", lambda: True)
+    monkeypatch.setattr("webskrap.client.hardware_gpu_available", lambda: False)
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    _stub_virtual_display(monkeypatch)
+
+    opened = asyncio.run(browser_session.open_session("stealth", virtual_display=True))
+    reused = asyncio.run(
+        browser_session.open_session("stealth", virtual_display=True, gpu=GpuBackend.MESA)
+    )
+
+    assert launches[0]["gpu"] is GpuBackend.MESA
+    assert opened["gpu"] == "mesa"
+    assert reused["reused"] is True
+    assert len(launches) == 1
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="virtual displays need POSIX")
 def test_stop_detached_kills_only_its_own_display(tmp_path: Path) -> None:
     owned = tmp_path / f"{display.DIRECTORY_PREFIX}abc"

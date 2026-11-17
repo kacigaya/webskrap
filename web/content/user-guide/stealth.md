@@ -334,9 +334,15 @@ config = SessionConfig(
 )
 ```
 
-Under `virtual_display`, headed Chrome with no usable GPU has no WebGL at all,
-as a real GPU-less desktop does, and `gpu="auto"` leaves it that way; pass
-`gpu="mesa"` when pages need WebGL. WebGPU is left alone: its adapter stays
+Under `virtual_display`, headed Chrome with no usable GPU has no WebGL at all.
+A browser without WebGL is rare, and bot tests flag the missing WebGL vendor
+and renderer. So under `virtual_display`, `gpu="auto"` launches with
+`gpu="mesa"` when lavapipe is installed and no Intel, AMD or NVIDIA GPU is
+found (a DRM render node with one of those PCI vendors, or `/dev/nvidia0`).
+Without lavapipe, WebGL stays off. Other GPUs, such as an ARM SoC GPU, are not
+detected and also get Mesa; pass `launch_args=["--use-angle=gl"]` to keep
+Chromium's Linux default. `browser_open` and `webskrap browser open` report the
+backend the browser launched with. WebGPU is left alone: its adapter stays
 `null`, which is what Chrome reports on machines without a supported GPU.
 Launch flags you pass yourself (`--use-gl`, `--use-angle`) take precedence.
 
