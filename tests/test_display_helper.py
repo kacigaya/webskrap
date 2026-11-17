@@ -8,6 +8,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -20,6 +21,7 @@ _FAKE_HELPER = """
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import Mock
 from webskrap.display import _helper
 
 @contextmanager
@@ -211,3 +213,44 @@ def test_process_identity_rejects_a_live_unrelated_pid(tmp_path: Path) -> None:
     finally:
         process.kill()
         process.wait(5)
+
+
+def test_readiness_retries_a_transient_windows_sharing_error(monkeypatch, tmp_path):
+    directory = _directory(tmp_path)
+    ready_path = directory / _helper.READY_FILE
+    ready_path.write_text('{"x": 1, "y": 2}')
+    original = Path.read_text
+    reads = 0
+
+    def read(path, *args, **kwargs):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            raise PermissionError("file temporarily unavailable")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(_helper, "_POLL_S", 0)
+    process = Mock(spec=subprocess.Popen)
+    process.poll.return_value = None
+    assert _helper._wait_until_ready(process, directory) == (1, 2)
+    assert reads == 2
+
+
+def test_cleanup_retries_until_windows_releases_the_log(monkeypatch, tmp_path):
+    directory = _directory(tmp_path)
+    original = _helper.shutil.rmtree
+    attempts = 0
+
+    def remove(path):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("file still open")
+        original(path)
+
+    monkeypatch.setattr(_helper.shutil, "rmtree", remove)
+    monkeypatch.setattr(_helper, "_POLL_S", 0)
+    _helper._remove_directory(directory)
+    assert attempts == 2
+    assert not directory.exists()

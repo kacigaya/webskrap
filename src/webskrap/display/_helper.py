@@ -87,7 +87,7 @@ def start(
 def _wait_until_ready(process: subprocess.Popen[bytes], directory: Path) -> tuple[int, int]:
     deadline = time.monotonic() + START_TIMEOUT_S
     while time.monotonic() < deadline:
-        with suppress(FileNotFoundError, ValueError, KeyError, TypeError):
+        with suppress(FileNotFoundError, PermissionError, ValueError, KeyError, TypeError):
             ready = json.loads((directory / READY_FILE).read_text(encoding="utf-8"))
             return int(ready["x"]), int(ready["y"])
         if process.poll() is not None:
@@ -109,7 +109,7 @@ def _failure(directory: Path, process: subprocess.Popen[bytes]) -> str:
 def stop(process: subprocess.Popen[bytes], directory: Path) -> None:
     """Ask the helper to release its display, wait for it, and delete its directory."""
     _end(process, directory)
-    shutil.rmtree(directory, ignore_errors=True)
+    _remove_directory(directory)
 
 
 def _end(process: subprocess.Popen[bytes], directory: Path) -> None:
@@ -159,7 +159,22 @@ def stop_detached(pid: int, directory: Path) -> None:
     if _lock_held(lock):
         msg = f"virtual display helper did not stop; recovery files kept at {directory}"
         raise WebSkrapError(msg, code=ErrorCode.BROWSER_LAUNCH)
-    shutil.rmtree(directory, ignore_errors=True)
+    _remove_directory(directory)
+
+
+def _remove_directory(directory: Path) -> None:
+    deadline = time.monotonic() + STOP_TIMEOUT_S
+    while True:
+        try:
+            shutil.rmtree(directory)
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_POLL_S)
+        else:
+            return
 
 
 def _is_helper(pid: int, directory: Path) -> bool:
