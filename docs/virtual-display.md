@@ -138,7 +138,35 @@ configure the Windows driver in advance. Run their Actions runner interactively,
 rather than as a Session 0 Windows service. Dispatch only trusted repository
 code to these machines. This path does not install or replace drivers.
 
-macOS and Windows integration tests have not been executed from the current
-Linux development host. Hosted test results will be recorded after the authorized test-branch push.
-Actual hosted-runner results and physical GPU, display removal, DPI and desktop
-session checks remain required before claiming verified platform support.
+## Verified hosted run, 2026-11-17
+
+[Run 44088360042](https://github.com/kacigaya/webskrap/actions/runs/44088360042)
+passed on all three hosted operating systems at code commit `ad22f0a`:
+
+- Linux: 55 passed, 2 skipped.
+- macOS 26.7.2 ARM64: 53 passed, 4 skipped.
+- Windows Server 2025: 53 passed, 4 skipped.
+
+All three real-browser integration tests passed on every OS. Other skips are
+platform-specific tests. The driver installed successfully on the disposable
+Windows runner and exposed two monitors. The tests verified requested screen
+sizes, separate concurrent sessions, persistent browser recovery, rendering,
+native display cleanup and Windows mode restoration.
+
+macOS rendered WebGL through Apple's paravirtual Metal device and passed WebGPU
+blue-pixel readback. Linux rendered WebGL through Mesa lavapipe. Windows rendered
+through Microsoft's Basic Render Driver. Linux and Windows exposed WebGPU but
+returned no adapter, so WebGPU rendering was not tested on those runners.
+The persistent Windows Chrome browser lost its WebGL context after the WebGPU
+adapter probe; its WebGL readback and renderer were captured before that probe.
+The reports record this context loss. No browser flags or fingerprints were
+changed to hide it.
+
+Physical GPU behavior, mixed DPI, RDP reconnects and coverage of older OS releases
+remain unverified. The optional physical workflow job was not run. Hosted virtual
+GPU results do not establish those physical-machine behaviors.
+
+The final local non-live suite passed 1,125 tests with 87.83% coverage. Two
+Windows-only tests were skipped locally; the hosted Windows job ran them. Ruff,
+format checks, Pyright for all three platforms, Bandit, pip-audit, OSV checks
+for 51 locked public packages, build and Twine checks passed.
