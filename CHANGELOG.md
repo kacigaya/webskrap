@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-11-17
+
 ### Added
 
 - `webskrap mcp` starts the MCP server, the same as `webskrap-mcp`, so
@@ -16,6 +18,11 @@ history, so they summarize each release rather than list every change.
 - `server.json` describes the MCP server for the official MCP Registry as
   `io.github.kacigaya/webskrap`. The README carries the matching `mcp-name`
   marker that the registry checks on PyPI.
+
+### Changed
+
+- The PyPI page links the documentation and the changelog, and the
+  package keywords include `mcp`, `stealth` and `web-scraping`.
 
 ## [3.5.0] - 2026-11-16
 
@@ -1104,7 +1111,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.5.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.6.0...HEAD
+[3.6.0]: https://github.com/kacigaya/webskrap/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/kacigaya/webskrap/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/kacigaya/webskrap/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/kacigaya/webskrap/compare/v3.2.4...v3.3.0
