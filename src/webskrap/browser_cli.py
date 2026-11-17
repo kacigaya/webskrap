@@ -70,7 +70,10 @@ VirtualDisplayOption = Annotated[
     bool,
     typer.Option(
         "--virtual-display",
-        help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
+        help=(
+            "Run headed Chromium on a virtual display instead of headless "
+            "(Linux Xvfb, macOS, or Windows with the Virtual Display Driver)."
+        ),
     ),
 ]
 GpuOption = Annotated[
@@ -216,8 +219,8 @@ def open_command(
     from WEBSKRAP_PROXY_USERNAME and WEBSKRAP_PROXY_PASSWORD, never from the
     command line; a helper process keeps them in memory while the browser runs.
 
-    --virtual-display keeps the window invisible but runs Chrome headed on a
-    private Xvfb display that lives as long as the session (Linux).
+    --virtual-display runs Chrome headed on a virtual display that lives as
+    long as the session. macOS and Windows share the logged-in desktop.
     """
     output_format = parse_output_format(format)
     policy = parse_cli_value(

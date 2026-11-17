@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- Native virtual-display backends for macOS CoreGraphics and a preconfigured
+  Windows Virtual Display Driver monitor pool. Linux keeps Xvfb and Mesa.
+  Added lifecycle tests and a real-display CI workflow. macOS and Windows
+  require a logged-in desktop and share its displays.
+
 ### Changed
 
 - Under `virtual_display`, the default `gpu="auto"` now launches with Mesa's

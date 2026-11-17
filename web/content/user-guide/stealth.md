@@ -276,8 +276,15 @@ process killed with SIGKILL leaves its Xvfb running). The
 server listens on no TCP port and only accepts clients holding a random
 MIT-MAGIC-COOKIE stored in an owner-only file, so other local users cannot
 connect to it. It needs the `Xvfb` binary (Debian/Ubuntu: `apt install xvfb`);
-without it, or off Linux, the session fails to start with a `browser_launch`
-error. `virtual_display` only applies when `headless=True`.
+without it, the session fails to start with a `browser_launch` error.
+`virtual_display` only applies when `headless=True`.
+
+On macOS, WebSkrap uses CoreGraphics `CGVirtualDisplay` through Python ctypes.
+On Windows, it leases a preconfigured monitor from the open-source Virtual
+Display Driver. These backends need a logged-in desktop. Their displays share
+that desktop; they do not provide Xvfb access isolation. Windows needs prior
+administrator setup and one driver monitor per concurrent session. Neither
+backend falls back to headless mode. See the [platform setup and test limits](https://github.com/kacigaya/webskrap/blob/main/docs/virtual-display.md).
 
 ### Masking the user agent
 

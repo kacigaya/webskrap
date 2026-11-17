@@ -360,8 +360,9 @@ async def stealth_fetch(
         reduce_fingerprint_surface: Disable WebGL and canvas readback via flags.
         mask_headless_user_agent: Rewrite the HeadlessChrome UA token to Chrome.
             Empties high-entropy client hints; prefer virtual_display.
-        virtual_display: Run headed Chromium on a private Xvfb display
-            instead of headless (Linux with Xvfb). No HeadlessChrome token
+        virtual_display: Run headed Chromium on a virtual display
+            instead of headless (Linux Xvfb, macOS, Windows with the Virtual
+            Display Driver). No HeadlessChrome token
             and full client hints, without any override.
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
             without a GPU, a known headless tell), and "mesa" under
@@ -483,8 +484,9 @@ async def search(
         reduce_fingerprint_surface: Disable WebGL and canvas readback via flags.
         mask_headless_user_agent: Rewrite the HeadlessChrome UA token to Chrome.
             Empties high-entropy client hints; prefer virtual_display.
-        virtual_display: Run headed Chromium on a private Xvfb display
-            instead of headless (Linux with Xvfb). No HeadlessChrome token
+        virtual_display: Run headed Chromium on a virtual display
+            instead of headless (Linux Xvfb, macOS, Windows with the Virtual
+            Display Driver). No HeadlessChrome token
             and full client hints, without any override.
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
             without a GPU, a known headless tell), and "mesa" under
@@ -622,8 +624,9 @@ async def browser_open(
         fake_media_devices: Supply Chromium's synthetic camera and microphone.
         decline_cookies: With url, click a consent notice's reject control;
             cookie_notice_declined reports the strategy or null.
-        virtual_display: Run headed Chromium on a private Xvfb display
-            instead of headless (Linux with Xvfb). No HeadlessChrome token
+        virtual_display: Run headed Chromium on a virtual display
+            instead of headless (Linux Xvfb, macOS, Windows with the Virtual
+            Display Driver). No HeadlessChrome token
             and full client hints. The display lives as long as the session.
         gpu: WebGL renderer. "auto" is Chromium's choice (SwiftShader
             without a GPU), and "mesa" under virtual_display without a GPU

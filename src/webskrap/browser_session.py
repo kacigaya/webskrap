@@ -504,6 +504,7 @@ def launch_browser(
     profile_mode: SessionProfileMode = "native",
     profile: str | None = None,
     display_env: dict[str, str] | None = None,
+    window_origin: tuple[int, int] | None = None,
 ) -> tuple[int, int]:
     """Start a detached Chromium and return its (pid, CDP port).
 
@@ -525,7 +526,9 @@ def launch_browser(
         profile_mode: ``locale`` sets ``profile``'s timezone and languages
             through the browser's environment and ``--accept-lang`` (Linux).
         profile: Bundled profile name for locale mode.
-        display_env: ``DISPLAY`` and ``XAUTHORITY`` of a virtual display.
+        display_env: ``DISPLAY`` and ``XAUTHORITY`` of a Linux virtual display.
+        window_origin: Top-left corner of a macOS or Windows virtual display;
+            the window is placed there.
 
     Raises:
         WebSkrapError: If the browser exits during startup or never reports a
@@ -561,6 +564,9 @@ def launch_browser(
         "--disable-features=BackForwardCache",
         *config.browser_args(native_profile),
     ]
+    if window_origin is not None:
+        screen = config.virtual_screen()
+        command = display.place_window(command, window_origin, screen.width, screen.height)
     if config.launch_headless:
         command.append("--headless=new")
     command.append("about:blank")
@@ -765,8 +771,8 @@ async def open_session(
             either one set, a helper process (:func:`start_proxy_auth`) keeps
             both in memory and answers the proxy for as long as the browser
             runs. Neither is written to disk.
-        virtual_display: With ``headless``, run headed on a private Xvfb
-            display that lives as long as the session (Linux). Pages then see
+        virtual_display: With ``headless``, run headed on a private virtual
+            display that lives as long as the session. Pages then see
             no ``HeadlessChrome`` token and get full client hints.
         gpu: WebGL renderer; ``mesa`` uses Mesa's lavapipe instead of
             SwiftShader (Linux with mesa-vulkan-drivers).
@@ -852,7 +858,9 @@ async def open_session(
             virtual = None
             if config.uses_virtual_display():
                 screen = config.virtual_screen()
-                virtual = await display.VirtualDisplay.start(screen.width, screen.height)
+                virtual = await display.VirtualDisplay.start(
+                    screen.width, screen.height, detached=True
+                )
             try:
                 pid, port = launch_browser(
                     directory,
@@ -867,6 +875,9 @@ async def open_session(
                     profile_mode=profile_mode,
                     profile=profile,
                     display_env=virtual.env if virtual is not None else None,
+                    window_origin=virtual.origin
+                    if virtual is not None and not virtual.env
+                    else None,
                 )
             except BaseException:
                 if virtual is not None:

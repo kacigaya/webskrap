@@ -335,12 +335,6 @@ class SessionConfig(BaseModel):
     # Chrome does. Prefer virtual_display, which needs no override. Ignored
     # when virtual_display is set.
     mask_headless_user_agent: bool = False
-    # Run a headless session as a headed browser on a private Xvfb display
-    # (Linux, Xvfb installed) instead of in Chromium's headless mode. Nothing
-    # is overridden: no HeadlessChrome token, full client hints, real
-    # scrollbars and pointer media, and a real X screen sized by
-    # headless_screen (1920x1080 when that is None). Only applies when
-    # headless is True; the window stays invisible either way.
     virtual_display: bool = False
     # Which GL implementation WebGL renders with (chromium only).
     # "auto" leaves it to Chromium: a real GPU where one is usable. Without
@@ -594,7 +588,7 @@ class SessionConfig(BaseModel):
         return [flag]
 
     def uses_virtual_display(self) -> bool:
-        """True when this session runs headed on a private Xvfb display."""
+        """True when this session runs headed on a private virtual display."""
         return self.virtual_display and self.headless
 
     def virtual_screen(self) -> Viewport:

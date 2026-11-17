@@ -1,0 +1,144 @@
+# Native virtual displays
+
+`virtual_display=True` runs headed Chromium on a real display. Linux uses Xvfb.
+macOS uses CoreGraphics `CGVirtualDisplay` through Python's `ctypes` bindings.
+Windows uses preconfigured monitors from the open-source
+[Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver).
+No backend substitutes headless mode or `--screen-info` for a display.
+No extra Python package is required.
+
+```python
+from webskrap import SessionConfig, WebSkrapClient
+from webskrap.models import Viewport
+
+config = SessionConfig(
+    virtual_display=True,
+    headless_screen=Viewport(width=1280, height=720),
+)
+
+async with WebSkrapClient(default_config=config) as client:
+    session = await client.session("example", config=config)
+    page = await session.new_page()
+    await page.goto("https://example.com")
+```
+
+`headless_screen` keeps its existing name for compatibility. With a virtual
+display, it selects the native display resolution. The browser CLI and MCP keep
+their existing `virtual_display` option. Relative window positions are placed
+within the selected display. A missing backend produces a `browser_launch`
+error. It does not silently switch browser modes.
+
+## Linux
+
+1. Install Xvfb with your system package manager.
+2. Install `mesa-vulkan-drivers` if you need the Mesa software renderer.
+3. Use `virtual_display=True`.
+
+Each session gets its own X server, authentication cookie and temporary
+directory. The Linux Mesa GPU selection from PR #90 stays in effect. On a host
+without hardware 3D, `gpu="auto"` can select Mesa lavapipe for headed Chromium.
+WebGPU availability still depends on Chromium and the renderer. A real display
+does not ensure a WebGPU adapter.
+
+## macOS
+
+Run Python from a logged-in GUI session. A service without access to WindowServer
+cannot create a usable display. The backend creates one display per session at
+the requested size, without HiDPI scaling. Its native Objective-C calls follow
+[Chromium's virtual display test implementation](https://github.com/chromium/chromium/blob/main/ui/display/mac/test/virtual_display_util_mac.mm).
+Each descriptor has a nonzero vendor ID and a separate random serial number.
+macOS 14 requires those values for concurrent virtual displays.
+
+`CGVirtualDisplay` is a private API. Apple can change it between macOS releases.
+Creation is checked at runtime. No PyObjC package or compiled helper is required.
+A Python helper keeps the native object alive for persistent browser sessions.
+The OS owns display removal when that helper exits.
+
+The virtual display extends the user's desktop. Other desktop apps can observe
+it, and it appears in Displays settings. This does not provide Xvfb's separate
+X server. Test creation, screen assignment, concurrent display arrangement,
+GPU rendering and removal on each supported macOS release before deployment.
+
+## Windows
+
+1. Install the signed [Virtual Display Driver](https://github.com/VirtualDrivers/Virtual-Display-Driver/wiki) as an administrator.
+2. Configure `C:\VirtualDisplayDriver\vdd_settings.xml` with enough monitors in
+   `<monitors><count>` for your concurrent sessions.
+3. Add each needed size under `<resolutions>` and restart the driver as its
+   documentation requires.
+4. Set the displays to 100% scaling for the initial validation.
+5. Run Python inside the logged-in desktop session.
+
+WebSkrap leases one monitor from that pool. Python calls
+[`EnumDisplayDevicesW`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumdisplaydevicesw),
+`EnumDisplaySettingsW` and
+[`ChangeDisplaySettingsExW`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-changedisplaysettingsexw)
+to find the driver, set the requested mode and place Chromium on the monitor.
+A byte-range lock prevents two WebSkrap sessions of the same Windows user from
+leasing the same monitor. A separate lock serializes desktop layout changes.
+An unsupported size or an exhausted pool produces an explicit error.
+
+The runtime does not install drivers, create driver devices, alter certificates,
+or hotplug a monitor per session. Cleanup restores each monitor's previous mode
+and attachment state. The configured driver and its monitor pool remain
+installed. A journal saved before a mode change permits restoration on the next
+lease if the helper is terminated before cleanup. Recovery refuses a journal
+whose display identity has changed. Keep driver configuration and desktop layout
+stable while sessions run. Locks do not coordinate different Windows users.
+
+Windows displays share the desktop. This does not provide an isolated desktop
+or an invisible window. Mixed DPI layouts, RDP reconnects, monitor renumbering,
+Session 0 services and GPU driver changes require separate physical tests.
+Mixed DPI placement is not verified. WebSkrap does not change DPI settings or
+rewrite browser fingerprint values to compensate.
+
+## Lifecycle and crash recovery
+
+Normal session close stops Chromium and releases its display. Persistent browser
+sessions keep the helper until browser close or recovery of a dead browser.
+Temporary macOS and Windows helpers also watch their owner's input pipe and
+release the display when that owner dies. Force-killing a Linux owner can leave
+its Xvfb alive until session cleanup. Force-killing a Windows helper can leave
+the changed layout until the next lease recovers the journal. macOS removes its
+process-owned virtual display after helper death.
+
+Do not change a leased monitor manually. Restoring the recorded mode can undo
+such changes. None of the backends grants a security boundary against other
+processes of the same OS user.
+
+## Integration tests and CI
+
+The `Virtual displays` workflow installs Chromium and runs real headed-browser
+tests on Linux, macOS and Windows hosted runners. Linux installs Xvfb and Mesa.
+Windows runs `scripts/ci/install-vdd.ps1` on a disposable runner. The setup script
+pins VDD 25.7.23 and nefcon 1.21.1 archives with SHA-256 checks, verifies the catalog signature, imports only its
+signer certificate into TrustedPublisher, configures two monitors and waits for native
+enumeration. It refuses to overwrite existing driver settings. Do not run this
+CI installer on a personal or shared machine.
+
+The tests require the backend, so driver setup or display failures fail the job.
+They check CDP connection, requested screen size, canvas and WebGL pixel readback,
+headed browser identity, client hints, pointer media queries, concurrent sessions,
+persistent browser crash recovery, helper exit, native display removal or
+restored Windows modes, and temporary directory cleanup. JSON probe
+results are uploaded as workflow artifacts. WebGPU is probed separately because
+a VM or software GPU can expose the API without providing an adapter.
+
+[GitHub documents](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+that hosted Windows runners have administrator rights. It does not guarantee
+IddCx driver support, a usable interactive desktop or GPU acceleration. Hosted
+macOS likewise does not guarantee this private CoreGraphics API or GPU features.
+A failed hosted job must be investigated from its logs and probe artifacts.
+It must not be reclassified as a passing mock test.
+
+The workflow has an optional `physical` input for manually dispatched runs.
+It targets self-hosted runners labelled `virtual-display` plus `macOS` or
+`Windows`. Provision these machines with a logged-in desktop. Install and
+configure the Windows driver in advance. Run their Actions runner interactively,
+rather than as a Session 0 Windows service. Dispatch only trusted repository
+code to these machines. This path does not install or replace drivers.
+
+macOS and Windows integration tests have not been executed from the current
+Linux development host. Hosted test results will be recorded after the authorized test-branch push.
+Actual hosted-runner results and physical GPU, display removal, DPI and desktop
+session checks remain required before claiming verified platform support.

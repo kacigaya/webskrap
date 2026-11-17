@@ -886,6 +886,33 @@ def test_launch_on_a_virtual_display_runs_headed_there(
     assert env["XAUTHORITY"] == "/private/Xauthority"
 
 
+def test_launch_on_a_helper_display_places_the_window_there(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launched: list[list[str]] = []
+
+    def fake_popen(command: list[str], **_kwargs: Any) -> _FakeProcess:
+        launched.append(command)
+        return _FakeProcess(exited=True)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda *_args, **_kwargs: None)
+
+    _launch(tmp_path, headless=True, virtual_display=True, window_origin=(1920, 0))
+
+    command = launched[0]
+    assert "--headless=new" not in command
+    position = next(arg for arg in command if arg.startswith("--window-position="))
+    x, y = map(int, position.split("=", 1)[1].split(","))
+    assert 1920 <= x < 3840
+    assert 0 <= y < 1080
+    size = next(arg for arg in command if arg.startswith("--window-size="))
+    width, height = map(int, size.split("=", 1)[1].split(","))
+    assert 0 < width <= 1920
+    assert 0 < height <= 1080
+    assert not any(arg.startswith("--screen-info") for arg in command)
+
+
 def test_launch_applies_mesa_and_the_locale_natively(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -946,6 +973,7 @@ class _FakeDisplay:
     pid = 4321
     env = {"DISPLAY": ":7", "XAUTHORITY": "/tmp/webskrap-display-x/Xauthority"}  # noqa: S108
     directory = Path("/tmp/webskrap-display-x")  # noqa: S108
+    origin = (0, 0)
 
     def __init__(self) -> None:
         self.stopped = False
@@ -957,7 +985,7 @@ class _FakeDisplay:
 def _stub_virtual_display(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, Path]]:
     stops: list[tuple[int, Path]] = []
 
-    async def fake_start(_width: int, _height: int) -> _FakeDisplay:
+    async def fake_start(_width: int, _height: int, **_kwargs: object) -> _FakeDisplay:
         return _FakeDisplay()
 
     monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
@@ -980,13 +1008,35 @@ def test_open_keeps_a_virtual_display_for_the_session_and_close_stops_it(
     assert stops == [(4321, _FakeDisplay.directory)]
 
 
+def test_open_places_the_window_on_a_helper_display_and_detaches_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    started: list[object] = []
+
+    class _HelperDisplay(_FakeDisplay):
+        env: dict[str, str] = {}
+        origin = (1440, 0)
+
+    async def fake_start(_width: int, _height: int, **kwargs: object) -> _HelperDisplay:
+        started.append(kwargs)
+        return _HelperDisplay()
+
+    monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
+
+    asyncio.run(browser_session.open_session("vd", virtual_display=True))
+
+    assert started == [{"detached": True}]
+    assert launches[0]["window_origin"] == (1440, 0)
+
+
 def test_open_stops_the_display_when_the_browser_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _stub_session_launch(monkeypatch, tmp_path)
     created: list[_FakeDisplay] = []
 
-    async def fake_start(_width: int, _height: int) -> _FakeDisplay:
+    async def fake_start(_width: int, _height: int, **_kwargs: object) -> _FakeDisplay:
         created.append(_FakeDisplay())
         return created[-1]
 

@@ -66,11 +66,64 @@ async def test_missing_xvfb_is_a_launch_error(monkeypatch: pytest.MonkeyPatch) -
     assert excinfo.value.code is ErrorCode.BROWSER_LAUNCH
 
 
-async def test_non_linux_is_a_launch_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(display.sys, "platform", "darwin")
+async def test_unsupported_platform_is_a_launch_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(display.sys, "platform", "freebsd14")
 
-    with pytest.raises(WebSkrapError, match="needs Linux"):
+    with pytest.raises(WebSkrapError, match="Linux, macOS or Windows") as excinfo:
         await display.VirtualDisplay.start(800, 600)
+
+    assert excinfo.value.code is ErrorCode.BROWSER_LAUNCH
+    assert display.available() is False
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+async def test_macos_and_windows_start_a_detachable_helper(
+    monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    calls: list[tuple[int, int, bool]] = []
+
+    def fake_start(
+        width: int, height: int, *, detached: bool
+    ) -> tuple[object, Path, tuple[int, int]]:
+        calls.append((width, height, detached))
+        return object(), Path("/tmp/webskrap-display-x"), (1920, -40)
+
+    monkeypatch.setattr(display.sys, "platform", platform)
+    monkeypatch.setattr(display._helper, "start", fake_start)
+
+    virtual = await display.VirtualDisplay.start(1280, 720, detached=True)
+
+    assert calls == [(1280, 720, True)]
+    assert virtual.origin == (1920, -40)
+    assert virtual.env == {}
+    assert virtual.window_args(["--x"], 1280, 720) == [
+        "--x",
+        "--window-position=1920,-40",
+        "--window-size=1280,720",
+    ]
+
+
+def test_place_window_offsets_a_position_and_keeps_a_size() -> None:
+    args = ["--window-position=10,20", "--window-size=800,600"]
+
+    assert display.place_window(args, (1440, 0), 1280, 720) == [
+        "--window-position=1450,20",
+        "--window-size=800,600",
+    ]
+
+
+def test_place_window_rejects_a_malformed_position() -> None:
+    with pytest.raises(WebSkrapError) as excinfo:
+        display.place_window(["--window-position=left"], (0, 0), 800, 600)
+
+    assert excinfo.value.code is ErrorCode.USAGE
+
+
+def test_xvfb_display_needs_no_window_placement() -> None:
+    virtual = display.VirtualDisplay(None, ":5", Path("/tmp/webskrap-display-x"))  # type: ignore[arg-type]
+
+    assert virtual.window_args(["--a"], 800, 600) == ["--a"]
+    assert virtual.env["DISPLAY"] == ":5"
 
 
 async def test_cancelled_start_stops_the_display(
@@ -80,7 +133,7 @@ async def test_cancelled_start_stops_the_display(
     release = threading.Event()
     stopped: list[bool] = []
 
-    def start_blocking(_width: int, _height: int) -> display.VirtualDisplay:
+    def start_blocking(_width: int, _height: int, _detached: bool) -> display.VirtualDisplay:
         started.set()
         release.wait()
 

@@ -68,6 +68,8 @@ for later commands. On a remote host, use a desktop connection to its display.
 
 Keep `profile_mode="native"` for the browser's own identity. On Linux with Xvfb,
 `virtual_display=True` runs a headed browser without a visible desktop window.
+macOS uses CoreGraphics. Windows needs a configured Virtual Display Driver.
+These two platforms share the logged-in desktop. See [setup and test limits](docs/virtual-display.md).
 Full profile emulation is useful for device tests, but cannot replace every
 worker or iframe value. See the [identity limits](src/webskrap/guide.md).
 

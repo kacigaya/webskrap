@@ -1,0 +1,75 @@
+name: Virtual displays
+
+on:
+  pull_request:
+  push:
+    branches: [main, "test/virtual-display-*"]
+  workflow_dispatch:
+    inputs:
+      physical:
+        description: Run on configured physical macOS and Windows runners
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: '3.13'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb mesa-vulkan-drivers
+      - if: runner.os == 'Windows'
+        name: Install pinned VDD on disposable hosted runner
+        shell: pwsh
+        run: ./scripts/ci/install-vdd.ps1
+      - name: Install Chromium
+        run: uv run webskrap install
+      - name: Test real displays and headed Chromium
+        env:
+          WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY: '1'
+          WEBSKRAP_VIRTUAL_DISPLAY_REPORT: virtual-display-report
+        run: uv run --extra dev pytest -q tests/test_virtual_display_integration.py
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: virtual-display-${{ matrix.os }}
+          path: virtual-display-report/
+          if-no-files-found: warn
+
+  physical:
+    if: github.event_name == 'workflow_dispatch' && inputs.physical
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macOS, Windows]
+    runs-on: [self-hosted, '${{ matrix.os }}', virtual-display]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          python-version: '3.13'
+      - name: Install Chromium
+        run: uv run webskrap install
+      - name: Test configured physical display backend
+        env:
+          WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY: '1'
+          WEBSKRAP_VIRTUAL_DISPLAY_REPORT: virtual-display-report
+        run: uv run --extra dev pytest -q tests/test_virtual_display_integration.py
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: physical-virtual-display-${{ matrix.os }}
+          path: virtual-display-report/
+          if-no-files-found: warn

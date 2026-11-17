@@ -1083,6 +1083,7 @@ class WebSkrapClient:
                 screen = config.virtual_screen()
                 display = await VirtualDisplay.start(screen.width, screen.height)
                 env = {**(env or os.environ), **display.env}
+                args = display.window_args(args, screen.width, screen.height)
             if config.user_data_dir is not None:
                 config.user_data_dir.mkdir(parents=True, exist_ok=True)
             browser = await launch(

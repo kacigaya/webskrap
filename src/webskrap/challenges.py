@@ -21,8 +21,6 @@ number. An origin's own 403 or 404 behind the same CDN carries neither.
 from __future__ import annotations
 
 import asyncio
-import shutil
-import sys
 import time
 from collections.abc import Mapping
 from contextlib import suppress
@@ -30,6 +28,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 
+from webskrap import display
 from webskrap.cdp import CDPError, CDPPage, EventRecorder
 from webskrap.errors import ErrorCode, WebSkrapError
 
@@ -89,36 +88,33 @@ class Detection:
         return WebSkrapError(self.message, code=ErrorCode.BLOCKED, hint=self.hint())
 
 
-def xvfb_available() -> bool:
-    """True on Linux when an Xvfb binary is on PATH, so virtual_display can start."""
-    return sys.platform.startswith("linux") and shutil.which("Xvfb") is not None
-
-
 def blocked_hint(kind: BlockKind) -> str:
     """Return the fetch-tool recovery hint for a ``kind`` detection on this host.
 
     ``virtual_display=True`` comes first where it can run: a headed browser on
-    a private Xvfb display passed checks that headless and locale profiles did
-    not, at no cost in exit IPs.
+    a private virtual display passed checks that headless and locale profiles
+    did not, at no cost in exit IPs.
     """
+    ready = display.available()
     if kind == "block":
-        if xvfb_available():
+        if ready:
             return (
-                "Try virtual_display=True (Xvfb is installed), or change the exit IP (proxy). "
+                "Try virtual_display=True, or change the exit IP (proxy). "
                 "Retrying unchanged will not help."
             )
         return (
-            "Change the exit IP (proxy), or try virtual_display=True on Linux with Xvfb. "
-            "Retrying unchanged will not help."
+            "Change the exit IP (proxy), or try virtual_display=True (needs Xvfb on Linux "
+            "or the Virtual Display Driver on Windows). Retrying unchanged will not help."
         )
-    if xvfb_available():
+    if ready:
         return (
-            "Try virtual_display=True (Xvfb is installed), headed mode, or a persistent "
+            "Try virtual_display=True, headed mode, or a persistent "
             "user_data_dir. WebSkrap does not solve CAPTCHAs."
         )
     return (
-        "Try headed mode, virtual_display=True (Linux with Xvfb), or a persistent "
-        "user_data_dir. WebSkrap does not solve CAPTCHAs."
+        "Try headed mode, virtual_display=True (needs Xvfb on Linux or the Virtual "
+        "Display Driver on Windows), or a persistent user_data_dir. "
+        "WebSkrap does not solve CAPTCHAs."
     )
 
 

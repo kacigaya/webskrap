@@ -123,6 +123,9 @@ class _FakeDisplay:
     async def stop(self) -> None:
         self.stopped += 1
 
+    def window_args(self, args: list[str], _width: int, _height: int) -> list[str]:
+        return args
+
 
 def _launch_client(
     monkeypatch: pytest.MonkeyPatch, launcher: _Launcher, *, probe: bool = False
@@ -130,7 +133,7 @@ def _launch_client(
     displays: list[_FakeDisplay] = []
     sizes: list[tuple[int, int]] = []
 
-    async def fake_start(width: int, height: int) -> _FakeDisplay:
+    async def fake_start(width: int, height: int, **_kwargs: object) -> _FakeDisplay:
         sizes.append((width, height))
         displays.append(_FakeDisplay())
         return displays[-1]

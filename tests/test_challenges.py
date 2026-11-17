@@ -66,20 +66,19 @@ async def test_datadome_frame_inspection_stops_at_the_navigation_deadline(monkey
     assert cancelled.is_set()
 
 
-@pytest.mark.parametrize("xvfb", [True, False])
-def test_hints_tell_blocks_from_challenges(monkeypatch: pytest.MonkeyPatch, xvfb: bool) -> None:
-    monkeypatch.setattr(challenges, "xvfb_available", lambda: xvfb)
+@pytest.mark.parametrize("ready", [True, False])
+def test_hints_tell_blocks_from_challenges(monkeypatch: pytest.MonkeyPatch, ready: bool) -> None:
+    monkeypatch.setattr(challenges.display, "available", lambda: ready)
     block, challenge = blocked_hint("block"), blocked_hint("challenge")
     assert "exit IP" in block and "virtual_display=True" in block
     assert "user_data_dir" in challenge and "headed" in challenge
     assert "user_data_dir" not in block
-    # virtual_display leads only where Xvfb can start it.
-    assert block.startswith("Try virtual_display=True") is xvfb
-    assert challenge.startswith("Try virtual_display=True") is xvfb
+    assert block.startswith("Try virtual_display=True") is ready
+    assert challenge.startswith("Try virtual_display=True") is ready
 
 
 def test_blocked_error_carries_the_kind_specific_hint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(challenges, "xvfb_available", lambda: True)
+    monkeypatch.setattr(challenges.display, "available", lambda: True)
     error = Detection("Akamai", "block").error()
     assert error_payload(error)["hint"] == blocked_hint("block")
     assert error_payload(error)["code"] == "blocked"
