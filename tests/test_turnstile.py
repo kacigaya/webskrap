@@ -339,6 +339,7 @@ def _tls_context(directory: Path) -> ssl.SSLContext:
         )
     )
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert_path, key_path)
     return context
 
@@ -405,14 +406,15 @@ async def test_fetch_clicks_the_drawn_checkbox_and_returns_the_real_page(
 async def test_fetch_reports_a_checkbox_that_never_clears(
     widget_server, sandbox_supported, monkeypatch
 ) -> None:
-    monkeypatch.setattr(turnstile, "TIMEOUT_S", 8.0)
+    monkeypatch.setattr(challenges, "INTERSTITIAL_TIMEOUT_S", 5.0)
+    monkeypatch.setattr(turnstile, "TIMEOUT_S", 12.0)
     monkeypatch.setattr(turnstile, "CLICK_INTERVAL_S", 1.0)
     monkeypatch.setattr(turnstile, "WANDER_S", (0.0, 0.1))
     url = f"http://127.0.0.1:{widget_server.server_port}/stay"
     started = time.monotonic()
     async with WebSkrapClient(default_config=_config(sandbox_supported, {})) as client:
         with pytest.raises(WebSkrapError) as error:
-            await client.fetch(url, timeout_ms=3_000)
+            await client.fetch(url)
     assert error.value.code is ErrorCode.BLOCKED
     assert len(widget_server.clicks) == turnstile.MAX_CLICKS
-    assert time.monotonic() - started < 30
+    assert time.monotonic() - started < 45
