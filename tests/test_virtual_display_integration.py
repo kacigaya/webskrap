@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from webskrap import SessionConfig, WebSkrapClient, browser_session, display
-from webskrap.client import lavapipe_available
+from webskrap.client import hardware_gpu_available, lavapipe_available
 from webskrap.models import Viewport
 
 pytestmark = pytest.mark.browser
@@ -176,6 +176,12 @@ def _report(name: str, seen: dict[str, Any]) -> None:
         path.write_text(json.dumps(seen, indent=2), encoding="utf-8")
 
 
+def _webgl_expected() -> bool:
+    if not sys.platform.startswith("linux"):
+        return True
+    return lavapipe_available() or hardware_gpu_available()
+
+
 def _assert_headed_and_rendering(seen: dict[str, Any], width: int, height: int) -> None:
     assert "HeadlessChrome" not in seen["ua"]
     assert "HeadlessChrome" not in seen["brands"]
@@ -187,8 +193,9 @@ def _assert_headed_and_rendering(seen: dict[str, Any], width: int, height: int) 
     assert seen["finePointer"] is True
     assert seen["visibility"] == "visible"
     assert seen["canvasPixel"] == [255, 0, 0, 255]
-    assert seen["webglRenderer"], "WebGL is unavailable on the virtual display"
-    assert seen["glPixel"] == [0, 255, 0, 255]
+    if _webgl_expected():
+        assert seen["webglRenderer"], "WebGL is unavailable on the virtual display"
+        assert seen["glPixel"] == [0, 255, 0, 255]
     if sys.platform.startswith("linux") and lavapipe_available():
         assert "SwiftShader" not in seen["webglRenderer"]
     if seen["webgpu"] and "pixel" in seen["webgpu"]:
