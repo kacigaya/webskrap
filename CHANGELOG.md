@@ -16,6 +16,8 @@ history, so they summarize each release rather than list every change.
   Added lifecycle tests and a real-display CI workflow. macOS and Windows
   require a logged-in desktop and share its displays.
 
+## [3.6.1] - 2026-11-17
+
 ### Changed
 
 - Under `virtual_display`, the default `gpu="auto"` now launches with Mesa's
@@ -1125,7 +1127,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.6.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.6.1...HEAD
+[3.6.1]: https://github.com/kacigaya/webskrap/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/kacigaya/webskrap/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/kacigaya/webskrap/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/kacigaya/webskrap/compare/v3.3.0...v3.4.0
