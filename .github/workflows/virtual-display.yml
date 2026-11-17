@@ -36,6 +36,7 @@ jobs:
       - name: Install Chromium
         run: uv run webskrap install
       - name: Test real displays and headed Chromium
+        timeout-minutes: 8
         env:
           WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY: '1'
           WEBSKRAP_VIRTUAL_DISPLAY_REPORT: virtual-display-report
@@ -67,6 +68,7 @@ jobs:
       - name: Install Chromium
         run: uv run webskrap install
       - name: Test configured physical display backend
+        timeout-minutes: 8
         env:
           WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY: '1'
           WEBSKRAP_VIRTUAL_DISPLAY_REPORT: virtual-display-report

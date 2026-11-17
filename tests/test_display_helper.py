@@ -48,7 +48,7 @@ def _spawn(directory: Path, *, detached: bool) -> subprocess.Popen[bytes]:
     )
 
 
-def _wait_ready(directory: Path) -> dict[str, int]:
+def _wait_ready(directory: Path) -> dict[str, int | str]:
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         ready = directory / _helper.READY_FILE
@@ -73,11 +73,13 @@ def test_run_holds_until_the_run_file_goes(tmp_path: Path) -> None:
         target=lambda: status.append(_helper.run(directory, 800, 600, detached=True, backend=hold))
     )
     thread.start()
-    assert _wait_ready(directory) == {"x": 1440, "y": 0}
-    assert _helper._lock_held(directory / _helper.LOCK_FILE) is (sys.platform != "win32")
-
-    (directory / _helper.RUN_FILE).unlink()
-    thread.join(5)
+    try:
+        ready = _wait_ready(directory)
+        assert (ready["x"], ready["y"]) == (1440, 0)
+        assert _helper._lock_held(directory / _helper.LOCK_FILE)
+    finally:
+        (directory / _helper.RUN_FILE).unlink(missing_ok=True)
+        thread.join(5)
 
     assert status == [0]
     assert events == ["enter 800x600", "exit"]
@@ -119,7 +121,8 @@ def test_stop_detached_releases_a_detached_helper(tmp_path: Path) -> None:
     directory = _directory(tmp_path)
     process = _spawn(directory, detached=True)
     try:
-        assert _wait_ready(directory) == {"x": 100, "y": 200}
+        ready = _wait_ready(directory)
+        assert (ready["x"], ready["y"]) == (100, 200)
 
         _helper.stop_detached(process.pid, directory)
 
