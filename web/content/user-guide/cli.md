@@ -86,7 +86,7 @@ destination. Google is not offered. JSON output carries `query`, `engine`,
 
 A `blocked` failure (exit 11) means the engine served a bot challenge instead
 of results. Switch engine, reuse `--user-data-dir`, or change the exit IP.
-Nothing is retried and no CAPTCHA is solved.
+Nothing is retried.
 
 ## Text and stdout
 
@@ -153,6 +153,14 @@ and the JSON output carries `cookie_notice_declined`.
 ```bash
 webskrap fetch https://example.com --no-decline-cookies
 webskrap fetch https://example.com --decline-cookies-timeout-ms 4000
+```
+
+`--solve-cloudflare` clicks Cloudflare's Turnstile checkbox on its "Just a
+moment" page and waits up to 60 seconds for the real page. It is off by
+default. See [Stealth](stealth.md#cloudflare-turnstile) and use it responsibly.
+
+```bash
+webskrap fetch https://example.com --virtual-display --solve-cloudflare
 ```
 
 The timeout is how long to wait for a late-injected notice, and the per-fetch
@@ -284,7 +292,8 @@ failure; JSON output carries the same name in `code`:
 | 11   | `blocked`             |
 
 `open URL` and `goto` take `--decline-cookies` to click a consent notice's
-reject control. They also run the fetch tools' challenge and block check, but
+reject control, and `--solve-cloudflare` to click Cloudflare's Turnstile
+checkbox. They also run the fetch tools' challenge and block check, but
 report a match instead of failing: the human output prints a `blocked:` line,
 and JSON output carries it in `blocked`. The page stays open.
 

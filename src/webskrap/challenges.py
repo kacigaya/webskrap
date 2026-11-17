@@ -1,4 +1,4 @@
-"""Recognize challenge and block pages without solving them or copying their tokens.
+"""Recognize challenge and block pages, and wait for the ones that clear.
 
 These checks deliberately use provider-specific elements and headers. Mentioning
 a CAPTCHA in an article, embedding Turnstile, or receiving a plain HTTP 403 does
@@ -8,7 +8,9 @@ Two kinds are told apart, because they need different fixes:
 
 - A *challenge* asks the browser to prove itself (DataDome, Cloudflare's "Just a
   moment", Akamai's sec-cpt page, AWS WAF's challenge action). A more
-  browser-like run can pass it.
+  browser-like run can pass it. With ``solve_cloudflare``, Cloudflare's
+  checkbox is clicked by :mod:`webskrap.turnstile`; no other challenge is
+  interacted with, and no token is read or copied.
 - A *block* refuses the client outright (a Cloudflare block page, an Akamai
   edge reference page). Only a different exit IP or fingerprint helps.
 
@@ -69,11 +71,15 @@ class Detection:
         if browser_session:
             if self.kind == "block":
                 return "Reopen the session through another exit IP (webskrap browser open --proxy)."
-            return (
-                "Solve it in a headed session (webskrap browser open --headed) and keep the "
-                "profile. WebSkrap does not solve CAPTCHAs."
+            hint = (
+                "Complete it in a headed session (webskrap browser open --headed) and keep the "
+                "profile."
             )
-        return blocked_hint(self.kind)
+        else:
+            hint = blocked_hint(self.kind)
+        if (self.provider, self.kind) == ("Cloudflare", "challenge"):
+            hint += " solve_cloudflare=True clicks its Turnstile checkbox."
+        return hint
 
     def payload(self) -> dict[str, str]:
         """Return the machine-readable form the browser tools report."""
@@ -114,12 +120,9 @@ def blocked_hint(kind: BlockKind) -> str:
     if xvfb_available():
         return (
             "Try virtual_display=True (Xvfb is installed), headed mode, or a persistent "
-            "user_data_dir. WebSkrap does not solve CAPTCHAs."
+            "user_data_dir."
         )
-    return (
-        "Try headed mode, virtual_display=True (Linux with Xvfb), or a persistent "
-        "user_data_dir. WebSkrap does not solve CAPTCHAs."
-    )
+    return "Try headed mode, virtual_display=True (Linux with Xvfb), or a persistent user_data_dir."
 
 
 # Return only fixed provider names, never page text, URLs, IDs or tokens.
@@ -308,23 +311,33 @@ async def settle(
     *,
     wait_until: str,
     deadline: float,
+    solve_cloudflare: bool = False,
 ) -> dict[str, Any]:
     """Let a self-clearing interstitial reload into the requested page.
 
     DataDome's device check, Akamai's sec-cpt page and AWS WAF's challenge run
     their own script and reload the URL; nothing here interacts with them.
-    Waits at most :data:`INTERSTITIAL_TIMEOUT_S` and never past
-    ``deadline``. ``events`` comes from :func:`record_documents`.
+    Waits at most :data:`INTERSTITIAL_TIMEOUT_S` and never past ``deadline``.
+    ``events`` comes from :func:`record_documents`.
+
+    With ``solve_cloudflare``, Cloudflare's "Just a moment" page is waited on
+    too, and its checkbox, once drawn, is clicked by
+    :class:`webskrap.turnstile.Checkbox`. A drawn checkbox gets its own
+    :data:`webskrap.turnstile.TIMEOUT_S`, past ``deadline`` if need be.
 
     Returns:
-        The response of the document now on screen. When the interstitial is
-        still there, that is its own response, and :func:`detect` reports it.
+        The response of the document now on screen, once :func:`detect` finds
+        no reloading interstitial there. When the interstitial is still there,
+        that is its own response, and :func:`detect` reports it.
     """
+    from webskrap.turnstile import Checkbox
+
     limit = min(deadline, time.monotonic() + INTERSTITIAL_TIMEOUT_S)
     # Start from the document on screen: it may already have replaced the one
     # goto answered for, whose headers would keep reporting the interstitial.
     current_loader, document = _main_document(events, page.target_id)
     current = document if document is not None else response
+    checkbox: Checkbox | None = None
     while True:
         try:
             found = await detect(
@@ -332,7 +345,14 @@ async def settle(
             )
         except CDPError:
             found = Detection("", "challenge", reloads=True)  # the document is being replaced
-        if found is None or not found.reloads or time.monotonic() >= limit:
+        waiting = found is not None and found.reloads
+        if solve_cloudflare and found == Detection("Cloudflare", "challenge"):
+            checkbox = checkbox or Checkbox(page)
+            await checkbox.step()
+            if checkbox.seen:
+                limit = max(limit, checkbox.deadline)
+            waiting = True
+        if not waiting or time.monotonic() >= limit:
             return current
         await asyncio.sleep(_POLL_S)
         loader, document = _main_document(events, page.target_id)

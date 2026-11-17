@@ -1,6 +1,6 @@
 ---
 title: Stealth Browser Scraping with Python
-description: Use WebSkrap's own CDP client for stealth-oriented Python web scraping without CAPTCHA or access-control bypassing.
+description: Use WebSkrap's own CDP client for stealth-oriented Python web scraping, with opt-in Cloudflare Turnstile handling and no access-control bypassing.
 ---
 
 # Stealth
@@ -50,6 +50,31 @@ plain 403, 404 or 202 without these provider markers is not a block: it
 returns `ok: false` or `ok: true` as usual. The localized title of a block
 page is never a signal.
 
+## Cloudflare Turnstile
+
+`solve_cloudflare=True` (CLI `--solve-cloudflare`) handles Cloudflare's "Just
+a moment" page, like Scrapling's option of the same name. It is off by default;
+without it a Cloudflare challenge fails fast with `blocked`. With it, WebSkrap
+waits on the challenge page. When Cloudflare draws its Turnstile checkbox, the
+cursor wanders for 1.5 to 3 seconds, follows a curved path to the checkbox and
+clicks with a mouse-like button hold. The checkbox position is read from the
+widget's own DOM before each click. If the page has not cleared 20 seconds
+later, WebSkrap clicks again, at most three times. The checkbox gets up to 60
+seconds from when it first appears, on top of `timeout_ms`. Success is reported
+only after the real page loads and no challenge is detected on it; otherwise
+the call fails with `blocked`.
+
+It works in headless, headed and `virtual_display` modes. A click only answers
+the widget: Cloudflare still scores the browser and the exit IP, so a headless
+browser or a flagged IP can still be refused. No token is read, copied or
+injected, and no outside solving service is used. Other CAPTCHAs, such as
+DataDome's slider or image and audio puzzles, are reported as `blocked` and
+never touched.
+
+Use it responsibly: only on sites whose terms and applicable law allow
+automated access, and at a polite rate. Passing a challenge does not grant
+permission to collect data you may not collect.
+
 The hint depends on the kind. For a block, change the exit IP or try
 `virtual_display=True`. For a challenge, try `virtual_display=True`, headed
 mode, or a persistent `user_data_dir`. On Linux with Xvfb installed, the hint
@@ -58,10 +83,8 @@ Ray IDs or reference IDs. Detection cannot identify every challenge or
 guarantee that later interactions will succeed. Stop automatic retries on
 `blocked`.
 
-Some sites challenge a datacenter exit IP whatever the browser does. For
-example, a deal forum behind Cloudflare still challenged `virtual_display=True`
-from a cloud VM. There, only a residential or mobile exit IP helps. WebSkrap
-does not solve CAPTCHAs.
+Some sites refuse a datacenter exit IP whatever the browser does. There, only a
+residential or mobile exit IP helps.
 
 Pass `ready_selector` to require a visible content element before extraction; a
 successful HTTP status alone does not establish that the intended page loaded.

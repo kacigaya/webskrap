@@ -135,6 +135,14 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
     assert config.channel == "chrome"
     assert config.profile_mode == "native"
     assert config.decline_cookies is True
+    assert config.solve_cloudflare is False
+
+
+def test_fetch_solve_cloudflare_flag(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--solve-cloudflare"])
+    assert result.exit_code == 0, result.output
+    assert _FakeClient.calls[0]["config"].solve_cloudflare is True
 
 
 def test_fetch_no_decline_cookies_flag(monkeypatch: Any) -> None:

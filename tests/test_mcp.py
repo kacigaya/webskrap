@@ -152,6 +152,15 @@ def test_stealth_fetch_exposes_resource_and_wait_controls(monkeypatch: Any) -> N
     assert _FakeClient.calls[0]["config"].resource_policy.value == "lite"
     assert _FakeClient.calls[0]["wait_until"] == "load"
     assert _FakeClient.calls[0]["decline_cookies"] is True
+    assert _FakeClient.calls[0]["solve_cloudflare"] is False
+
+
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_tools_pass_solve_cloudflare(monkeypatch: Any, tool: Any) -> None:
+    _fake_client(monkeypatch)
+    asyncio.run(tool("https://example.test", solve_cloudflare=True))
+    assert _FakeClient.calls[0]["solve_cloudflare"] is True
+    assert _FakeClient.calls[0]["config"].solve_cloudflare is True
 
 
 @pytest.mark.parametrize("kwargs", [{"resource_policy": "invalid"}, {"wait_until": "invalid"}])

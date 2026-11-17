@@ -124,6 +124,10 @@ config = SessionConfig(decline_cookies=True, decline_cookies_timeout_ms=2_000)
 `session.decline_cookies(page)` applies the same handling to a page controlled
 by the caller.
 
+`SessionConfig(solve_cloudflare=True)`, or `session.fetch(url, solve_cloudflare=True)`
+for one call, clicks Cloudflare's Turnstile checkbox on its "Just a moment"
+page and waits up to 60 seconds for the real page. Use it responsibly.
+
 Link collection is opt-in with `include_links=True` and capped by `max_links`.
 Links resolve against the final URL. Duplicate and `javascript:` targets are
 dropped. `links_total` is the count before the cap. A session with

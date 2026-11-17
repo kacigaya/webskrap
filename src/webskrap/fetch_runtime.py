@@ -16,6 +16,7 @@ from webskrap.models import BrowserProfile, SessionConfig
 
 MAX_FETCH_CONCURRENCY = 8
 MAX_FETCH_SESSIONS = 8
+_PER_CALL = {"navigation_timeout_ms", "decline_cookies", "solve_cloudflare"}
 
 
 @dataclass
@@ -78,8 +79,8 @@ class FetchRuntime:
                 elif entry.closing:
                     raise WebSkrapError("fetch session is closing", code=ErrorCode.USAGE)
                 elif (
-                    entry.config.model_dump(exclude={"navigation_timeout_ms", "decline_cookies"})
-                    != config.model_dump(exclude={"navigation_timeout_ms", "decline_cookies"})
+                    entry.config.model_dump(exclude=_PER_CALL)
+                    != config.model_dump(exclude=_PER_CALL)
                     or entry.profile != profile
                 ):
                     raise WebSkrapError(

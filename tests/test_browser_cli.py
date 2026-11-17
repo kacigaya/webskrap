@@ -59,6 +59,27 @@ def test_browser_commands_are_registered() -> None:
         assert command in result.output
 
 
+def test_goto_passes_solve_cloudflare(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def run_page_action(_session: str, action: Any, **_: Any) -> Any:
+        return await action(object())
+
+    async def goto(_page: Any, url: str, _wait_until: str, **options: Any) -> dict[str, Any]:
+        calls.append(options)
+        return {"status": 200, "url": url, "title": "t", "blocked": None}
+
+    monkeypatch.setattr(browser_session, "run_page_action", run_page_action)
+    monkeypatch.setattr(browser_session, "goto", goto)
+    result = runner.invoke(
+        cli.app,
+        ["browser", "goto", "https://example.test", "--solve-cloudflare", "--format", "json"],
+        env=_env(tmp_path),
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == [{"decline_cookies": False, "solve_cloudflare": True}]
+
+
 @pytest.mark.parametrize("session", [".", "..", "../evil"])
 def test_invalid_session_name_is_rejected(tmp_path: Path, session: str) -> None:
     result = runner.invoke(

@@ -394,6 +394,7 @@ class SessionConfig(BaseModel):
     # misses most of them. This is the per-fetch cost on pages without a
     # notice; set 0 for a single immediate check.
     decline_cookies_timeout_ms: float = Field(default=2_000, ge=0)
+    solve_cloudflare: bool = False
 
     @model_validator(mode="before")
     @classmethod

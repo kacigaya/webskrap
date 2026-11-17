@@ -194,6 +194,13 @@ def open_command(
             "--decline-cookies", help="With a URL, click a cookie consent notice's reject control."
         ),
     ] = False,
+    solve_cloudflare: Annotated[
+        bool,
+        typer.Option(
+            "--solve-cloudflare",
+            help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     virtual_display: VirtualDisplayOption = False,
     gpu: GpuOption = GpuBackend.AUTO,
     profile_mode: SessionProfileModeOption = "native",
@@ -250,7 +257,11 @@ def open_command(
             _run_page_command(
                 session,
                 lambda page: browser_session.goto(
-                    page, url, "load", decline_cookies=decline_cookies
+                    page,
+                    url,
+                    "load",
+                    decline_cookies=decline_cookies,
+                    solve_cloudflare=solve_cloudflare,
                 ),
                 output_format,
                 timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
@@ -397,6 +408,13 @@ def goto_command(
         bool,
         typer.Option("--decline-cookies", help="Click a cookie consent notice's reject control."),
     ] = False,
+    solve_cloudflare: Annotated[
+        bool,
+        typer.Option(
+            "--solve-cloudflare",
+            help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
     """Navigate the current page.
@@ -409,7 +427,11 @@ def goto_command(
     state = _run_page_command(
         session,
         lambda page: browser_session.goto(
-            page, url, parsed_wait_until, decline_cookies=decline_cookies
+            page,
+            url,
+            parsed_wait_until,
+            decline_cookies=decline_cookies,
+            solve_cloudflare=solve_cloudflare,
         ),
         output_format,
         timeout_ms=timeout_ms,
