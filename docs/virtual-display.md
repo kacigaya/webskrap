@@ -43,11 +43,11 @@ does not ensure a WebGPU adapter.
 ## macOS
 
 Run Python from a logged-in GUI session. A service without access to WindowServer
-cannot create a usable display. Turn off **Displays have separate Spaces** in
-System Settings > Desktop & Dock > Mission Control, then log out and back in.
-With separate Spaces, macOS moves each new window to the active display, so
-Chrome cannot stay on the virtual display. The backend refuses to start while
-the setting is on. The backend creates one display per session at
+cannot create a usable display. With **Displays have separate Spaces** on,
+macOS can move each new window to the active display, so Chrome may not stay
+on the virtual display. If placement fails while it is on, the error says to
+turn it off in System Settings > Desktop & Dock > Mission Control and to log
+out and back in. The backend creates one display per session at
 the requested size, without HiDPI scaling. Its native Objective-C calls follow
 [Chromium's virtual display test implementation](https://github.com/chromium/chromium/blob/main/ui/display/mac/test/virtual_display_util_mac.mm).
 Each descriptor has a nonzero vendor ID and a separate random serial number.

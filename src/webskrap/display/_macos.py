@@ -298,9 +298,8 @@ def hold(width: int, height: int) -> Iterator[tuple[int, int]]:
     takes. The display is removed on exit, and by macOS if this process dies.
 
     Raises:
-        WebSkrapError: ``browser_launch`` outside a GUI session, while
-            displays have separate Spaces, on a macOS without the API, or if
-            the display does not come online.
+        WebSkrapError: ``browser_launch`` outside a GUI session, on a macOS
+            without the API, or if the display does not come online.
     """
     if width <= 0 or height <= 0:
         raise _fail("width and height must be positive")
@@ -310,13 +309,6 @@ def hold(width: int, height: int) -> Iterator[tuple[int, int]]:
         raise _fail(f"CoreGraphics could not be loaded ({exc})") from None
     if not runtime.gui_session():
         raise _fail("no logged-in GUI session; run inside the user's desktop session")
-    if runtime.separate_spaces():
-        # macOS moves each new window to the active display's Space, so
-        # Chrome cannot stay on the virtual display.
-        raise _fail(
-            "turn off 'Displays have separate Spaces' in System Settings > "
-            "Desktop & Dock > Mission Control, then log out and back in"
-        )
     pool = runtime.objc.objc_autoreleasePoolPush()
     virtual = None
     try:
@@ -478,8 +470,16 @@ async def place_browser(
             ):
                 return
             await asyncio.sleep(0.1)
+        hint = ""
+        with suppress(Exception):
+            if _Runtime().separate_spaces():
+                # macOS can move a new window to the active display's Space.
+                hint = (
+                    "; turn off 'Displays have separate Spaces' in System Settings > "
+                    "Desktop & Dock > Mission Control, then log out and back in"
+                )
         raise _fail(
-            f"Chrome stayed on the wrong screen (observed {seen}, expected {width}x{height})"
+            f"Chrome stayed on the wrong screen (observed {seen}, expected {width}x{height})" + hint
         )
     finally:
         await connection.send("Target.detachFromTarget", {"sessionId": attached["sessionId"]})

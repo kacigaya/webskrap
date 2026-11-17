@@ -20,8 +20,8 @@ history, so they summarize each release rather than list every change.
 
 - macOS virtual displays wait until WindowServer reports the new arrangement
   to other apps before Chrome launches, and placement retries really move the
-  window. Chrome no longer sometimes stays on the physical screen. The backend
-  now fails fast when "Displays have separate Spaces" is on.
+  window. Chrome no longer sometimes stays on the physical screen. A placement
+  failure names "Displays have separate Spaces" when that setting is on.
 - macOS blanks the screen less often. A new virtual display keeps the place
   macOS gives it unless it overlaps another display. Back-to-back temporary
   sessions of the same size reuse one display, which is removed after 15 idle

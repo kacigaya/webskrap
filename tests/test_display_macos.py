@@ -53,13 +53,6 @@ def test_no_gui_fails_before_creation(runtime):
     runtime.send.assert_not_called()
 
 
-def test_separate_spaces_fail_before_creation(runtime):
-    runtime.separate_spaces.return_value = True
-    with pytest.raises(WebSkrapError, match="separate Spaces"), _macos.hold(1280, 720):
-        pytest.fail("display created while displays have separate Spaces")
-    runtime.send.assert_not_called()
-
-
 def test_missing_id_releases(runtime):
     runtime.send.return_value = 0
     with pytest.raises(WebSkrapError, match="without an ID"), _macos.hold(1280, 720):
@@ -252,8 +245,12 @@ async def test_cdp_placement_rejects_a_browser_left_on_the_physical_screen(
     )
     ticks = iter([0, 0, 0, 11])
     monkeypatch.setattr(_macos, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
-    with pytest.raises(WebSkrapError, match="Chrome stayed on the wrong screen"):
+    spaces = Mock()
+    spaces.separate_spaces.return_value = native_screen == [1792, 1120]
+    monkeypatch.setattr(_macos, "_Runtime", lambda: spaces)
+    with pytest.raises(WebSkrapError, match="Chrome stayed on the wrong screen") as error:
         await _macos.place_browser(connection, (1792, 0), 1280, 720, [])
+    assert ("separate Spaces" in str(error.value)) is (native_screen == [1792, 1120])
     assert connection.send.call_args.args[0] == "Target.detachFromTarget"
 
 
