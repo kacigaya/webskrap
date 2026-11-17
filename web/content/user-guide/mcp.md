@@ -212,8 +212,9 @@ of a session's traffic. Open a proxied session from the CLI with
 `browser_open` reports its `proxy_server`.
 
 `browser_open` also takes the native stealth settings of `stealth_fetch`:
-`virtual_display` (headed Chromium on a private Xvfb display that lives as long
-as the session, Linux), `gpu` (`mesa` renders WebGL through Mesa's lavapipe; `auto` picks it under
+`virtual_display` (headed Chromium on Xvfb on Linux, CoreGraphics on macOS,
+or a configured Virtual Display Driver monitor on Windows; the last two share
+the logged-in desktop), `gpu` (`mesa` renders WebGL through Mesa's lavapipe; `auto` picks it under
 `virtual_display` on a host without a GPU when lavapipe is installed),
 and `profile_mode` `locale` with a `profile` (timezone and languages set at
 launch, Linux). Session commands reconnect for every call, and CDP emulation

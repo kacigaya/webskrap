@@ -69,8 +69,9 @@ session through a proxy and defaults WebRTC to `disable_non_proxied_udp`;
 reopening with different values is refused. The URL never holds credentials:
 for an http or https proxy, set `WEBSKRAP_PROXY_USERNAME` and
 `WEBSKRAP_PROXY_PASSWORD`, and a helper process answers the proxy.
-`--virtual-display` runs Chrome headed on a private Xvfb display that lives
-as long as the session. `--gpu mesa` and `--profile-mode locale --profile NAME`
+`--virtual-display` runs Chrome headed on Xvfb (Linux), CoreGraphics (macOS),
+or a configured Virtual Display Driver monitor (Windows), for the session
+lifetime. macOS and Windows share the logged-in desktop. `--gpu mesa` and `--profile-mode locale --profile NAME`
 work as for `fetch`; `full` mode is not offered for sessions.
 
 ```bash

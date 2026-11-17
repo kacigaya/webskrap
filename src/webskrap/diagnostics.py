@@ -114,7 +114,7 @@ def fingerprint_warnings(fingerprint: object) -> list[str]:
     if "HeadlessChrome" in str(fingerprint.get("user_agent", "")):
         warnings.append(
             "Headless fetches report HeadlessChrome in the user agent. Use "
-            "virtual_display=True (Linux with Xvfb) or headed mode."
+            "virtual_display=True or headed mode."
         )
     renderer = fingerprint.get("webgl_renderer")
     if renderer is None:

@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -886,6 +887,33 @@ def test_launch_on_a_virtual_display_runs_headed_there(
     assert env["XAUTHORITY"] == "/private/Xauthority"
 
 
+def test_launch_on_a_helper_display_places_the_window_there(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launched: list[list[str]] = []
+
+    def fake_popen(command: list[str], **_kwargs: Any) -> _FakeProcess:
+        launched.append(command)
+        return _FakeProcess(exited=True)
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda *_args, **_kwargs: None)
+
+    _launch(tmp_path, headless=True, virtual_display=True, window_origin=(1920, 0))
+
+    command = launched[0]
+    assert "--headless=new" not in command
+    position = next(arg for arg in command if arg.startswith("--window-position="))
+    x, y = map(int, position.split("=", 1)[1].split(","))
+    assert 1920 <= x < 3840
+    assert 0 <= y < 1080
+    size = next(arg for arg in command if arg.startswith("--window-size="))
+    width, height = map(int, size.split("=", 1)[1].split(","))
+    assert 0 < width <= 1920
+    assert 0 < height <= 1080
+    assert not any(arg.startswith("--screen-info") for arg in command)
+
+
 def test_launch_applies_mesa_and_the_locale_natively(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -946,6 +974,7 @@ class _FakeDisplay:
     pid = 4321
     env = {"DISPLAY": ":7", "XAUTHORITY": "/tmp/webskrap-display-x/Xauthority"}  # noqa: S108
     directory = Path("/tmp/webskrap-display-x")  # noqa: S108
+    origin = (0, 0)
 
     def __init__(self) -> None:
         self.stopped = False
@@ -953,11 +982,26 @@ class _FakeDisplay:
     async def stop(self) -> None:
         self.stopped = True
 
+    def window_args(self, args, width, height):
+        return args
+
+
+def _stub_macos_placement(monkeypatch: pytest.MonkeyPatch) -> None:
+    from webskrap.display import _macos
+
+    @contextlib.asynccontextmanager
+    async def connect(*_args: object, **_kwargs: object):
+        yield object()
+
+    monkeypatch.setattr(browser_session.cdp_session, "connect", connect)
+    monkeypatch.setattr(_macos, "place_browser", AsyncMock())
+
 
 def _stub_virtual_display(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, Path]]:
     stops: list[tuple[int, Path]] = []
+    _stub_macos_placement(monkeypatch)
 
-    async def fake_start(_width: int, _height: int) -> _FakeDisplay:
+    async def fake_start(_width: int, _height: int, **_kwargs: object) -> _FakeDisplay:
         return _FakeDisplay()
 
     monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
@@ -980,13 +1024,36 @@ def test_open_keeps_a_virtual_display_for_the_session_and_close_stops_it(
     assert stops == [(4321, _FakeDisplay.directory)]
 
 
+def test_open_places_the_window_on_a_helper_display_and_detaches_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    started: list[object] = []
+
+    class _HelperDisplay(_FakeDisplay):
+        env: dict[str, str] = {}
+        origin = (1440, 0)
+
+    async def fake_start(_width: int, _height: int, **kwargs: object) -> _HelperDisplay:
+        started.append(kwargs)
+        return _HelperDisplay()
+
+    monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
+    _stub_macos_placement(monkeypatch)
+
+    asyncio.run(browser_session.open_session("vd", virtual_display=True))
+
+    assert started == [{"detached": True}]
+    assert launches[0]["window_origin"] == (1440, 0)
+
+
 def test_open_stops_the_display_when_the_browser_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _stub_session_launch(monkeypatch, tmp_path)
     created: list[_FakeDisplay] = []
 
-    async def fake_start(_width: int, _height: int) -> _FakeDisplay:
+    async def fake_start(_width: int, _height: int, **_kwargs: object) -> _FakeDisplay:
         created.append(_FakeDisplay())
         return created[-1]
 
@@ -1144,3 +1211,31 @@ def test_locale_launch_keeps_proxy_credentials_out_of_the_browser(
     assert launched[0]["TZ"] == "Europe/Paris"
     assert "WEBSKRAP_PROXY_USERNAME" not in launched[0]
     assert "WEBSKRAP_PROXY_PASSWORD" not in launched[0]
+
+
+def test_macos_persistent_placement_failure_kills_browser_and_stops_display(monkeypatch, tmp_path):
+    from webskrap.display import _macos
+
+    _stub_session_launch(monkeypatch, tmp_path)
+    virtual = _FakeDisplay()
+
+    async def start(*args, **kwargs):
+        return virtual
+
+    @contextlib.asynccontextmanager
+    async def connect(*args, **kwargs):
+        yield object()
+
+    killed = []
+    monkeypatch.setattr(display.VirtualDisplay, "start", start)
+    monkeypatch.setattr(browser_session.cdp_session, "connect", connect)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda pid, **kw: killed.append(pid))
+    monkeypatch.setattr(
+        _macos, "place_browser", AsyncMock(side_effect=WebSkrapError("wrong screen"))
+    )
+    monkeypatch.setattr(browser_session.sys, "platform", "darwin")
+    with pytest.raises(WebSkrapError, match="wrong screen"):
+        asyncio.run(browser_session.open_session("mac", virtual_display=True))
+    assert killed == [1234]
+    assert virtual.stopped
+    assert browser_session.read_state(browser_session.session_dir("mac")) is None

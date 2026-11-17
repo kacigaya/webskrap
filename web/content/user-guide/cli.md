@@ -185,8 +185,9 @@ webskrap fetch https://example.com \
   --virtual-display
 ```
 
-`--virtual-display` runs Chrome headed on a private Xvfb display (Linux, `Xvfb`
-installed), so no `HeadlessChrome` token or empty client hints reach the site.
+`--virtual-display` runs Chrome headed on Xvfb (Linux), CoreGraphics (macOS),
+or a configured Virtual Display Driver monitor (Windows). macOS and Windows
+need a logged-in desktop. No `HeadlessChrome` token or empty client hints reach the site.
 `--mask-headless-user-agent` rewrites the token under headless mode instead,
 but Chromium then empties the high-entropy client hints. `--gpu mesa` renders
 WebGL with Mesa's lavapipe instead of SwiftShader (Linux,
@@ -232,7 +233,7 @@ its workers, and the browser launches with
 `--disable-blink-features=AutomationControlled` (`navigator.webdriver` stays
 false) plus the 1920x1080 virtual screen used by headless fetches. Headless
 sessions still report `HeadlessChrome` in the user agent. When a site checks
-it, pass `--virtual-display` (headed on a private Xvfb display that lives as
+it, pass `--virtual-display` (headed on a virtual display that lives as
 long as the session, Linux) or `--headed`. `--gpu mesa` and
 `--profile-mode locale --profile NAME` work as for `fetch`. Session commands
 reconnect for every call and CDP emulation ends with its connection, so

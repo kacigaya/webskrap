@@ -64,7 +64,9 @@ returns `ok: false` or `ok: true` as usual. The localized title of a block
 page is never a signal.
 
 `profile_mode="native"` keeps the browser's own identity across documents and
-workers. On Linux, `virtual_display=True` runs that browser headed on Xvfb.
+workers. `virtual_display=True` runs headed on Xvfb (Linux), CoreGraphics
+(macOS), or a preconfigured Virtual Display Driver monitor (Windows). The
+last two need a logged-in desktop and share it with other apps.
 This avoids headless-specific values without replacing JavaScript APIs.
 It does not guarantee that a site will accept the browser or its exit IP.
 

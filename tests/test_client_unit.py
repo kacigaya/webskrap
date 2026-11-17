@@ -118,10 +118,14 @@ class _Launcher:
 class _FakeDisplay:
     def __init__(self) -> None:
         self.stopped = 0
+        self.origin = (1792, 0)
         self.env = {"DISPLAY": ":99", "XAUTHORITY": "/tmp/webskrap-display-x/Xauthority"}
 
     async def stop(self) -> None:
         self.stopped += 1
+
+    def window_args(self, args: list[str], _width: int, _height: int) -> list[str]:
+        return args
 
 
 def _launch_client(
@@ -130,7 +134,7 @@ def _launch_client(
     displays: list[_FakeDisplay] = []
     sizes: list[tuple[int, int]] = []
 
-    async def fake_start(width: int, height: int) -> _FakeDisplay:
+    async def fake_start(width: int, height: int, **_kwargs: object) -> _FakeDisplay:
         sizes.append((width, height))
         displays.append(_FakeDisplay())
         return displays[-1]
@@ -138,7 +142,10 @@ def _launch_client(
     async def no_probe(*_args: object) -> str:
         raise AssertionError("the UA probe must not run here")
 
+    from webskrap.display import _macos
+
     monkeypatch.setattr("webskrap.client.VirtualDisplay.start", fake_start)
+    monkeypatch.setattr(_macos, "place_browser", AsyncMock())
     monkeypatch.setattr(client_module, "launch", launcher)
     monkeypatch.setattr(client_module, "find_executable", lambda _channel: EXECUTABLE)
     client = WebSkrapClient()
@@ -1236,3 +1243,17 @@ async def test_fetch_selects_resources_for_output(monkeypatch, text_only, screen
     monkeypatch.setattr(client_module, "_maybe_screenshot", AsyncMock(return_value=None))
     await session.fetch("https://example.test", text_only=text_only, screenshot=screenshot)
     session.new_page.assert_awaited_once_with(text_only=expected)
+
+
+async def test_macos_rejects_wrong_display_and_stops_helper(monkeypatch):
+    from webskrap.display import _macos
+
+    launcher = _Launcher()
+    client, displays, _ = _launch_client(monkeypatch, launcher)
+    monkeypatch.setattr(client_module.sys, "platform", "darwin")
+    placement = AsyncMock(side_effect=WebSkrapError("wrong screen", code=ErrorCode.BROWSER_LAUNCH))
+    monkeypatch.setattr(_macos, "place_browser", placement)
+    with pytest.raises(WebSkrapError, match="wrong screen"):
+        await client._create_session("mac", SessionConfig(virtual_display=True), get_profile(None))
+    placement.assert_awaited_once()
+    assert displays[0].stopped == 1
