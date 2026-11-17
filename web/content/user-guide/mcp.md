@@ -42,6 +42,13 @@ Run the server:
 webskrap-mcp
 ```
 
+`webskrap mcp` starts the same server. Use it with `uvx`, which runs a
+package's main command:
+
+```bash
+uvx webskrap mcp
+```
+
 You can also run it as a module:
 
 ```bash

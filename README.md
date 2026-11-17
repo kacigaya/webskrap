@@ -194,3 +194,5 @@ vulnerability, and [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and pull request
 expectations.
+
+<!-- mcp-name: io.github.kacigaya/webskrap -->

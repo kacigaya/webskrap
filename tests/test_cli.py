@@ -737,6 +737,18 @@ def test_search_blocked_failure_is_a_parseable_envelope(monkeypatch: Any) -> Non
     assert payload["hint"] == RECOVERY_HINTS[ErrorCode.BLOCKED]
 
 
+def test_mcp_command_runs_the_mcp_server(monkeypatch: Any) -> None:
+    from webskrap import mcp_server
+
+    calls: list[str] = []
+    monkeypatch.setattr(mcp_server, "main", lambda: calls.append("run"))
+
+    result = runner.invoke(cli.app, ["mcp"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["run"]
+
+
 def test_schema_describes_the_whole_command_tree() -> None:
     result = runner.invoke(cli.app, ["schema"])
 
@@ -744,7 +756,16 @@ def test_schema_describes_the_whole_command_tree() -> None:
     schema = json.loads(result.output)
     assert schema["name"] == "webskrap"
     top_level = {command["name"] for command in schema["commands"]}
-    assert {"fetch", "search", "doctor", "install", "profiles", "browser", "schema"} <= top_level
+    assert {
+        "fetch",
+        "search",
+        "doctor",
+        "install",
+        "profiles",
+        "browser",
+        "schema",
+        "mcp",
+    } <= top_level
 
     browser = next(command for command in schema["commands"] if command["name"] == "browser")
     assert {"open", "close", "snapshot", "wait", "eval"} <= {

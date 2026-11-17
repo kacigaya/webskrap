@@ -32,7 +32,7 @@ webskrap profiles
 
 - WebSkrap's own Chrome DevTools Protocol client. It needs no Playwright,
   Patchright or Node.js.
-- The `webskrap-mcp` server.
+- The MCP server, started with `webskrap-mcp` or `webskrap mcp`.
 
 No extras are needed; everything above ships with the base install.
 

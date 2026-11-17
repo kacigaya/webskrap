@@ -9,6 +9,14 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `webskrap mcp` starts the MCP server, the same as `webskrap-mcp`, so
+  `uvx webskrap mcp` runs it without a separate script name.
+- `server.json` describes the MCP server for the official MCP Registry as
+  `io.github.kacigaya/webskrap`. The README carries the matching `mcp-name`
+  marker that the registry checks on PyPI.
+
 ## [3.5.0] - 2026-11-16
 
 ### Added

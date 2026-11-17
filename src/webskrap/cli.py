@@ -236,6 +236,14 @@ def _walk_command_summaries(
     return rows
 
 
+@app.command("mcp")
+def mcp_command() -> None:
+    """Run the MCP server over stdio, the same server as `webskrap-mcp`."""
+    from webskrap.mcp_server import main as run_mcp_server
+
+    run_mcp_server()
+
+
 @app.command("doctor")
 def doctor_command(
     format: Annotated[
