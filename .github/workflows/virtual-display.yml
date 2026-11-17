@@ -39,7 +39,11 @@ jobs:
         env:
           WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY: '1'
           WEBSKRAP_VIRTUAL_DISPLAY_REPORT: virtual-display-report
-        run: uv run --extra dev pytest -q tests/test_virtual_display_integration.py
+        run: >-
+          uv run --extra dev pytest -q
+          tests/test_display.py tests/test_display_helper.py
+          tests/test_display_macos.py tests/test_display_windows.py
+          tests/test_virtual_display_integration.py
       - if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -66,7 +70,11 @@ jobs:
         env:
           WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY: '1'
           WEBSKRAP_VIRTUAL_DISPLAY_REPORT: virtual-display-report
-        run: uv run --extra dev pytest -q tests/test_virtual_display_integration.py
+        run: >-
+          uv run --extra dev pytest -q
+          tests/test_display.py tests/test_display_helper.py
+          tests/test_display_macos.py tests/test_display_windows.py
+          tests/test_virtual_display_integration.py
       - if: always()
         uses: actions/upload-artifact@v7
         with:
