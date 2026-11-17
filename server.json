@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.kacigaya/webskrap",
+  "title": "WebSkrap",
+  "description": "Stealth web fetch, search and real Chrome control for AI agents.",
+  "repository": {
+    "url": "https://github.com/kacigaya/webskrap",
+    "source": "github"
+  },
+  "websiteUrl": "https://kacigaya.github.io/webskrap/docs/user-guide/mcp/",
+  "version": "3.5.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "webskrap",
+      "version": "3.5.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

@@ -7,7 +7,9 @@ Git checkout only.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import tomllib
 from pathlib import Path
 
 from webskrap import errors, mcp_server
@@ -80,3 +82,15 @@ def test_cli_guide_lists_every_exit_status() -> None:
         if row[0].isdigit()
     }
     assert documented == {(status, code.value) for code, status in errors.EXIT_CODES.items()}
+
+
+def test_mcp_registry_metadata_matches_the_release() -> None:
+    server = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert f"<!-- mcp-name: {server['name']} -->" in readme
+    (package,) = server["packages"]
+    assert package["identifier"] == project["name"]
+    assert server["version"] == package["version"] == project["version"]
+    assert package["packageArguments"] == [{"type": "positional", "value": "mcp"}]
