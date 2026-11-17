@@ -16,6 +16,13 @@ history, so they summarize each release rather than list every change.
   Added lifecycle tests and a real-display CI workflow. macOS and Windows
   require a logged-in desktop and share its displays.
 
+### Fixed
+
+- macOS virtual displays wait until WindowServer reports the new arrangement
+  to other apps before Chrome launches, and placement retries really move the
+  window. Chrome no longer sometimes stays on the physical screen. The backend
+  now fails fast when "Displays have separate Spaces" is on.
+
 ## [3.6.1] - 2026-11-17
 
 ### Changed

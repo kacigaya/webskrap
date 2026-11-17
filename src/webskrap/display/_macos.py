@@ -41,6 +41,11 @@ VENDOR_ID = 505
 PIXELS_PER_INCH = 96
 READY_TIMEOUT_S = 10.0
 _DISPATCH_QUEUE_PRIORITY_HIGH = 2
+_RECONFIGURED = ctypes.CFUNCTYPE(None, c_uint32, c_uint32, c_void_p)
+_BEGIN_CONFIGURATION_FLAG = 1 << 0
+_MOVED_FLAG = 1 << 1
+_CONFIGURE_FOR_SESSION = 1
+_UTF8 = 0x08000100
 
 
 class CGPoint(ctypes.Structure):
@@ -103,8 +108,20 @@ class _Runtime:
         self.cg.CGCompleteDisplayConfiguration.restype = c_int32
         self.cg.CGCompleteDisplayConfiguration.argtypes = (c_void_p, c_uint32)
         self.cg.CGCancelDisplayConfiguration.argtypes = (c_void_p,)
+        self.cg.CGDisplayRegisterReconfigurationCallback.restype = c_int32
+        self.cg.CGDisplayRegisterReconfigurationCallback.argtypes = (_RECONFIGURED, c_void_p)
+        self.cg.CGDisplayRemoveReconfigurationCallback.restype = c_int32
+        self.cg.CGDisplayRemoveReconfigurationCallback.argtypes = (_RECONFIGURED, c_void_p)
         self.cg.CGSessionCopyCurrentDictionary.restype = c_void_p
         self.cf.CFRelease.argtypes = (c_void_p,)
+        self.cf.CFStringCreateWithCString.restype = c_void_p
+        self.cf.CFStringCreateWithCString.argtypes = (c_void_p, ctypes.c_char_p, c_uint32)
+        self.cf.CFPreferencesGetAppBooleanValue.restype = c_bool
+        self.cf.CFPreferencesGetAppBooleanValue.argtypes = (
+            c_void_p,
+            c_void_p,
+            ctypes.POINTER(c_bool),
+        )
         self.cf.CFRunLoopRunInMode.restype = c_int32
         self.cf.CFRunLoopRunInMode.argtypes = (c_void_p, c_double, c_bool)
         self.default_mode = c_void_p.in_dll(self.cf, "kCFRunLoopDefaultMode").value
@@ -148,6 +165,20 @@ class _Runtime:
             return False
         self.cf.CFRelease(session)
         return True
+
+    def separate_spaces(self) -> bool:
+        """True while each display has its own Spaces, the macOS default."""
+        key, app = (
+            self.cf.CFStringCreateWithCString(None, name, _UTF8)
+            for name in (b"spans-displays", b"com.apple.spaces")
+        )
+        try:
+            valid = c_bool()
+            spans = self.cf.CFPreferencesGetAppBooleanValue(key, app, ctypes.byref(valid))
+            return not (valid.value and spans)
+        finally:
+            self.cf.CFRelease(key)
+            self.cf.CFRelease(app)
 
     def displays(self) -> list[int]:
         ids = (c_uint32 * 32)()
@@ -267,8 +298,9 @@ def hold(width: int, height: int) -> Iterator[tuple[int, int]]:
     takes. The display is removed on exit, and by macOS if this process dies.
 
     Raises:
-        WebSkrapError: ``browser_launch`` outside a GUI session, on a macOS
-            without the API, or if the display does not come online.
+        WebSkrapError: ``browser_launch`` outside a GUI session, while
+            displays have separate Spaces, on a macOS without the API, or if
+            the display does not come online.
     """
     if width <= 0 or height <= 0:
         raise _fail("width and height must be positive")
@@ -278,6 +310,13 @@ def hold(width: int, height: int) -> Iterator[tuple[int, int]]:
         raise _fail(f"CoreGraphics could not be loaded ({exc})") from None
     if not runtime.gui_session():
         raise _fail("no logged-in GUI session; run inside the user's desktop session")
+    if runtime.separate_spaces():
+        # macOS moves each new window to the active display's Space, so
+        # Chrome cannot stay on the virtual display.
+        raise _fail(
+            "turn off 'Displays have separate Spaces' in System Settings > "
+            "Desktop & Dock > Mission Control, then log out and back in"
+        )
     pool = runtime.objc.objc_autoreleasePoolPush()
     virtual = None
     try:
@@ -313,34 +352,55 @@ def _layout_lock() -> Iterator[None]:
 
 
 def _arrange(runtime: _Runtime, display_id: int) -> CGRect:
-    """Extend the desktop to the right in logical points, without changing other displays."""
-    configuration = c_void_p()
-    status = runtime.cg.CGBeginDisplayConfiguration(ctypes.byref(configuration))
+    """Extend the desktop to the right in logical points, without changing other displays.
+
+    Returns only after WindowServer reports the move to every app. This
+    process sees its own change at once, but a browser launched before that
+    report keeps the old layout and cannot place its window on the display.
+    """
+    others = [runtime.cg.CGDisplayBounds(i) for i in runtime.displays() if i != display_id]
+    right = round(max((b.origin.x + b.size.width for b in others), default=0))
+    bounds = runtime.cg.CGDisplayBounds(display_id)
+    if (round(bounds.origin.x), round(bounds.origin.y)) == (right, 0):
+        return bounds
+    moved: list[bool] = []
+
+    def reconfigured(changed: int, flags: int, _info: int | None) -> None:
+        if changed == display_id and flags & _MOVED_FLAG and not flags & _BEGIN_CONFIGURATION_FLAG:
+            moved.append(True)
+
+    callback = _RECONFIGURED(reconfigured)
+    status = runtime.cg.CGDisplayRegisterReconfigurationCallback(callback, None)
     if status:
-        raise _fail(f"could not begin display arrangement ({status})")
+        raise _fail(f"could not watch the display arrangement ({status})")
     try:
-        others = [runtime.cg.CGDisplayBounds(i) for i in runtime.displays() if i != display_id]
-        right = round(max((b.origin.x + b.size.width for b in others), default=0))
-        for operation, arguments in (
-            (runtime.cg.CGConfigureDisplayMirrorOfDisplay, (configuration, display_id, 0)),
-            (runtime.cg.CGConfigureDisplayOrigin, (configuration, display_id, right, 0)),
-        ):
-            status = operation(*arguments)
-            if status:
-                raise _fail(f"could not arrange the virtual display ({status})")
-    except BaseException:
-        runtime.cg.CGCancelDisplayConfiguration(configuration)
-        raise
-    status = runtime.cg.CGCompleteDisplayConfiguration(configuration, 0)
-    if status:
-        raise _fail(f"could not apply display arrangement ({status})")
-    deadline = time.monotonic() + READY_TIMEOUT_S
-    while time.monotonic() < deadline:
-        bounds = runtime.cg.CGDisplayBounds(display_id)
-        if round(bounds.origin.x) == right and round(bounds.origin.y) == 0:
-            return bounds
-        runtime.pump(0.05)
-    raise _fail("the virtual display did not reach its requested desktop origin")
+        configuration = c_void_p()
+        status = runtime.cg.CGBeginDisplayConfiguration(ctypes.byref(configuration))
+        if status:
+            raise _fail(f"could not begin display arrangement ({status})")
+        try:
+            for operation, arguments in (
+                (runtime.cg.CGConfigureDisplayMirrorOfDisplay, (configuration, display_id, 0)),
+                (runtime.cg.CGConfigureDisplayOrigin, (configuration, display_id, right, 0)),
+            ):
+                status = operation(*arguments)
+                if status:
+                    raise _fail(f"could not arrange the virtual display ({status})")
+        except BaseException:
+            runtime.cg.CGCancelDisplayConfiguration(configuration)
+            raise
+        status = runtime.cg.CGCompleteDisplayConfiguration(configuration, _CONFIGURE_FOR_SESSION)
+        if status:
+            raise _fail(f"could not apply display arrangement ({status})")
+        deadline = time.monotonic() + READY_TIMEOUT_S
+        while time.monotonic() < deadline:
+            bounds = runtime.cg.CGDisplayBounds(display_id)
+            if moved and (round(bounds.origin.x), round(bounds.origin.y)) == (right, 0):
+                return bounds
+            runtime.pump(0.05)
+        raise _fail("the virtual display did not reach its requested desktop origin")
+    finally:
+        runtime.cg.CGDisplayRemoveReconfigurationCallback(callback, None)
 
 
 async def place_browser(
@@ -386,10 +446,15 @@ async def place_browser(
             "Browser.setWindowBounds", {"windowId": window_id, "bounds": {"windowState": "normal"}}
         )
         seen = None
+        nudge = 0
         while time.monotonic() < deadline:
+            # Re-sending equal bounds is a no-op. Chrome re-reads its screen only
+            # when the window really moves, so retries alternate one point apart.
             await connection.send(
-                "Browser.setWindowBounds", {"windowId": window_id, "bounds": bounds}
+                "Browser.setWindowBounds",
+                {"windowId": window_id, "bounds": {**bounds, "left": bounds["left"] + nudge}},
             )
+            nudge ^= 1
             seen = await page.evaluate(
                 "() => [screen.width, screen.height, screenX, screenY, outerWidth, outerHeight]"
             )

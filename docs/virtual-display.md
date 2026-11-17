@@ -43,7 +43,11 @@ does not ensure a WebGPU adapter.
 ## macOS
 
 Run Python from a logged-in GUI session. A service without access to WindowServer
-cannot create a usable display. The backend creates one display per session at
+cannot create a usable display. Turn off **Displays have separate Spaces** in
+System Settings > Desktop & Dock > Mission Control, then log out and back in.
+With separate Spaces, macOS moves each new window to the active display, so
+Chrome cannot stay on the virtual display. The backend refuses to start while
+the setting is on. The backend creates one display per session at
 the requested size, without HiDPI scaling. Its native Objective-C calls follow
 [Chromium's virtual display test implementation](https://github.com/chromium/chromium/blob/main/ui/display/mac/test/virtual_display_util_mac.mm).
 Each descriptor has a nonzero vendor ID and a separate random serial number.
@@ -56,7 +60,10 @@ The OS owns display removal when that helper exits.
 
 Display creation alone does not assign Chrome to it. The backend explicitly
 extends the new display to the right of the desktop using logical CoreGraphics
-bounds, not Retina pixel dimensions. A per-user lock serializes these changes.
+bounds, not Retina pixel dimensions, for the login session. It waits until
+WindowServer reports the move, because a browser launched earlier keeps the old
+layout. A per-user lock serializes these changes. Each display's random serial
+leaves a stale entry in `com.apple.spaces`.
 After launch, both temporary and persistent sessions move Chrome's native window
 through CDP and read its real screen dimensions and window position. A session
 fails and cleans up if Chrome remains on the physical screen. No screen values

@@ -17,12 +17,14 @@ _ARRANGE = _macos._arrange
 def runtime(monkeypatch):
     native = Mock()
     native.gui_session.return_value = True
+    native.separate_spaces.return_value = False
     native.send.return_value = 42
     native.cg.CGDisplayPixelsWide.return_value = 1280
     native.cg.CGDisplayPixelsHigh.return_value = 720
     native.cg.CGDisplayBounds.return_value = _macos.CGRect(
         _macos.CGPoint(1920, 0), _macos.CGSize(1280, 720)
     )
+    native.cg.CGDisplayRegisterReconfigurationCallback.return_value = 0
     monkeypatch.setattr(_macos, "_Runtime", lambda: native)
     monkeypatch.setattr(_macos, "_create", lambda *_: 17)
     monkeypatch.setattr(_macos, "_arrange", lambda *_: native.cg.CGDisplayBounds())
@@ -48,6 +50,13 @@ def test_no_gui_fails_before_creation(runtime):
     runtime.gui_session.return_value = False
     with pytest.raises(WebSkrapError, match="no logged-in GUI session"), _macos.hold(1280, 720):
         pytest.fail("display created outside a GUI session")
+    runtime.send.assert_not_called()
+
+
+def test_separate_spaces_fail_before_creation(runtime):
+    runtime.separate_spaces.return_value = True
+    with pytest.raises(WebSkrapError, match="separate Spaces"), _macos.hold(1280, 720):
+        pytest.fail("display created while displays have separate Spaces")
     runtime.send.assert_not_called()
 
 
@@ -119,16 +128,58 @@ def test_arrangement_uses_retina_logical_bounds_and_does_not_move_other_displays
     runtime.cg.CGBeginDisplayConfiguration.return_value = 0
     runtime.cg.CGConfigureDisplayMirrorOfDisplay.return_value = 0
     runtime.cg.CGConfigureDisplayOrigin.return_value = 0
-    runtime.cg.CGCompleteDisplayConfiguration.return_value = 0
     runtime.displays.return_value = [1, 42]
     physical = _macos.CGRect(_macos.CGPoint(0, 0), _macos.CGSize(1792, 1120))
-    virtual = _macos.CGRect(_macos.CGPoint(1792, 0), _macos.CGSize(1280, 720))
-    runtime.cg.CGDisplayBounds.side_effect = lambda i: physical if i == 1 else virtual
+    virtual = _macos.CGRect(_macos.CGPoint(-1280, 0), _macos.CGSize(1280, 720))
+    moved = _macos.CGRect(_macos.CGPoint(1792, 0), _macos.CGSize(1280, 720))
+    state = {"virtual": virtual}
+
+    def complete(*_):
+        # WindowServer applies the move, then tells every app, this one included.
+        state["virtual"] = moved
+        callback = runtime.cg.CGDisplayRegisterReconfigurationCallback.call_args.args[0]
+        callback(42, _macos._BEGIN_CONFIGURATION_FLAG | _macos._MOVED_FLAG, None)
+        assert runtime.pump.call_count == 0
+        callback(42, _macos._MOVED_FLAG, None)
+        return 0
+
+    runtime.cg.CGCompleteDisplayConfiguration.side_effect = complete
+    runtime.cg.CGDisplayBounds.side_effect = lambda i: physical if i == 1 else state["virtual"]
     result = _ARRANGE(runtime, 42)
     assert result.origin.x == 1792
     assert runtime.cg.CGConfigureDisplayOrigin.call_args.args[1:] == (42, 1792, 0)
     assert runtime.cg.CGConfigureDisplayMirrorOfDisplay.call_args.args[1:] == (42, 0)
+    assert runtime.cg.CGCompleteDisplayConfiguration.call_args.args[1] == (
+        _macos._CONFIGURE_FOR_SESSION
+    )
     runtime.cg.CGCancelDisplayConfiguration.assert_not_called()
+    runtime.cg.CGDisplayRemoveReconfigurationCallback.assert_called_once()
+
+
+def test_arrangement_waits_for_the_move_to_reach_other_apps(runtime, monkeypatch):
+    runtime.cg.CGBeginDisplayConfiguration.return_value = 0
+    runtime.cg.CGConfigureDisplayMirrorOfDisplay.return_value = 0
+    runtime.cg.CGConfigureDisplayOrigin.return_value = 0
+    runtime.cg.CGCompleteDisplayConfiguration.return_value = 0
+    runtime.displays.return_value = []
+    bounds = iter([(1920, 0), (0, 0)])
+    runtime.cg.CGDisplayBounds.side_effect = lambda _: _macos.CGRect(
+        _macos.CGPoint(*next(bounds, (0, 0))), _macos.CGSize(1280, 720)
+    )
+    ticks = iter([0, 0, 0, 11])
+    monkeypatch.setattr(_macos, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    with pytest.raises(WebSkrapError, match="did not reach its requested desktop origin"):
+        _ARRANGE(runtime, 42)
+    runtime.cg.CGDisplayRemoveReconfigurationCallback.assert_called_once()
+
+
+def test_arrangement_leaves_a_display_already_in_place(runtime):
+    runtime.displays.return_value = [1, 42]
+    physical = _macos.CGRect(_macos.CGPoint(0, 0), _macos.CGSize(1792, 1120))
+    virtual = _macos.CGRect(_macos.CGPoint(1792, 0), _macos.CGSize(1280, 720))
+    runtime.cg.CGDisplayBounds.side_effect = lambda i: physical if i == 1 else virtual
+    assert _ARRANGE(runtime, 42) is virtual
+    runtime.cg.CGBeginDisplayConfiguration.assert_not_called()
 
 
 def test_arrangement_cancels_a_failed_configuration(runtime):
@@ -168,7 +219,10 @@ async def test_cdp_placement_retries_ignored_launch_coordinates_and_reads_native
         if call.args[0] == "Browser.setWindowBounds"
     ]
     assert placements[0] == {"windowState": "normal"}
-    assert placements[1:] == [{"left": 1800, "top": 25, "width": 1000, "height": 650}] * 2
+    assert placements[1:] == [
+        {"left": 1800, "top": 25, "width": 1000, "height": 650},
+        {"left": 1801, "top": 25, "width": 1000, "height": 650},
+    ]
     assert evaluate.await_count == 2
     assert connection.send.call_args.args[0] == "Target.detachFromTarget"
 
