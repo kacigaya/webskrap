@@ -54,6 +54,15 @@ Creation is checked at runtime. No PyObjC package or compiled helper is required
 A Python helper keeps the native object alive for persistent browser sessions.
 The OS owns display removal when that helper exits.
 
+Display creation alone does not assign Chrome to it. The backend explicitly
+extends the new display to the right of the desktop using logical CoreGraphics
+bounds, not Retina pixel dimensions. A per-user lock serializes these changes.
+After launch, both temporary and persistent sessions move Chrome's native window
+through CDP and read its real screen dimensions and window position. A session
+fails and cleans up if Chrome remains on the physical screen. No screen values
+are emulated or rewritten. Chrome may briefly show its startup window before
+placement completes; this is not an isolated or hidden macOS desktop.
+
 The virtual display extends the user's desktop. Other desktop apps can observe
 it, and it appears in Displays settings. This does not provide Xvfb's separate
 X server. Test creation, screen assignment, concurrent display arrangement,
@@ -170,3 +179,27 @@ The final local non-live suite passed 1,125 tests with 87.83% coverage. Two
 Windows-only tests were skipped locally; the hosted Windows job ran them. Ruff,
 format checks, Pyright for all three platforms, Bandit, pip-audit, OSV checks
 for 51 locked public packages, build and Twine checks passed.
+
+## Physical Mac placement regression
+
+A physical Intel Mac reported successful display creation but Chrome 156 stayed
+on its 1792x1120 physical screen. The earlier hosted result did not cover that
+Retina desktop arrangement. The placement follow-up adds explicit native display
+arrangement, CDP movement and screen-assignment checks. Its physical Mac retest
+is still required; no linked Mac was available during the local implementation.
+The earlier hosted results above apply to the recorded commit, not this follow-up.
+
+To retest with installed Google Chrome, without downloading Chrome for Testing:
+
+```bash
+WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY=1 \
+WEBSKRAP_VIRTUAL_DISPLAY_CHANNEL=chrome \
+WEBSKRAP_VIRTUAL_DISPLAY_REPORT=/tmp/webskrap-mac-display-report \
+uv run --extra dev pytest -q tests/test_virtual_display_integration.py
+```
+
+The channel override selects the browser for temporary integration sessions.
+Persistent sessions keep their normal installed-Chrome-first selection. Reports
+include native screen sizes and window positions. The tests also check that the
+window center lies within its assigned display, even when two displays have the
+same resolution. No new Actions run was started for this follow-up.

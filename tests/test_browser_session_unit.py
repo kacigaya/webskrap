@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -981,6 +982,9 @@ class _FakeDisplay:
     async def stop(self) -> None:
         self.stopped = True
 
+    def window_args(self, args, width, height):
+        return args
+
 
 def _stub_virtual_display(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, Path]]:
     stops: list[tuple[int, Path]] = []
@@ -1194,3 +1198,31 @@ def test_locale_launch_keeps_proxy_credentials_out_of_the_browser(
     assert launched[0]["TZ"] == "Europe/Paris"
     assert "WEBSKRAP_PROXY_USERNAME" not in launched[0]
     assert "WEBSKRAP_PROXY_PASSWORD" not in launched[0]
+
+
+def test_macos_persistent_placement_failure_kills_browser_and_stops_display(monkeypatch, tmp_path):
+    from webskrap.display import _macos
+
+    _stub_session_launch(monkeypatch, tmp_path)
+    virtual = _FakeDisplay()
+
+    async def start(*args, **kwargs):
+        return virtual
+
+    @contextlib.asynccontextmanager
+    async def connect(*args, **kwargs):
+        yield object()
+
+    killed = []
+    monkeypatch.setattr(display.VirtualDisplay, "start", start)
+    monkeypatch.setattr(browser_session.cdp_session, "connect", connect)
+    monkeypatch.setattr(browser_session, "kill_browser", lambda pid, **kw: killed.append(pid))
+    monkeypatch.setattr(
+        _macos, "place_browser", AsyncMock(side_effect=WebSkrapError("wrong screen"))
+    )
+    monkeypatch.setattr(browser_session.sys, "platform", "darwin")
+    with pytest.raises(WebSkrapError, match="wrong screen"):
+        asyncio.run(browser_session.open_session("mac", virtual_display=True))
+    assert killed == [1234]
+    assert virtual.stopped
+    assert browser_session.read_state(browser_session.session_dir("mac")) is None

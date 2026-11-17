@@ -16,15 +16,20 @@ Displays settings.
 
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import secrets
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from ctypes import c_bool, c_double, c_int32, c_uint32, c_void_p
+from pathlib import Path
 from typing import Any
 
+from webskrap.cdp import CDPConnection, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.paths import secure_directory
 
 OBJC_PATH = "/usr/lib/libobjc.A.dylib"
 SYSTEM_PATH = "/usr/lib/libSystem.B.dylib"
@@ -89,6 +94,15 @@ class _Runtime:
             ctypes.POINTER(c_uint32),
             ctypes.POINTER(c_uint32),
         )
+        self.cg.CGBeginDisplayConfiguration.restype = c_int32
+        self.cg.CGBeginDisplayConfiguration.argtypes = (ctypes.POINTER(c_void_p),)
+        self.cg.CGConfigureDisplayOrigin.restype = c_int32
+        self.cg.CGConfigureDisplayOrigin.argtypes = (c_void_p, c_uint32, c_int32, c_int32)
+        self.cg.CGConfigureDisplayMirrorOfDisplay.restype = c_int32
+        self.cg.CGConfigureDisplayMirrorOfDisplay.argtypes = (c_void_p, c_uint32, c_uint32)
+        self.cg.CGCompleteDisplayConfiguration.restype = c_int32
+        self.cg.CGCompleteDisplayConfiguration.argtypes = (c_void_p, c_uint32)
+        self.cg.CGCancelDisplayConfiguration.argtypes = (c_void_p,)
         self.cg.CGSessionCopyCurrentDictionary.restype = c_void_p
         self.cf.CFRelease.argtypes = (c_void_p,)
         self.cf.CFRunLoopRunInMode.restype = c_int32
@@ -135,12 +149,15 @@ class _Runtime:
         self.cf.CFRelease(session)
         return True
 
-    def online(self, display_id: int) -> bool:
+    def displays(self) -> list[int]:
         ids = (c_uint32 * 32)()
         count = c_uint32()
         if self.cg.CGGetOnlineDisplayList(32, ids, ctypes.byref(count)) != 0:
-            return False
-        return display_id in ids[: count.value]
+            raise _fail("could not enumerate online displays")
+        return list(ids[: count.value])
+
+    def online(self, display_id: int) -> bool:
+        return display_id in self.displays()
 
     def pump(self, seconds: float) -> None:
         self.cf.CFRunLoopRunInMode(self.default_mode, seconds, False)
@@ -268,10 +285,123 @@ def hold(width: int, height: int) -> Iterator[tuple[int, int]]:
         display_id = runtime.send(virtual, "displayID", restype=c_uint32)
         if not display_id:
             raise _fail("macOS created a display without an ID")
-        bounds = _wait_until_online(runtime, display_id, width, height)
+        _wait_until_online(runtime, display_id, width, height)
+        with _layout_lock():
+            bounds = _arrange(runtime, display_id)
         yield round(bounds.origin.x), round(bounds.origin.y)
     finally:
         if virtual:
             with suppress(Exception):
                 runtime.send(virtual, "release")
         runtime.objc.objc_autoreleasePoolPop(pool)
+
+
+@contextmanager
+def _layout_lock() -> Iterator[None]:
+    if sys.platform == "win32":
+        raise _fail("display arrangement requires macOS")
+    import fcntl
+
+    directory = Path.home() / ".webskrap" / "display-locks"
+    secure_directory(directory)
+    with (directory / "macos-layout.lock").open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _arrange(runtime: _Runtime, display_id: int) -> CGRect:
+    """Extend the desktop to the right in logical points, without changing other displays."""
+    configuration = c_void_p()
+    status = runtime.cg.CGBeginDisplayConfiguration(ctypes.byref(configuration))
+    if status:
+        raise _fail(f"could not begin display arrangement ({status})")
+    try:
+        others = [runtime.cg.CGDisplayBounds(i) for i in runtime.displays() if i != display_id]
+        right = round(max((b.origin.x + b.size.width for b in others), default=0))
+        for operation, arguments in (
+            (runtime.cg.CGConfigureDisplayMirrorOfDisplay, (configuration, display_id, 0)),
+            (runtime.cg.CGConfigureDisplayOrigin, (configuration, display_id, right, 0)),
+        ):
+            status = operation(*arguments)
+            if status:
+                raise _fail(f"could not arrange the virtual display ({status})")
+    except BaseException:
+        runtime.cg.CGCancelDisplayConfiguration(configuration)
+        raise
+    status = runtime.cg.CGCompleteDisplayConfiguration(configuration, 0)
+    if status:
+        raise _fail(f"could not apply display arrangement ({status})")
+    deadline = time.monotonic() + READY_TIMEOUT_S
+    while time.monotonic() < deadline:
+        bounds = runtime.cg.CGDisplayBounds(display_id)
+        if round(bounds.origin.x) == right and round(bounds.origin.y) == 0:
+            return bounds
+        runtime.pump(0.05)
+    raise _fail("the virtual display did not reach its requested desktop origin")
+
+
+async def place_browser(
+    connection: CDPConnection,
+    origin: tuple[int, int],
+    width: int,
+    height: int,
+    args: list[str],
+) -> None:
+    """Move the real Chrome window and verify native screen assignment before use."""
+    bounds = {"left": origin[0], "top": origin[1], "width": width, "height": height}
+    for flag, fields in (
+        ("--window-position=", ("left", "top")),
+        ("--window-size=", ("width", "height")),
+    ):
+        for arg in args:
+            if arg.startswith(flag):
+                try:
+                    values = [int(v) for v in arg[len(flag) :].split(",")]
+                    if len(values) != 2:
+                        raise ValueError
+                except ValueError:
+                    raise _fail(f"invalid window bounds: {arg}") from None
+                bounds.update(zip(fields, values, strict=True))
+    deadline = time.monotonic() + READY_TIMEOUT_S
+    target = None
+    while time.monotonic() < deadline:
+        targets = await connection.send("Target.getTargets")
+        target = next((t for t in targets["targetInfos"] if t["type"] == "page"), None)
+        if target is not None:
+            break
+        await asyncio.sleep(0.1)
+    if target is None:
+        raise _fail("Chrome has no page window to place on the virtual display")
+    attached = await connection.send(
+        "Target.attachToTarget", {"targetId": target["targetId"], "flatten": True}
+    )
+    page = CDPPage(connection, attached["sessionId"], target["targetId"])
+    try:
+        window = await connection.send("Browser.getWindowForTarget", {"targetId": page.target_id})
+        window_id = window["windowId"]
+        await connection.send(
+            "Browser.setWindowBounds", {"windowId": window_id, "bounds": {"windowState": "normal"}}
+        )
+        seen = None
+        while time.monotonic() < deadline:
+            await connection.send(
+                "Browser.setWindowBounds", {"windowId": window_id, "bounds": bounds}
+            )
+            seen = await page.evaluate(
+                "() => [screen.width, screen.height, screenX, screenY, outerWidth, outerHeight]"
+            )
+            if (
+                seen[:2] == [width, height]
+                and origin[0] <= seen[2] + seen[4] / 2 < origin[0] + width
+                and origin[1] <= seen[3] + seen[5] / 2 < origin[1] + height
+            ):
+                return
+            await asyncio.sleep(0.1)
+        raise _fail(
+            f"Chrome stayed on the wrong screen (observed {seen}, expected {width}x{height})"
+        )
+    finally:
+        await connection.send("Target.detachFromTarget", {"sessionId": attached["sessionId"]})

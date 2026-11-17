@@ -861,6 +861,7 @@ async def open_session(
                 virtual = await display.VirtualDisplay.start(
                     screen.width, screen.height, detached=True
                 )
+            pid = None
             try:
                 pid, port = launch_browser(
                     directory,
@@ -879,8 +880,25 @@ async def open_session(
                     if virtual is not None and not virtual.env
                     else None,
                 )
+                if virtual is not None and sys.platform == "darwin":
+                    from webskrap.display import _macos
+
+                    screen = config.virtual_screen()
+
+                    async with cdp_session.connect(
+                        name, directory / "user-data", port, timeout_ms=LAUNCH_TIMEOUT_S * 1000
+                    ) as connection:
+                        await _macos.place_browser(
+                            connection,
+                            virtual.origin,
+                            screen.width,
+                            screen.height,
+                            virtual.window_args(config.browser_args(), screen.width, screen.height),
+                        )
             except BaseException:
                 if virtual is not None:
+                    if pid is not None:
+                        kill_browser(pid, force=True)
                     await virtual.stop()
                 raise
             display_state = (

@@ -1095,6 +1095,14 @@ class WebSkrapClient:
                 timeout_s=config.timeout_ms / 1000,
             )
             browser.connection.default_timeout_s = config.default_timeout_ms / 1000
+            if display is not None and sys.platform == "darwin":
+                from webskrap.display import _macos
+
+                screen = config.virtual_screen()
+
+                await _macos.place_browser(
+                    browser.connection, display.origin, screen.width, screen.height, args
+                )
             await cdp_setup.prepare_browser(browser, config, profile)
             if state is not None:
                 await cdp_setup.apply_storage_state(browser, state)

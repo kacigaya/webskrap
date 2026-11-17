@@ -28,6 +28,8 @@ from webskrap.models import Viewport
 
 pytestmark = pytest.mark.browser
 
+_CHANNEL = os.environ.get("WEBSKRAP_VIRTUAL_DISPLAY_CHANNEL", "chromium")
+
 _REQUIRED = os.environ.get("WEBSKRAP_REQUIRE_VIRTUAL_DISPLAY") == "1"
 
 _PROBE = """async () => {
@@ -210,7 +212,7 @@ async def test_session_runs_headed_with_webgl_at_the_requested_size(
 ) -> None:
     config = SessionConfig(
         chromium_sandbox=sandbox_supported,
-        channel="chromium",
+        channel=_CHANNEL,
         virtual_display=True,
         headless_screen=Viewport(width=1280, height=720),
     )
@@ -223,6 +225,7 @@ async def test_session_runs_headed_with_webgl_at_the_requested_size(
     _report("single", {**seen, "origin": list(virtual.origin)})
 
     _assert_headed_and_rendering(seen, 1280, 720)
+    _assert_assigned(seen, virtual.origin, 1280, 720)
     assert _gone(directory)
     assert virtual._process.poll() is not None
 
@@ -234,7 +237,7 @@ async def test_concurrent_sessions_get_separate_displays(
     configs = [
         SessionConfig(
             chromium_sandbox=sandbox_supported,
-            channel="chromium",
+            channel=_CHANNEL,
             virtual_display=True,
             headless_screen=Viewport(width=width, height=height),
         )
@@ -247,11 +250,12 @@ async def test_concurrent_sessions_get_separate_displays(
         virtuals = [s._display for s in sessions if s._display is not None]
         directories = [v.directory for v in virtuals]
         seen = await asyncio.gather(*(_probe(s, page_url) for s in sessions))
-    _report("concurrent", {"sessions": seen})
+    _report("concurrent", {"sessions": seen, "origins": [list(v.origin) for v in virtuals]})
 
     assert len(set(directories)) == 2
-    for result, (width, height) in zip(seen, sizes, strict=True):
+    for result, virtual, (width, height) in zip(seen, virtuals, sizes, strict=True):
         _assert_headed_and_rendering(result, width, height)
+        _assert_assigned(result, virtual.origin, width, height)
     assert all(_gone(directory) for directory in directories)
     assert all(v._process.poll() is not None for v in virtuals)
 
@@ -296,3 +300,11 @@ def test_persistent_session_keeps_its_display_and_recovers_after_a_crash(
         browser_session.close_session(name)
 
     assert _gone(second_display)
+
+
+def _assert_assigned(
+    seen: dict[str, Any], origin: tuple[int, int], width: int, height: int
+) -> None:
+    outer_width, outer_height, x, y = seen["window"]
+    assert origin[0] <= x + outer_width / 2 < origin[0] + width
+    assert origin[1] <= y + outer_height / 2 < origin[1] + height
