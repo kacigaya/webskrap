@@ -52,13 +52,15 @@ asyncio.run(main())
 For deferred content, pass `ready_selector="#content"` to a Python fetch or
 `--ready-selector '#content'` to CLI `fetch`. Both MCP fetch tools accept
 `ready_selector` too. The selector must become visible after consent dismissal.
-Known challenge pages (DataDome, Cloudflare, Akamai, AWS WAF) and provider block
+Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF) and provider block
 pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
 checks that reload the page. It does not retry refusals. With
 `solve_cloudflare=True` (CLI `--solve-cloudflare`), it clicks Cloudflare's
 Turnstile checkbox; see [Cloudflare Turnstile](#cloudflare-turnstile). With
 `solve_datadome=True` (CLI `--solve-datadome`), it drags DataDome's slider; see
-[DataDome slider](#datadome-slider).
+[DataDome slider](#datadome-slider). With `solve_perimeterx=True` (CLI
+`--solve-perimeterx`), it holds HUMAN's Press & Hold button; see
+[HUMAN Press & Hold](#human-press--hold).
 Ordinary HTTP errors still return `ok=False`.
 For an empty HTTP error body, Chromium can show its own error page. The returned
 text or HTML is that rendered page. The status, headers, and `final_url` still
@@ -174,13 +176,33 @@ hard block instead. No cookie or token is read, copied or injected, no outside
 solving service is used, and DataDome's audio and image puzzles are never
 touched.
 
-Use both responsibly: only on sites whose terms and applicable law allow
+## HUMAN Press & Hold
+
+`solve_perimeterx=True` (CLI `--solve-perimeterx`) handles the Press & Hold
+challenge of HUMAN Security (formerly PerimeterX). It is off by default;
+without it the challenge page fails fast with `blocked`. With it, WebSkrap
+waits on the challenge page. When HUMAN draws its button, the cursor follows a
+curved path to it, presses, and holds with a small hand tremor until the
+button's progress fill is complete, then lets go. The button is read from the
+challenge frame's DOM before each hold. If the page has not cleared 8 seconds
+later, WebSkrap holds again, at most three times. The button gets up to 60
+seconds from when it first appears, on top of `timeout_ms`. Success is
+reported only after the real page loads and no challenge is detected on it;
+otherwise the call fails with `blocked`.
+
+A hold only answers the widget: HUMAN still scores the browser and the exit
+IP. In live runs it refused every completed hold from a flagged IP, in every
+browser mode, and accepted the first hold from a cleaner exit. No cookie or
+token is read, copied or injected, and no outside solving service is used.
+
+Use them responsibly: only on sites whose terms and applicable law allow
 automated access, and at a polite rate. Passing a challenge does not grant
 permission to collect data you may not collect.
 
 ```bash
 webskrap fetch https://example.com --virtual-display --solve-cloudflare
 webskrap fetch https://example.com --virtual-display --solve-datadome
+webskrap fetch https://example.com --virtual-display --solve-perimeterx
 ```
 
 ## Visual browser interaction

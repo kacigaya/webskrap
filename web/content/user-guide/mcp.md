@@ -108,6 +108,7 @@ leave the notice in place.
 | `decline_cookies` | `true` | Click a cookie consent notice's reject button after load. |
 | `solve_cloudflare` | `false` | Click Cloudflare's Turnstile checkbox and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
 | `solve_datadome` | `false` | Drag DataDome's slider CAPTCHA and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
+| `solve_perimeterx` | `false` | Hold HUMAN's (PerimeterX) Press & Hold button and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
 | `session` | `null` | Opt in to a warm browser with shared cookies/storage. |
 
 Example arguments:
@@ -175,7 +176,7 @@ For repeated extraction, pass the same `session` name on each fetch:
 The first call launches the browser; later calls open new pages in its existing
 context. Cookies and storage are shared within that name. Keep profile and
 config options identical; changes are rejected. `timeout_ms`, `decline_cookies`,
-`solve_cloudflare`, `solve_datadome`, output options and `wait_until` can vary. Concurrent calls can use the same session.
+`solve_cloudflare`, `solve_datadome`, `solve_perimeterx`, output options and `wait_until` can vary. Concurrent calls can use the same session.
 Up to eight fetches run at once; extra calls wait. Up to eight named sessions
 stay open; close unused ones before creating more.
 
@@ -249,8 +250,9 @@ longer than 2 seconds fails with `usage`.
 `browser_goto` and `browser_open` accept `decline_cookies: true` to click a
 consent notice's reject control (waiting up to 10 seconds for it) and report the strategy in
 `cookie_notice_declined`. They also accept `solve_cloudflare: true` to click
-Cloudflare's Turnstile checkbox, and `solve_datadome: true` to drag DataDome's
-slider, before the page is reported. `browser_screenshot` accepts `target`, a snapshot ref
+Cloudflare's Turnstile checkbox, `solve_datadome: true` to drag DataDome's
+slider, and `solve_perimeterx: true` to hold HUMAN's Press & Hold button,
+before the page is reported. `browser_screenshot` accepts `target`, a snapshot ref
 (iframe refs such as `f12345e15` included) or CSS selector, to capture only
 that element's bounding box; the result reports it as `clip`.
 

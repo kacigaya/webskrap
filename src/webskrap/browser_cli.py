@@ -208,6 +208,13 @@ def open_command(
             help="Drag DataDome's slider CAPTCHA and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_perimeterx: Annotated[
+        bool,
+        typer.Option(
+            "--solve-perimeterx",
+            help="Hold HUMAN's Press & Hold button and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     virtual_display: VirtualDisplayOption = False,
     gpu: GpuOption = GpuBackend.AUTO,
     profile_mode: SessionProfileModeOption = "native",
@@ -270,6 +277,7 @@ def open_command(
                     decline_cookies=decline_cookies,
                     solve_cloudflare=solve_cloudflare,
                     solve_datadome=solve_datadome,
+                    solve_perimeterx=solve_perimeterx,
                 ),
                 output_format,
                 timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
@@ -430,6 +438,13 @@ def goto_command(
             help="Drag DataDome's slider CAPTCHA and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_perimeterx: Annotated[
+        bool,
+        typer.Option(
+            "--solve-perimeterx",
+            help="Hold HUMAN's Press & Hold button and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
     """Navigate the current page.
@@ -448,6 +463,7 @@ def goto_command(
             decline_cookies=decline_cookies,
             solve_cloudflare=solve_cloudflare,
             solve_datadome=solve_datadome,
+            solve_perimeterx=solve_perimeterx,
         ),
         output_format,
         timeout_ms=timeout_ms,

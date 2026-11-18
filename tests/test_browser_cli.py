@@ -79,13 +79,21 @@ def test_goto_passes_solve_cloudflare(tmp_path: Path, monkeypatch: pytest.Monkey
             "https://example.test",
             "--solve-cloudflare",
             "--solve-datadome",
+            "--solve-perimeterx",
             "--format",
             "json",
         ],
         env=_env(tmp_path),
     )
     assert result.exit_code == 0, result.output
-    assert calls == [{"decline_cookies": False, "solve_cloudflare": True, "solve_datadome": True}]
+    assert calls == [
+        {
+            "decline_cookies": False,
+            "solve_cloudflare": True,
+            "solve_datadome": True,
+            "solve_perimeterx": True,
+        }
+    ]
 
 
 @pytest.mark.parametrize("session", [".", "..", "../evil"])

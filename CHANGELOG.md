@@ -23,6 +23,17 @@ history, so they summarize each release rather than list every change.
   measured in DataDome's cross-site frame through CDP, and the drag follows a
   human rhythm, again after 10 s if the page has not cleared, at most three
   times within 60 s. A hard block has no slider and stays `blocked`.
+- `solve_perimeterx` (CLI `--solve-perimeterx`; same MCP tools) holds the
+  Press & Hold button of HUMAN Security (formerly PerimeterX). Off by default.
+  The button is found in the challenge's same-process frame through CDP and
+  held with a small tremor until its progress fill completes, again after 8 s
+  if the page has not cleared, at most three times within 60 s.
+
+### Changed
+
+- HUMAN's Press & Hold page (`#px-captcha`) is now detected as a challenge, so
+  fetch raises `blocked` and browser sessions report it, instead of returning
+  the 403 page as an ordinary HTTP error.
 
 ### Fixed
 

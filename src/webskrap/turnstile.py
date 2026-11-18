@@ -66,6 +66,11 @@ class Checkbox:
     next_click: float = 0.0
     seen: bool = False
 
+    @property
+    def attempts(self) -> int:
+        """How many gestures have been made so far."""
+        return self.clicks
+
     async def step(self) -> None:
         """Click the checkbox when it is drawn and a click is due; else do nothing.
 

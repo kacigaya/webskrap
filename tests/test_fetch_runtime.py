@@ -300,7 +300,9 @@ async def test_per_call_options_can_vary_without_relaunch(runtime) -> None:
         pass
     async with runtime.use(
         "crawl",
-        SessionConfig(decline_cookies=True, solve_cloudflare=True, solve_datadome=True),
+        SessionConfig(
+            decline_cookies=True, solve_cloudflare=True, solve_datadome=True, solve_perimeterx=True
+        ),
         get_profile(None),
     ) as second:
         assert second is first

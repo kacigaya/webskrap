@@ -433,6 +433,7 @@ async def goto(
     decline_cookies: bool = False,
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
+    solve_perimeterx: bool = False,
 ) -> dict[str, Any]:
     """Navigate and return ``{"status", "url", "title", "blocked"}``.
 
@@ -440,7 +441,8 @@ async def goto(
     for a self-clearing interstitial. A detected page is reported in
     ``blocked`` rather than raised, so the session stays usable for a person
     to look at. With ``solve_cloudflare``, Cloudflare's Turnstile checkbox is
-    clicked first; with ``solve_datadome``, DataDome's slider is dragged. With
+    clicked first; with ``solve_datadome``, DataDome's slider is dragged; with
+    ``solve_perimeterx``, HUMAN's Press & Hold button is held. With
     ``decline_cookies``, a consent notice is dismissed and
     ``cookie_notice_declined`` names the strategy that clicked, or is None.
     """
@@ -458,6 +460,7 @@ async def goto(
             deadline=deadline,
             solve_cloudflare=solve_cloudflare,
             solve_datadome=solve_datadome,
+            solve_perimeterx=solve_perimeterx,
         )
     finally:
         documents.stop()
