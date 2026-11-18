@@ -1,6 +1,6 @@
 ---
 title: Stealth Browser Scraping with Python
-description: Use WebSkrap's own CDP client for stealth-oriented Python web scraping, with opt-in Cloudflare Turnstile, DataDome slider and HUMAN Press & Hold handling and no access-control bypassing.
+description: Use WebSkrap's own CDP client for stealth-oriented Python web scraping, with opt-in Cloudflare Turnstile, DataDome slider, HUMAN Press & Hold and reCAPTCHA/hCaptcha checkbox handling and no access-control bypassing.
 ---
 
 # Stealth
@@ -109,6 +109,27 @@ A hold only answers the widget: HUMAN still scores the browser and the exit
 IP. In live runs it refused every completed hold from a flagged IP, in every
 browser mode, and accepted the first hold from a cleaner exit. No cookie or
 token is read, copied or injected, and no outside solving service is used.
+
+## reCAPTCHA and hCaptcha checkbox
+
+`solve_recaptcha=True` (CLI `--solve-recaptcha`) clicks the "I'm not a robot"
+checkbox of reCAPTCHA v2 or hCaptcha on a page that blocks the site: a 403,
+429 or 503 response that carries the widget. It is off by default; without it
+such a page fails fast with `blocked`. With it, WebSkrap waits for the widget,
+moves the cursor like a person and clicks the checkbox. When the provider
+trusts the browser, the box ticks and the page's own callback continues to the
+real page. If the page has not cleared 15 seconds later, WebSkrap clicks again,
+at most twice within 60 seconds. When the provider opens an image challenge
+instead, WebSkrap leaves it alone and the call fails with `blocked` at once.
+
+For a checkbox inside a form, fill the form, then call `browser_solve_captcha`
+(CLI `webskrap browser solve-captcha`) before you submit it. Its
+`captcha.state` is `checked`, `challenge`, `gone`, `timeout` or `not_found`.
+
+The click only answers the checkbox: the provider still scores the browser and
+the exit IP, and a datacenter IP usually gets the image challenge. reCAPTCHA
+v3 and invisible widgets have no checkbox and are not handled. No token is
+read, copied or injected, and no outside solving service is used.
 
 Use them responsibly: only on sites whose terms and applicable law allow
 automated access, and at a polite rate. Passing a challenge does not grant

@@ -103,8 +103,10 @@ Read the [CLI](references/cli.md) or [MCP](references/mcp.md) reference for exam
   access.
 - Keep CAPTCHA handling to the opt-in Cloudflare Turnstile checkbox click
   (`solve_cloudflare`, `turnstile.py`), DataDome slider drag
-  (`solve_datadome`, `datadome.py`) and HUMAN Press & Hold
-  (`solve_perimeterx`, `perimeterx.py`). Do not add token injection, solving
+  (`solve_datadome`, `datadome.py`), HUMAN Press & Hold
+  (`solve_perimeterx`, `perimeterx.py`) and reCAPTCHA/hCaptcha checkbox click
+  (`solve_recaptcha`, `browser_solve_captcha`, `recaptcha.py`). Never touch
+  their image or audio challenges. Do not add token injection, solving
   services, login-wall bypass, credential bypass, or access-control
   circumvention.
 - Do not commit cookies, storage state, proxy credentials, or persistent browser

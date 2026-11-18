@@ -155,9 +155,12 @@ def test_stealth_fetch_exposes_resource_and_wait_controls(monkeypatch: Any) -> N
     assert _FakeClient.calls[0]["solve_cloudflare"] is False
     assert _FakeClient.calls[0]["solve_datadome"] is False
     assert _FakeClient.calls[0]["solve_perimeterx"] is False
+    assert _FakeClient.calls[0]["solve_recaptcha"] is False
 
 
-@pytest.mark.parametrize("name", ["solve_cloudflare", "solve_datadome", "solve_perimeterx"])
+@pytest.mark.parametrize(
+    "name", ["solve_cloudflare", "solve_datadome", "solve_perimeterx", "solve_recaptcha"]
+)
 @pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
 def test_fetch_tools_pass_solve_flags(monkeypatch: Any, tool: Any, name: str) -> None:
     _fake_client(monkeypatch)
@@ -327,12 +330,30 @@ def test_browser_tools_are_registered() -> None:
         "browser_interact",
         "browser_wait_for",
         "browser_press",
+        "browser_solve_captcha",
         "browser_screenshot",
         "browser_eval",
         "browser_close",
         "browser_list",
         "browser_tabs",
     } <= names
+
+
+def test_browser_solve_captcha_runs_the_session_action(monkeypatch: Any) -> None:
+    calls: list[Any] = []
+
+    async def browser_action(session: str, run: Any, timeout_ms: float) -> dict[str, Any]:
+        calls.append((session, timeout_ms))
+        return await run("page")
+
+    async def solve_captcha(page: Any) -> dict[str, Any]:
+        return {"url": "u", "title": "t", "captcha": {"provider": "hCaptcha", "state": page}}
+
+    monkeypatch.setattr(mcp_server, "_browser_action", browser_action)
+    monkeypatch.setattr(mcp_server.browser_session, "solve_captcha", solve_captcha)
+    result = asyncio.run(mcp_server.browser_solve_captcha(session="form"))
+    assert result["captcha"] == {"provider": "hCaptcha", "state": "page"}
+    assert calls == [("form", 30_000)]
 
 
 def test_browser_interact_rejects_unknown_action() -> None:
@@ -643,6 +664,7 @@ def test_tools_that_can_lose_data_or_submit_forms_are_marked_destructive() -> No
     assert annotations["browser_close"].destructive_hint is True
     assert annotations["browser_interact"].destructive_hint is True
     assert annotations["browser_press"].destructive_hint is True
+    assert annotations["browser_solve_captcha"].destructive_hint is True
     # Listing sessions must not look like closing one.
     assert annotations["browser_list"].destructive_hint is False
 

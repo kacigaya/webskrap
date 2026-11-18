@@ -142,6 +142,8 @@ def _emit_state(state: dict[str, Any], output_format: OutputFormat) -> None:
     if "cookie_notice_declined" in state:
         declined = state["cookie_notice_declined"] or "no notice found"
         console.print(f"[bold]Cookie notice:[/bold] {declined}")
+    if captcha := state.get("captcha"):
+        console.print(f"[bold]CAPTCHA:[/bold] {captcha['provider'] or 'none'} {captcha['state']}")
     if blocked := state.get("blocked"):
         stderr_console.print(
             f"[yellow]blocked:[/yellow] {blocked['provider']} {blocked['kind']}. {blocked['hint']}"
@@ -215,6 +217,13 @@ def open_command(
             help="Hold HUMAN's Press & Hold button and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_recaptcha: Annotated[
+        bool,
+        typer.Option(
+            "--solve-recaptcha",
+            help="Click a reCAPTCHA v2 or hCaptcha checkbox on a blocked page; wait up to 60 s.",
+        ),
+    ] = False,
     virtual_display: VirtualDisplayOption = False,
     gpu: GpuOption = GpuBackend.AUTO,
     profile_mode: SessionProfileModeOption = "native",
@@ -278,6 +287,7 @@ def open_command(
                     solve_cloudflare=solve_cloudflare,
                     solve_datadome=solve_datadome,
                     solve_perimeterx=solve_perimeterx,
+                    solve_recaptcha=solve_recaptcha,
                 ),
                 output_format,
                 timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
@@ -445,6 +455,13 @@ def goto_command(
             help="Hold HUMAN's Press & Hold button and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_recaptcha: Annotated[
+        bool,
+        typer.Option(
+            "--solve-recaptcha",
+            help="Click a reCAPTCHA v2 or hCaptcha checkbox on a blocked page; wait up to 60 s.",
+        ),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
     """Navigate the current page.
@@ -464,6 +481,7 @@ def goto_command(
             solve_cloudflare=solve_cloudflare,
             solve_datadome=solve_datadome,
             solve_perimeterx=solve_perimeterx,
+            solve_recaptcha=solve_recaptcha,
         ),
         output_format,
         timeout_ms=timeout_ms,
@@ -565,6 +583,23 @@ def _register_element_command(name: str, help_text: str) -> None:
 
 for _name in ELEMENT_ACTIONS:
     _register_element_command(_name, _ELEMENT_COMMAND_HELP[_name])
+
+
+@browser_app.command("solve-captcha")
+def solve_captcha_command(
+    session: SessionOption = "default",
+    timeout_ms: ActionTimeoutOption = 30_000,
+    format: FormatOption = "human",
+) -> None:
+    """Click the page's reCAPTCHA v2 or hCaptcha checkbox like a person."""
+    output_format = parse_output_format(format)
+
+    async def action(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.solve_captcha(page)
+
+    _emit_state(
+        _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
+    )
 
 
 @browser_app.command("press")

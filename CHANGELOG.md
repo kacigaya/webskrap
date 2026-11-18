@@ -9,6 +9,27 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `solve_recaptcha` (CLI `--solve-recaptcha`; MCP `fetch`, `stealth_fetch`,
+  `browser_open` and `browser_goto`) clicks the reCAPTCHA v2 or hCaptcha
+  checkbox on a 403, 429 or 503 page that carries the widget. Off by default.
+  The checkbox is read in the provider's cross-site frame through CDP and
+  clicked along a human cursor path, again after 15 s if the page has not
+  cleared, at most twice within 60 s. An image challenge is never touched: the
+  call reports `blocked` at once.
+- `browser_solve_captcha` (CLI `webskrap browser solve-captcha`) clicks a
+  reCAPTCHA v2 or hCaptcha checkbox inside a form and reports `captcha.state`
+  (`checked`, `challenge`, `gone`, `timeout` or `not_found`).
+
+### Changed
+
+- A 403, 429 or 503 page that carries a reCAPTCHA v2 or hCaptcha checkbox is
+  now detected as a challenge, so fetch raises `blocked` and browser sessions
+  report it, instead of returning the page as an ordinary HTTP error.
+- Turnstile's checkbox click is now the public `turnstile.click`, shared with
+  the reCAPTCHA and hCaptcha solver.
+
 ## [3.7.0] - 2026-11-18
 
 ### Added

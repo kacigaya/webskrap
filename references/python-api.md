@@ -107,7 +107,7 @@ CSS selector or snapshot ref that must become visible after consent dismissal an
 extraction. Its wait uses `timeout_ms` or `navigation_timeout_ms` separately from
 navigation. A missing selector raises a timeout. A blank selector is a usage error.
 
-Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF) and provider block pages (Cloudflare, Akamai) raise `WebSkrapError` with
+Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block pages (Cloudflare, Akamai) raise `WebSkrapError` with
 `code=ErrorCode.BLOCKED`, even when served with HTTP 200. `error.hint`
 holds a kind-specific hint. Ordinary HTTP errors
 still return `FetchResult(ok=False)`. Detection uses active provider markers and
@@ -128,7 +128,10 @@ by the caller.
 for one call, clicks Cloudflare's Turnstile checkbox on its "Just a moment"
 page and waits up to 60 seconds for the real page. `solve_datadome=True` does
 the same for DataDome's slider CAPTCHA, and `solve_perimeterx=True` for HUMAN's
-Press & Hold button. Use them responsibly.
+Press & Hold button. `solve_recaptcha=True` clicks a reCAPTCHA v2 or hCaptcha
+checkbox on a 403, 429 or 503 page. For a checkbox inside a form,
+`await browser_session.solve_captcha(page)` clicks it and returns
+`captcha.state`. Use them responsibly.
 
 Link collection is opt-in with `include_links=True` and capped by `max_links`.
 Links resolve against the final URL. Duplicate and `javascript:` targets are

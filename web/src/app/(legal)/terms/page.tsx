@@ -67,8 +67,8 @@ export default function TermsPage() {
         automation behave like an ordinary browser for testing, research, and
         permitted collection. Its only CAPTCHA handling is an opt-in click on
         Cloudflare’s Turnstile checkbox, an opt-in drag of DataDome’s slider
-        and an opt-in hold of HUMAN’s Press &amp; Hold button; use them
-        responsibly. The maintainer
+        an opt-in hold of HUMAN’s Press &amp; Hold button and an opt-in click
+        on a reCAPTCHA or hCaptcha checkbox; use them responsibly. The maintainer
         does not endorse using WebSkrap to evade a site’s decision to refuse
         automated traffic.
       </p>

@@ -71,6 +71,7 @@ python -m webskrap.mcp_server
 | `browser_snapshot` | Aria snapshot of the page with `eN` element refs. |
 | `browser_interact` | Click, fill, type, select, hover, check, or uncheck an element. |
 | `browser_press` | Press a keyboard key on the page. |
+| `browser_solve_captcha` | Click a reCAPTCHA v2 or hCaptcha checkbox inside a form and report `captcha.state`. |
 | `browser_wait_for` | Wait for text to appear or disappear, a ref or selector state, or a load state. |
 | `browser_view` | Inline viewport PNG and CSS coordinate metadata, without a file write. |
 | `browser_mouse` | Coordinate click, double-click, move, scroll, or drag. |
@@ -109,6 +110,7 @@ leave the notice in place.
 | `solve_cloudflare` | `false` | Click Cloudflare's Turnstile checkbox and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
 | `solve_datadome` | `false` | Drag DataDome's slider CAPTCHA and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
 | `solve_perimeterx` | `false` | Hold HUMAN's (PerimeterX) Press & Hold button and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
+| `solve_recaptcha` | `false` | Click a reCAPTCHA v2 or hCaptcha checkbox on a 403, 429 or 503 page and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
 | `session` | `null` | Opt in to a warm browser with shared cookies/storage. |
 
 Example arguments:
@@ -176,7 +178,7 @@ For repeated extraction, pass the same `session` name on each fetch:
 The first call launches the browser; later calls open new pages in its existing
 context. Cookies and storage are shared within that name. Keep profile and
 config options identical; changes are rejected. `timeout_ms`, `decline_cookies`,
-`solve_cloudflare`, `solve_datadome`, `solve_perimeterx`, output options and `wait_until` can vary. Concurrent calls can use the same session.
+`solve_cloudflare`, `solve_datadome`, `solve_perimeterx`, `solve_recaptcha`, output options and `wait_until` can vary. Concurrent calls can use the same session.
 Up to eight fetches run at once; extra calls wait. Up to eight named sessions
 stay open; close unused ones before creating more.
 
@@ -251,8 +253,10 @@ longer than 2 seconds fails with `usage`.
 consent notice's reject control (waiting up to 10 seconds for it) and report the strategy in
 `cookie_notice_declined`. They also accept `solve_cloudflare: true` to click
 Cloudflare's Turnstile checkbox, `solve_datadome: true` to drag DataDome's
-slider, and `solve_perimeterx: true` to hold HUMAN's Press & Hold button,
-before the page is reported. `browser_screenshot` accepts `target`, a snapshot ref
+slider, `solve_perimeterx: true` to hold HUMAN's Press & Hold button, and
+`solve_recaptcha: true` to click a reCAPTCHA v2 or hCaptcha checkbox, before
+the page is reported. For a checkbox inside a form, `browser_solve_captcha`
+clicks it and reports `captcha.state`. `browser_screenshot` accepts `target`, a snapshot ref
 (iframe refs such as `f12345e15` included) or CSS selector, to capture only
 that element's bounding box; the result reports it as `clip`.
 

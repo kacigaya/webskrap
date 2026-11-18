@@ -361,6 +361,13 @@ def fetch_command(
             help="Hold HUMAN's Press & Hold button and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_recaptcha: Annotated[
+        bool,
+        typer.Option(
+            "--solve-recaptcha",
+            help="Click a reCAPTCHA v2 or hCaptcha checkbox on a blocked page; wait up to 60 s.",
+        ),
+    ] = False,
     profile_mode: ProfileModeOption = "native",
     reduce_fingerprint_surface: ReduceFingerprintSurfaceOption = False,
     mask_headless_user_agent: MaskHeadlessUserAgentOption = False,
@@ -397,6 +404,7 @@ def fetch_command(
             solve_cloudflare=solve_cloudflare,
             solve_datadome=solve_datadome,
             solve_perimeterx=solve_perimeterx,
+            solve_recaptcha=solve_recaptcha,
             profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
@@ -435,6 +443,7 @@ async def _fetch(
     solve_cloudflare: bool,
     solve_datadome: bool,
     solve_perimeterx: bool,
+    solve_recaptcha: bool,
     profile_mode: str,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
@@ -458,6 +467,7 @@ async def _fetch(
         solve_cloudflare=solve_cloudflare,
         solve_datadome=solve_datadome,
         solve_perimeterx=solve_perimeterx,
+        solve_recaptcha=solve_recaptcha,
         profile_mode=profile_mode,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
@@ -695,6 +705,7 @@ def _session_config(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
 ) -> SessionConfig:
     """Build the headless session config that ``fetch`` and ``search`` share."""
     return SessionConfig(
@@ -709,6 +720,7 @@ def _session_config(
         solve_cloudflare=solve_cloudflare,
         solve_datadome=solve_datadome,
         solve_perimeterx=solve_perimeterx,
+        solve_recaptcha=solve_recaptcha,
         profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
