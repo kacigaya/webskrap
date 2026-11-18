@@ -382,6 +382,7 @@ class WebSkrapSession:
         ready_selector: str | None = None,
         solve_cloudflare: bool | None = None,
         solve_datadome: bool | None = None,
+        solve_perimeterx: bool | None = None,
     ) -> FetchResult:
         """Open ``url`` in a new page, read it, and close the page.
 
@@ -417,6 +418,11 @@ class WebSkrapSession:
                 ``SessionConfig.solve_datadome``; None uses the config. When on,
                 DataDome's slider CAPTCHA is dragged and the real page is
                 awaited for up to 60 s, apart from the navigation timeout.
+            solve_perimeterx: Per-call override of
+                ``SessionConfig.solve_perimeterx``; None uses the config. When
+                on, HUMAN's (PerimeterX) Press & Hold button is held and the
+                real page is awaited for up to 60 s, apart from the navigation
+                timeout.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
@@ -450,6 +456,9 @@ class WebSkrapSession:
                 ),
                 solve_datadome=(
                     self.config.solve_datadome if solve_datadome is None else solve_datadome
+                ),
+                solve_perimeterx=(
+                    self.config.solve_perimeterx if solve_perimeterx is None else solve_perimeterx
                 ),
             )
             headers = response_headers(response)
@@ -552,6 +561,7 @@ class WebSkrapSession:
                 deadline=deadline,
                 solve_cloudflare=self.config.solve_cloudflare,
                 solve_datadome=self.config.solve_datadome,
+                solve_perimeterx=self.config.solve_perimeterx,
             )
             await raise_for_challenge(
                 page, response_headers(response), response_status(response), deadline=deadline
@@ -816,6 +826,7 @@ class WebSkrapClient:
         ready_selector: str | None = None,
         solve_cloudflare: bool | None = None,
         solve_datadome: bool | None = None,
+        solve_perimeterx: bool | None = None,
     ) -> FetchResult:
         """Fetch one URL in a throwaway session.
 
@@ -840,6 +851,8 @@ class WebSkrapClient:
                 :meth:`WebSkrapSession.fetch`.
             solve_datadome: Per-call DataDome slider override; see
                 :meth:`WebSkrapSession.fetch`.
+            solve_perimeterx: Per-call Press & Hold override; see
+                :meth:`WebSkrapSession.fetch`.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`.
@@ -862,6 +875,7 @@ class WebSkrapClient:
                 ready_selector=ready_selector,
                 solve_cloudflare=solve_cloudflare,
                 solve_datadome=solve_datadome,
+                solve_perimeterx=solve_perimeterx,
             )
         finally:
             # A cancelled waiter can leave its shielded browser launch running.

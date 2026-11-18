@@ -100,7 +100,24 @@ hard block instead. No cookie or token is read, copied or injected, no outside
 solving service is used, and DataDome's audio and image puzzles are never
 touched.
 
-Use both responsibly: only on sites whose terms and applicable law allow
+`solve_perimeterx=True` (CLI `--solve-perimeterx`) handles the Press & Hold
+challenge of HUMAN Security (formerly PerimeterX). It is off by default;
+without it the challenge page fails fast with `blocked`. With it, WebSkrap
+waits on the challenge page. When HUMAN draws its button, the cursor follows a
+curved path to it, presses, and holds with a small hand tremor until the
+button's progress fill is complete, then lets go. The button is read from the
+challenge frame's DOM before each hold. If the page has not cleared 8 seconds
+later, WebSkrap holds again, at most three times. The button gets up to 60
+seconds from when it first appears, on top of `timeout_ms`. Success is
+reported only after the real page loads and no challenge is detected on it;
+otherwise the call fails with `blocked`.
+
+A hold only answers the widget: HUMAN still scores the browser and the exit
+IP. In live runs it refused every completed hold from a flagged IP, in every
+browser mode, and accepted the first hold from a cleaner exit. No cookie or
+token is read, copied or injected, and no outside solving service is used.
+
+Use them responsibly: only on sites whose terms and applicable law allow
 automated access, and at a polite rate. Passing a challenge does not grant
 permission to collect data you may not collect.
 
@@ -248,7 +265,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_launch` | Run `webskrap install`. Fetch and search already fall back from `chrome` to Edge and bundled Chromium. |
 | `sandbox` | Check user namespaces and AppArmor for the browser executable; restore sandbox support. |
 | `path_rejected` | Paths are relative to a confined root. |
-| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. For Cloudflare's checkbox, `solve_cloudflare=True`; for DataDome's slider, `solve_datadome=True`. |
+| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. For Cloudflare's checkbox, `solve_cloudflare=True`; for DataDome's slider, `solve_datadome=True`; for HUMAN's Press & Hold, `solve_perimeterx=True`. |
 | `usage` | Re-read the argument's documented values. |
 
 ## Limits
@@ -257,7 +274,7 @@ Screenshots are written under `./webskrap-output` and persistent profiles under
 `~/.webskrap/profiles` (`WEBSKRAP_OUTPUT_DIR` and `WEBSKRAP_MCP_PROFILE_DIR` move
 those roots). Absolute paths and traversal are rejected. The sandbox switch is an
 environment variable and never a tool argument, so a page cannot argue a model
-into disabling it. The only CAPTCHA handling is the opt-in Turnstile click and DataDome slider drag; no
+into disabling it. The only CAPTCHA handling is the opt-in Turnstile click, DataDome slider drag and HUMAN Press & Hold; no
 login-wall bypass. Use it responsibly.
 
 ## Python batch fetching

@@ -154,9 +154,10 @@ def test_stealth_fetch_exposes_resource_and_wait_controls(monkeypatch: Any) -> N
     assert _FakeClient.calls[0]["decline_cookies"] is True
     assert _FakeClient.calls[0]["solve_cloudflare"] is False
     assert _FakeClient.calls[0]["solve_datadome"] is False
+    assert _FakeClient.calls[0]["solve_perimeterx"] is False
 
 
-@pytest.mark.parametrize("name", ["solve_cloudflare", "solve_datadome"])
+@pytest.mark.parametrize("name", ["solve_cloudflare", "solve_datadome", "solve_perimeterx"])
 @pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
 def test_fetch_tools_pass_solve_flags(monkeypatch: Any, tool: Any, name: str) -> None:
     _fake_client(monkeypatch)

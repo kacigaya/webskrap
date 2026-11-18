@@ -25,7 +25,7 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 
 | Symbol | Description |
 | --- | --- |
-| `SessionConfig` | Per-session or per-call settings: channel, headless, `profile_mode`, timeouts, `user_data_dir`, `storage_state`, `resource_policy`, `decline_cookies`, `decline_cookies_timeout_ms`, `solve_cloudflare`, `solve_datadome`, proxy, and stealth options. |
+| `SessionConfig` | Per-session or per-call settings: channel, headless, `profile_mode`, timeouts, `user_data_dir`, `storage_state`, `resource_policy`, `decline_cookies`, `decline_cookies_timeout_ms`, `solve_cloudflare`, `solve_datadome`, `solve_perimeterx`, proxy, and stealth options. |
 | `ProxyConfig` | Proxy `server` with optional `username` and `password`. |
 | `ResourcePolicy` | Request-blocking preset: `ALL`, `LITE`, or `DOCUMENTS`. |
 | `SearchEngine` | Results page a search loads: `BING` (default) or `DDG` (DuckDuckGo HTML). Google is not offered. |

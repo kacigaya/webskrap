@@ -7,11 +7,13 @@ not establish that a provider replaced the requested page.
 Two kinds are told apart, because they need different fixes:
 
 - A *challenge* asks the browser to prove itself (DataDome, Cloudflare's "Just a
-  moment", Akamai's sec-cpt page, AWS WAF's challenge action). A more
-  browser-like run can pass it. With ``solve_cloudflare``, Cloudflare's
-  checkbox is clicked by :mod:`webskrap.turnstile`; with ``solve_datadome``,
-  DataDome's slider is dragged by :mod:`webskrap.datadome`. No other challenge
-  is interacted with, and no token is read or copied.
+  moment", HUMAN's (PerimeterX) Press & Hold, Akamai's sec-cpt page, AWS WAF's
+  challenge action). A more browser-like run can pass it. With
+  ``solve_cloudflare``, Cloudflare's checkbox is clicked by
+  :mod:`webskrap.turnstile`; with ``solve_datadome``, DataDome's slider is
+  dragged by :mod:`webskrap.datadome`; with ``solve_perimeterx``, HUMAN's
+  button is held by :mod:`webskrap.perimeterx`. No other challenge is
+  interacted with, and no token is read or copied.
 - A *block* refuses the client outright (a Cloudflare block page, an Akamai
   edge reference page). Only a different exit IP or fingerprint helps.
 
@@ -40,6 +42,7 @@ BlockKind = Literal["challenge", "block"]
 
 #: How long a self-clearing interstitial gets to reload into the requested page.
 INTERSTITIAL_TIMEOUT_S = 15.0
+RELOAD_GRACE_S = 10.0
 _POLL_S = 0.25
 
 
@@ -82,6 +85,8 @@ class Detection:
             hint += " solve_cloudflare=True clicks its Turnstile checkbox."
         if (self.provider, self.kind) == ("DataDome", "challenge"):
             hint += " solve_datadome=True drags its slider."
+        if (self.provider, self.kind) == ("PerimeterX", "challenge"):
+            hint += " solve_perimeterx=True holds its Press & Hold button."
         return hint
 
     def payload(self) -> dict[str, str]:
@@ -161,6 +166,17 @@ _DETECT_SCRIPT = r"""({status, ray, cloudflare, akamai}) => {
       return found('Cloudflare', 'challenge');
   }
   if (datadome) return datadome;
+  if (document.getElementById('px-captcha')) return found('PerimeterX', 'challenge');
+  const pxApp = [...document.querySelectorAll('script:not([src])')]
+    .some((script) => script.textContent.includes('_pxAppId'));
+  for (const script of document.querySelectorAll('script[src]')) {
+    let url;
+    try { url = new URL(script.getAttribute('src'), document.baseURI); }
+    catch { continue; }
+    if (/^captcha\.px-(cdn|cloud)\.net$/.test(url.hostname)
+        || (pxApp && /^\/[A-Za-z0-9]{4,16}\/captcha\/captcha\.js$/.test(url.pathname)))
+      return found('PerimeterX', 'challenge');
+  }
   if (document.getElementById('sec-if-cpt-container')) return found('Akamai', 'challenge', true);
   const text = document.body ? document.body.textContent : '';
   if (cloudflare && (status === 403 || status === 429)) {
@@ -221,7 +237,10 @@ async def detect(
     if not isinstance(found, dict):
         return None
     provider, kind = found.get("provider"), found.get("kind")
-    if provider not in ("DataDome", "Cloudflare", "Akamai") or kind not in ("challenge", "block"):
+    if provider not in ("DataDome", "Cloudflare", "Akamai", "PerimeterX") or kind not in (
+        "challenge",
+        "block",
+    ):
         return None
     detection = Detection(provider, kind, reloads=bool(found.get("reloads")))
     if provider == "DataDome" and isinstance(page, CDPPage):
@@ -316,6 +335,7 @@ async def settle(
     deadline: float,
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
+    solve_perimeterx: bool = False,
 ) -> dict[str, Any]:
     """Let a self-clearing interstitial reload into the requested page.
 
@@ -329,7 +349,11 @@ async def settle(
     :class:`webskrap.turnstile.Checkbox`. A drawn checkbox gets its own
     :data:`webskrap.turnstile.TIMEOUT_S`, past ``deadline`` if need be.
     ``solve_datadome`` does the same for DataDome's slider CAPTCHA with
-    :class:`webskrap.datadome.Slider`.
+    :class:`webskrap.datadome.Slider`, and ``solve_perimeterx`` for HUMAN's
+    Press & Hold button with :class:`webskrap.perimeterx.Hold`. Once a widget
+    has been seen, a clear detection on the same document waits up to
+    :data:`RELOAD_GRACE_S` for the reload the provider starts after a pass,
+    since its markers can disappear before the new document commits.
 
     Returns:
         The response of the document now on screen, once :func:`detect` finds
@@ -337,6 +361,7 @@ async def settle(
         that is its own response, and :func:`detect` reports it.
     """
     from webskrap.datadome import Slider
+    from webskrap.perimeterx import Hold
     from webskrap.turnstile import Checkbox
 
     limit = min(deadline, time.monotonic() + INTERSTITIAL_TIMEOUT_S)
@@ -346,6 +371,9 @@ async def settle(
     current = document if document is not None else response
     checkbox: Checkbox | None = None
     slider: Slider | None = None
+    hold: Hold | None = None
+    widget_loader: str | None = None
+    clear_since: float | None = None
     while True:
         try:
             found = await detect(
@@ -354,16 +382,25 @@ async def settle(
         except CDPError:
             found = Detection("", "challenge", reloads=True)  # the document is being replaced
         waiting = found is not None and found.reloads
-        solver: Checkbox | Slider | None = None
+        solver: Checkbox | Slider | Hold | None = None
         if solve_cloudflare and found == Detection("Cloudflare", "challenge"):
             solver = checkbox = checkbox or Checkbox(page)
         elif solve_datadome and found == Detection("DataDome", "challenge"):
             solver = slider = slider or Slider(page)
+        elif solve_perimeterx and found == Detection("PerimeterX", "challenge"):
+            solver = hold = hold or Hold(page)
         if solver is not None:
+            attempts = solver.attempts
             await solver.step()
             if solver.seen:
                 limit = max(limit, solver.deadline)
+            if solver.attempts > attempts:
+                widget_loader = current_loader
             waiting = True
+            clear_since = None
+        elif found is None and widget_loader is not None and widget_loader == current_loader:
+            clear_since = clear_since or time.monotonic()
+            waiting = time.monotonic() - clear_since < RELOAD_GRACE_S
         if not waiting or time.monotonic() >= limit:
             return current
         await asyncio.sleep(_POLL_S)

@@ -137,9 +137,10 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
     assert config.decline_cookies is True
     assert config.solve_cloudflare is False
     assert config.solve_datadome is False
+    assert config.solve_perimeterx is False
 
 
-@pytest.mark.parametrize("name", ["solve_cloudflare", "solve_datadome"])
+@pytest.mark.parametrize("name", ["solve_cloudflare", "solve_datadome", "solve_perimeterx"])
 def test_fetch_solve_flags(monkeypatch: Any, name: str) -> None:
     _fake_client(monkeypatch)
     flag = "--" + name.replace("_", "-")

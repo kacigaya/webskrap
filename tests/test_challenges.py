@@ -112,7 +112,23 @@ def test_browser_payload_names_the_session_fix() -> None:
             '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>',
             "Cloudflare",
         ),
+        ('<div id="px-captcha-wrapper"><div id="px-captcha"></div></div>', "PerimeterX"),
+        (
+            "<script>window._pxAppId = 'PXab12cd34';</script>"
+            '<script src="/ab12cd34/captcha/captcha.js?a=c&m=0"></script>',
+            "PerimeterX",
+        ),
+        ('<script src="https://captcha.px-cdn.net/PXab12cd34/captcha.js"></script>', "PerimeterX"),
+        ('<script src="/ab12cd34/captcha/captcha.js"></script>', None),
+        (
+            "<script>window._pxAppId = 'PXab12cd34';</script>"
+            '<script src="/ab12cd34/init.js"></script>',
+            None,
+        ),
+        ('<script src="https://captcha.px-cdn.net.example.test/PXab/captcha.js"></script>', None),
         ("<p>DataDome, Cloudflare, CAPTCHA and access denied troubleshooting</p>", None),
+        ('<script src="https://client.px-cloud.net/PXabc/main.min.js"></script>', None),
+        ('<div class="px-captcha">Press &amp; Hold</div>', None),
         ('<script src="https://js.datadome.co/tags.js"></script>', None),
         ('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>', None),
         ('<script src="/cdn-cgi/challenge-platform/h/g/jsd/oneshot"></script>', None),

@@ -396,6 +396,7 @@ class SessionConfig(BaseModel):
     decline_cookies_timeout_ms: float = Field(default=2_000, ge=0)
     solve_cloudflare: bool = False
     solve_datadome: bool = False
+    solve_perimeterx: bool = False
 
     @model_validator(mode="before")
     @classmethod

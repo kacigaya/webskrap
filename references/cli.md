@@ -35,7 +35,7 @@ long page. Do not re-fetch with an ever larger limit.
 Pass `--ready-selector '#content'` (CSS or a snapshot ref) to wait for visible content after consent
 dismissal. `--timeout-ms` applies separately to navigation and the readiness wait.
 A missing selector exits 3 (`timeout`). A known challenge or block page
-(DataDome, Cloudflare, Akamai, AWS WAF) exits 11 (`blocked`) without retrying,
+(DataDome, Cloudflare, HUMAN, Akamai, AWS WAF) exits 11 (`blocked`) without retrying,
 including one served with HTTP 200.
 Ordinary HTTP error pages still return a result with `ok: false`.
 
@@ -77,6 +77,7 @@ work as for `fetch`; `full` mode is not offered for sessions.
 webskrap browser open https://example.com --decline-cookies
 webskrap browser goto https://example.com --solve-cloudflare
 webskrap browser goto https://example.com --solve-datadome
+webskrap browser goto https://example.com --solve-perimeterx
 webskrap browser snapshot
 webskrap browser click e15
 webskrap browser fill "input[name=q]" "chromium"

@@ -16,7 +16,13 @@ from webskrap.models import BrowserProfile, SessionConfig
 
 MAX_FETCH_CONCURRENCY = 8
 MAX_FETCH_SESSIONS = 8
-_PER_CALL = {"navigation_timeout_ms", "decline_cookies", "solve_cloudflare", "solve_datadome"}
+_PER_CALL = {
+    "navigation_timeout_ms",
+    "decline_cookies",
+    "solve_cloudflare",
+    "solve_datadome",
+    "solve_perimeterx",
+}
 
 
 @dataclass

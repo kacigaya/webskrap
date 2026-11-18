@@ -59,6 +59,11 @@ class Slider:
     next_slide: float = 0.0
     seen: bool = False
 
+    @property
+    def attempts(self) -> int:
+        """How many gestures have been made so far."""
+        return self.slides
+
     async def step(self) -> None:
         """Drag the slider when it is drawn and a drag is due; else do nothing.
 
