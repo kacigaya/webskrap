@@ -117,6 +117,25 @@ IP. In live runs it refused every completed hold from a flagged IP, in every
 browser mode, and accepted the first hold from a cleaner exit. No cookie or
 token is read, copied or injected, and no outside solving service is used.
 
+`solve_recaptcha=True` (CLI `--solve-recaptcha`) clicks the "I'm not a robot"
+checkbox of reCAPTCHA v2 or hCaptcha on a page that blocks the site: a 403,
+429 or 503 response that carries the widget. It is off by default; without it
+such a page fails fast with `blocked`. With it, WebSkrap waits for the widget,
+moves the cursor like a person and clicks the checkbox. When the provider
+trusts the browser, the box ticks and the page's own callback continues to the
+real page. If the page has not cleared 15 seconds later, WebSkrap clicks again,
+at most twice within 60 seconds. When the provider opens an image challenge
+instead, WebSkrap leaves it alone and the call fails with `blocked` at once.
+
+For a checkbox inside a form, fill the form, then call `browser_solve_captcha`
+(CLI `webskrap browser solve-captcha`) before you submit it. Its
+`captcha.state` is `checked`, `challenge`, `gone`, `timeout` or `not_found`.
+
+The click only answers the checkbox: the provider still scores the browser and
+the exit IP, and a datacenter IP usually gets the image challenge. reCAPTCHA
+v3 and invisible widgets have no checkbox and are not handled. No token is
+read, copied or injected, and no outside solving service is used.
+
 Use them responsibly: only on sites whose terms and applicable law allow
 automated access, and at a polite rate. Passing a challenge does not grant
 permission to collect data you may not collect.
@@ -234,6 +253,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_snapshot` | `url`, `title`, `snapshot`, `snapshot_length`, `snapshot_offset`, `snapshot_truncated`, `next_snapshot_offset` |
 | `browser_interact`, `browser_press`, `browser_mouse`, `browser_insert_text` | `url`, `title` |
 | `browser_wait_for` | `url`, `title`, `matched` |
+| `browser_solve_captcha` | `url`, `title`, `captcha` (`provider`, `state`: `checked`, `challenge`, `gone`, `timeout`, `not_found`) |
 | `browser_eval` | `result`, `result_length`, `result_truncated`, and `result_json` when clipped |
 | `browser_view` | Inline PNG plus `url`, `title`, `width`, `height`, `scroll_x`, `scroll_y`, `coordinate_system`, `mime_type` |
 | `browser_screenshot` | `url`, `title`, `path`, and `clip` with `target` |
@@ -265,7 +285,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_launch` | Run `webskrap install`. Fetch and search already fall back from `chrome` to Edge and bundled Chromium. |
 | `sandbox` | Check user namespaces and AppArmor for the browser executable; restore sandbox support. |
 | `path_rejected` | Paths are relative to a confined root. |
-| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. For Cloudflare's checkbox, `solve_cloudflare=True`; for DataDome's slider, `solve_datadome=True`; for HUMAN's Press & Hold, `solve_perimeterx=True`. |
+| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. For Cloudflare's checkbox, `solve_cloudflare=True`; for DataDome's slider, `solve_datadome=True`; for HUMAN's Press & Hold, `solve_perimeterx=True`; for a reCAPTCHA or hCaptcha checkbox, `solve_recaptcha=True`. |
 | `usage` | Re-read the argument's documented values. |
 
 ## Limits
@@ -274,7 +294,7 @@ Screenshots are written under `./webskrap-output` and persistent profiles under
 `~/.webskrap/profiles` (`WEBSKRAP_OUTPUT_DIR` and `WEBSKRAP_MCP_PROFILE_DIR` move
 those roots). Absolute paths and traversal are rejected. The sandbox switch is an
 environment variable and never a tool argument, so a page cannot argue a model
-into disabling it. The only CAPTCHA handling is the opt-in Turnstile click, DataDome slider drag and HUMAN Press & Hold; no
+into disabling it. The only CAPTCHA handling is the opt-in Turnstile click, DataDome slider drag, HUMAN Press & Hold and reCAPTCHA/hCaptcha checkbox click; no
 login-wall bypass. Use it responsibly.
 
 ## Python batch fetching

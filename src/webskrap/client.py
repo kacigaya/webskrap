@@ -383,6 +383,7 @@ class WebSkrapSession:
         solve_cloudflare: bool | None = None,
         solve_datadome: bool | None = None,
         solve_perimeterx: bool | None = None,
+        solve_recaptcha: bool | None = None,
     ) -> FetchResult:
         """Open ``url`` in a new page, read it, and close the page.
 
@@ -423,6 +424,11 @@ class WebSkrapSession:
                 on, HUMAN's (PerimeterX) Press & Hold button is held and the
                 real page is awaited for up to 60 s, apart from the navigation
                 timeout.
+            solve_recaptcha: Per-call override of
+                ``SessionConfig.solve_recaptcha``; None uses the config. When
+                on, a reCAPTCHA v2 or hCaptcha checkbox on a 403, 429 or 503
+                page is clicked and the real page is awaited for up to 60 s,
+                apart from the navigation timeout.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
@@ -459,6 +465,9 @@ class WebSkrapSession:
                 ),
                 solve_perimeterx=(
                     self.config.solve_perimeterx if solve_perimeterx is None else solve_perimeterx
+                ),
+                solve_recaptcha=(
+                    self.config.solve_recaptcha if solve_recaptcha is None else solve_recaptcha
                 ),
             )
             headers = response_headers(response)
@@ -562,6 +571,7 @@ class WebSkrapSession:
                 solve_cloudflare=self.config.solve_cloudflare,
                 solve_datadome=self.config.solve_datadome,
                 solve_perimeterx=self.config.solve_perimeterx,
+                solve_recaptcha=self.config.solve_recaptcha,
             )
             await raise_for_challenge(
                 page, response_headers(response), response_status(response), deadline=deadline
@@ -827,6 +837,7 @@ class WebSkrapClient:
         solve_cloudflare: bool | None = None,
         solve_datadome: bool | None = None,
         solve_perimeterx: bool | None = None,
+        solve_recaptcha: bool | None = None,
     ) -> FetchResult:
         """Fetch one URL in a throwaway session.
 
@@ -853,6 +864,8 @@ class WebSkrapClient:
                 :meth:`WebSkrapSession.fetch`.
             solve_perimeterx: Per-call Press & Hold override; see
                 :meth:`WebSkrapSession.fetch`.
+            solve_recaptcha: Per-call reCAPTCHA/hCaptcha checkbox override; see
+                :meth:`WebSkrapSession.fetch`.
 
         Returns:
             A :class:`~webskrap.models.FetchResult`.
@@ -876,6 +889,7 @@ class WebSkrapClient:
                 solve_cloudflare=solve_cloudflare,
                 solve_datadome=solve_datadome,
                 solve_perimeterx=solve_perimeterx,
+                solve_recaptcha=solve_recaptcha,
             )
         finally:
             # A cancelled waiter can leave its shielded browser launch running.

@@ -301,7 +301,11 @@ async def test_per_call_options_can_vary_without_relaunch(runtime) -> None:
     async with runtime.use(
         "crawl",
         SessionConfig(
-            decline_cookies=True, solve_cloudflare=True, solve_datadome=True, solve_perimeterx=True
+            decline_cookies=True,
+            solve_cloudflare=True,
+            solve_datadome=True,
+            solve_perimeterx=True,
+            solve_recaptcha=True,
         ),
         get_profile(None),
     ) as second:

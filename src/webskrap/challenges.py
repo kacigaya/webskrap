@@ -12,8 +12,10 @@ Two kinds are told apart, because they need different fixes:
   ``solve_cloudflare``, Cloudflare's checkbox is clicked by
   :mod:`webskrap.turnstile`; with ``solve_datadome``, DataDome's slider is
   dragged by :mod:`webskrap.datadome`; with ``solve_perimeterx``, HUMAN's
-  button is held by :mod:`webskrap.perimeterx`. No other challenge is
-  interacted with, and no token is read or copied.
+  button is held by :mod:`webskrap.perimeterx`; with ``solve_recaptcha``, a
+  reCAPTCHA v2 or hCaptcha checkbox on a 403, 429 or 503 page is clicked by
+  :mod:`webskrap.recaptcha`. No other challenge is interacted with, and no
+  token is read or copied.
 - A *block* refuses the client outright (a Cloudflare block page, an Akamai
   edge reference page). Only a different exit IP or fingerprint helps.
 
@@ -87,6 +89,8 @@ class Detection:
             hint += " solve_datadome=True drags its slider."
         if (self.provider, self.kind) == ("PerimeterX", "challenge"):
             hint += " solve_perimeterx=True holds its Press & Hold button."
+        if (self.provider, self.kind) in (("reCAPTCHA", "challenge"), ("hCaptcha", "challenge")):
+            hint += " solve_recaptcha=True clicks its checkbox."
         return hint
 
     def payload(self) -> dict[str, str]:
@@ -177,6 +181,30 @@ _DETECT_SCRIPT = r"""({status, ray, cloudflare, akamai}) => {
         || (pxApp && /^\/[A-Za-z0-9]{4,16}\/captcha\/captcha\.js$/.test(url.pathname)))
       return found('PerimeterX', 'challenge');
   }
+  if (status === 403 || status === 429 || status === 503) {
+    for (const element of document.querySelectorAll(
+        '.g-recaptcha, .h-captcha, iframe[src], script[src]')) {
+      if (element.classList.contains('g-recaptcha')) return found('reCAPTCHA', 'challenge');
+      if (element.classList.contains('h-captcha')) return found('hCaptcha', 'challenge');
+      let url;
+      try { url = new URL(element.getAttribute('src'), document.baseURI); }
+      catch { continue; }
+      const google = url.hostname === 'www.google.com' || url.hostname === 'www.recaptcha.net';
+      const hcaptcha = url.hostname === 'hcaptcha.com' || url.hostname.endsWith('.hcaptcha.com');
+      if (element.tagName === 'IFRAME' && google
+          && /^\/recaptcha\/(api2|enterprise)\/anchor$/.test(url.pathname))
+        return found('reCAPTCHA', 'challenge');
+      if (element.tagName === 'IFRAME' && hcaptcha && url.pathname.startsWith('/captcha/'))
+        return found('hCaptcha', 'challenge');
+      const render = url.searchParams.get('render');
+      if (element.tagName === 'SCRIPT' && google && (!render || render === 'explicit')
+          && /^\/recaptcha\/(api|enterprise)\.js$/.test(url.pathname))
+        return found('reCAPTCHA', 'challenge');
+      if (element.tagName === 'SCRIPT' && url.hostname === 'js.hcaptcha.com'
+          && url.pathname === '/1/api.js')
+        return found('hCaptcha', 'challenge');
+    }
+  }
   if (document.getElementById('sec-if-cpt-container')) return found('Akamai', 'challenge', true);
   const text = document.body ? document.body.textContent : '';
   if (cloudflare && (status === 403 || status === 429)) {
@@ -237,7 +265,14 @@ async def detect(
     if not isinstance(found, dict):
         return None
     provider, kind = found.get("provider"), found.get("kind")
-    if provider not in ("DataDome", "Cloudflare", "Akamai", "PerimeterX") or kind not in (
+    if provider not in (
+        "DataDome",
+        "Cloudflare",
+        "Akamai",
+        "PerimeterX",
+        "reCAPTCHA",
+        "hCaptcha",
+    ) or kind not in (
         "challenge",
         "block",
     ):
@@ -336,6 +371,7 @@ async def settle(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
 ) -> dict[str, Any]:
     """Let a self-clearing interstitial reload into the requested page.
 
@@ -350,7 +386,10 @@ async def settle(
     :data:`webskrap.turnstile.TIMEOUT_S`, past ``deadline`` if need be.
     ``solve_datadome`` does the same for DataDome's slider CAPTCHA with
     :class:`webskrap.datadome.Slider`, and ``solve_perimeterx`` for HUMAN's
-    Press & Hold button with :class:`webskrap.perimeterx.Hold`. Once a widget
+    Press & Hold button with :class:`webskrap.perimeterx.Hold`, and
+    ``solve_recaptcha`` for a reCAPTCHA v2 or hCaptcha checkbox with
+    :class:`webskrap.recaptcha.Tick`, whose image challenge ends the wait at
+    once. Once a widget
     has been seen, a clear detection on the same document waits up to
     :data:`RELOAD_GRACE_S` for the reload the provider starts after a pass,
     since its markers can disappear before the new document commits.
@@ -362,9 +401,10 @@ async def settle(
     """
     from webskrap.datadome import Slider
     from webskrap.perimeterx import Hold
+    from webskrap.recaptcha import Tick
     from webskrap.turnstile import Checkbox
 
-    limit = min(deadline, time.monotonic() + INTERSTITIAL_TIMEOUT_S)
+    base_limit = limit = min(deadline, time.monotonic() + INTERSTITIAL_TIMEOUT_S)
     # Start from the document on screen: it may already have replaced the one
     # goto answered for, whose headers would keep reporting the interstitial.
     current_loader, document = _main_document(events, page.target_id)
@@ -372,6 +412,7 @@ async def settle(
     checkbox: Checkbox | None = None
     slider: Slider | None = None
     hold: Hold | None = None
+    tick: Tick | None = None
     widget_loader: str | None = None
     clear_since: float | None = None
     while True:
@@ -382,18 +423,23 @@ async def settle(
         except CDPError:
             found = Detection("", "challenge", reloads=True)  # the document is being replaced
         waiting = found is not None and found.reloads
-        solver: Checkbox | Slider | Hold | None = None
+        solver: Checkbox | Slider | Hold | Tick | None = None
         if solve_cloudflare and found == Detection("Cloudflare", "challenge"):
             solver = checkbox = checkbox or Checkbox(page)
         elif solve_datadome and found == Detection("DataDome", "challenge"):
             solver = slider = slider or Slider(page)
         elif solve_perimeterx and found == Detection("PerimeterX", "challenge"):
             solver = hold = hold or Hold(page)
+        elif solve_recaptcha and found in (
+            Detection("reCAPTCHA", "challenge"),
+            Detection("hCaptcha", "challenge"),
+        ):
+            solver = tick = tick or Tick(page)
         if solver is not None:
             attempts = solver.attempts
             await solver.step()
             if solver.seen:
-                limit = max(limit, solver.deadline)
+                limit = max(base_limit, solver.deadline)
             if solver.attempts > attempts:
                 widget_loader = current_loader
             waiting = True

@@ -107,6 +107,10 @@ jobs:
         env:
           WEBSKRAP_LIVE: "1"
         run: uv run --extra dev pytest -q tests/test_turnstile_live.py
+      - name: reCAPTCHA and hCaptcha official test keys
+        env:
+          WEBSKRAP_LIVE: "1"
+        run: uv run --extra dev pytest -q tests/test_recaptcha_live.py
       - if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:

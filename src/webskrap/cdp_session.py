@@ -434,6 +434,7 @@ async def goto(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
 ) -> dict[str, Any]:
     """Navigate and return ``{"status", "url", "title", "blocked"}``.
 
@@ -442,7 +443,8 @@ async def goto(
     ``blocked`` rather than raised, so the session stays usable for a person
     to look at. With ``solve_cloudflare``, Cloudflare's Turnstile checkbox is
     clicked first; with ``solve_datadome``, DataDome's slider is dragged; with
-    ``solve_perimeterx``, HUMAN's Press & Hold button is held. With
+    ``solve_perimeterx``, HUMAN's Press & Hold button is held; with
+    ``solve_recaptcha``, a reCAPTCHA v2 or hCaptcha checkbox is clicked. With
     ``decline_cookies``, a consent notice is dismissed and
     ``cookie_notice_declined`` names the strategy that clicked, or is None.
     """
@@ -461,6 +463,7 @@ async def goto(
             solve_cloudflare=solve_cloudflare,
             solve_datadome=solve_datadome,
             solve_perimeterx=solve_perimeterx,
+            solve_recaptcha=solve_recaptcha,
         )
     finally:
         documents.stop()

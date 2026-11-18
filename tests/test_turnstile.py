@@ -127,7 +127,7 @@ def gesture(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     mocks = {
         "locate": AsyncMock(return_value=BOX),
         "wander": AsyncMock(),
-        "_click": AsyncMock(),
+        "click": AsyncMock(),
     }
     for name, mock in mocks.items():
         monkeypatch.setattr(turnstile, name, mock)
@@ -139,7 +139,7 @@ async def test_step_wanders_once_then_clicks_on_schedule(gesture) -> None:
     await checkbox.step()
     assert checkbox.seen and checkbox.clicks == 1
     gesture["wander"].assert_awaited_once()
-    gesture["_click"].assert_awaited_once_with(checkbox.page, BOX)
+    gesture["click"].assert_awaited_once_with(checkbox.page, BOX)
     assert checkbox.next_click > time.monotonic() + turnstile.CLICK_INTERVAL_S - 1
     await checkbox.step()
     assert checkbox.clicks == 1
@@ -159,11 +159,11 @@ async def test_step_does_nothing_without_a_checkbox_or_past_the_deadline(gesture
     checkbox.deadline = time.monotonic() - 1
     await checkbox.step()
     assert checkbox.clicks == 0
-    gesture["_click"].assert_not_awaited()
+    gesture["click"].assert_not_awaited()
 
 
 async def test_a_gesture_cut_short_by_navigation_still_counts(gesture) -> None:
-    gesture["_click"].side_effect = WebSkrapError("page navigated")
+    gesture["click"].side_effect = WebSkrapError("page navigated")
     checkbox = Checkbox(MagicMock(spec=CDPPage))
     await checkbox.step()
     assert checkbox.clicks == 1
@@ -195,12 +195,12 @@ async def test_settle_clicks_then_returns_the_page_the_challenge_reloads_into(ge
             ("Network.responseReceived", {"loaderId": "L2", "type": "Document", "response": real}),
         ]
 
-    gesture["_click"].side_effect = click
+    gesture["click"].side_effect = click
     settled = await challenges.settle(
         page, events, {}, wait_until="load", deadline=time.monotonic() + 5, solve_cloudflare=True
     )
     assert settled is real
-    gesture["_click"].assert_awaited_once()
+    gesture["click"].assert_awaited_once()
     page.wait_lifecycle.assert_awaited_once()
 
 
@@ -219,7 +219,7 @@ async def test_settle_stops_after_the_last_click_and_its_budget(gesture, monkeyp
         solve_cloudflare=True,
     )
     assert settled == {"status": 403, "headers": {}}
-    assert gesture["_click"].await_count == turnstile.MAX_CLICKS
+    assert gesture["click"].await_count == turnstile.MAX_CLICKS
     assert time.monotonic() - started < 2
 
 
@@ -231,7 +231,7 @@ async def test_settle_without_a_drawn_checkbox_keeps_the_caller_deadline(gesture
         page, events, {}, wait_until="load", deadline=time.monotonic() + 0.3, solve_cloudflare=True
     )
     assert time.monotonic() - started < 2
-    gesture["_click"].assert_not_awaited()
+    gesture["click"].assert_not_awaited()
 
 
 async def test_settle_leaves_cloudflare_alone_without_the_flag(gesture) -> None:

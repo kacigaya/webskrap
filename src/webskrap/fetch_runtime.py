@@ -22,6 +22,7 @@ _PER_CALL = {
     "solve_cloudflare",
     "solve_datadome",
     "solve_perimeterx",
+    "solve_recaptcha",
 }
 
 

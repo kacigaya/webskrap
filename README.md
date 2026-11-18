@@ -52,7 +52,7 @@ asyncio.run(main())
 For deferred content, pass `ready_selector="#content"` to a Python fetch or
 `--ready-selector '#content'` to CLI `fetch`. Both MCP fetch tools accept
 `ready_selector` too. The selector must become visible after consent dismissal.
-Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF) and provider block
+Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block
 pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
 checks that reload the page. It does not retry refusals. With
 `solve_cloudflare=True` (CLI `--solve-cloudflare`), it clicks Cloudflare's
@@ -60,7 +60,9 @@ Turnstile checkbox; see [Cloudflare Turnstile](#cloudflare-turnstile). With
 `solve_datadome=True` (CLI `--solve-datadome`), it drags DataDome's slider; see
 [DataDome slider](#datadome-slider). With `solve_perimeterx=True` (CLI
 `--solve-perimeterx`), it holds HUMAN's Press & Hold button; see
-[HUMAN Press & Hold](#human-press--hold).
+[HUMAN Press & Hold](#human-press--hold). With `solve_recaptcha=True` (CLI
+`--solve-recaptcha`), it clicks a reCAPTCHA v2 or hCaptcha checkbox on a
+blocking page; see [reCAPTCHA and hCaptcha checkbox](#recaptcha-and-hcaptcha-checkbox).
 Ordinary HTTP errors still return `ok=False`.
 For an empty HTTP error body, Chromium can show its own error page. The returned
 text or HTML is that rendered page. The status, headers, and `final_url` still
@@ -195,6 +197,27 @@ IP. In live runs it refused every completed hold from a flagged IP, in every
 browser mode, and accepted the first hold from a cleaner exit. No cookie or
 token is read, copied or injected, and no outside solving service is used.
 
+## reCAPTCHA and hCaptcha checkbox
+
+`solve_recaptcha=True` (CLI `--solve-recaptcha`) clicks the "I'm not a robot"
+checkbox of reCAPTCHA v2 or hCaptcha on a page that blocks the site: a 403,
+429 or 503 response that carries the widget. It is off by default; without it
+such a page fails fast with `blocked`. With it, WebSkrap waits for the widget,
+moves the cursor like a person and clicks the checkbox. When the provider
+trusts the browser, the box ticks and the page's own callback continues to the
+real page. If the page has not cleared 15 seconds later, WebSkrap clicks again,
+at most twice within 60 seconds. When the provider opens an image challenge
+instead, WebSkrap leaves it alone and the call fails with `blocked` at once.
+
+For a checkbox inside a form, fill the form, then call `browser_solve_captcha`
+(CLI `webskrap browser solve-captcha`) before you submit it. Its
+`captcha.state` is `checked`, `challenge`, `gone`, `timeout` or `not_found`.
+
+The click only answers the checkbox: the provider still scores the browser and
+the exit IP, and a datacenter IP usually gets the image challenge. reCAPTCHA
+v3 and invisible widgets have no checkbox and are not handled. No token is
+read, copied or injected, and no outside solving service is used.
+
 Use them responsibly: only on sites whose terms and applicable law allow
 automated access, and at a polite rate. Passing a challenge does not grant
 permission to collect data you may not collect.
@@ -203,6 +226,8 @@ permission to collect data you may not collect.
 webskrap fetch https://example.com --virtual-display --solve-cloudflare
 webskrap fetch https://example.com --virtual-display --solve-datadome
 webskrap fetch https://example.com --virtual-display --solve-perimeterx
+webskrap fetch https://example.com --virtual-display --solve-recaptcha
+webskrap browser solve-captcha
 ```
 
 ## Visual browser interaction

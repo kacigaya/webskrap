@@ -91,7 +91,7 @@ class Checkbox:
                 box = await locate(self.page)
                 if box is None:
                     return
-            await _click(self.page, box)
+            await click(self.page, box)
         self.clicks += 1
         self.next_click = time.monotonic() + CLICK_INTERVAL_S
 
@@ -171,7 +171,7 @@ async def wander(page: CDPPage, seconds: float) -> None:
         await asyncio.sleep(uniform(0.3, 1.0))
 
 
-async def _click(page: CDPPage, box: Box) -> None:
+async def click(page: CDPPage, box: Box) -> None:
     """Travel to ``box`` and click it with a mouse-like hold."""
     x, y = click_point(box, None)
     await cdp_dom.travel(page, x, y)

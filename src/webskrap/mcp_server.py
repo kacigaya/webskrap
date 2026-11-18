@@ -130,7 +130,8 @@ Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
 browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
 Known challenge/block pages return blocked: follow its hint; do not retry.
-browser_goto reports it. solve_cloudflare/solve_datadome/solve_perimeterx=true pass it.
+browser_goto reports it; solve_*=true passes it.
+browser_solve_captcha ticks a checkbox.
 Call doctor for unexplained failures; read webskrap://guide for details.
 Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.
 Paths must be relative and cannot escape their roots (path_rejected).
@@ -191,6 +192,7 @@ async def _run_fetch(
             "solve_cloudflare": resolved.solve_cloudflare,
             "solve_datadome": resolved.solve_datadome,
             "solve_perimeterx": resolved.solve_perimeterx,
+            "solve_recaptcha": resolved.solve_recaptcha,
         }
         if not isinstance(runtime, FetchRuntime):
             # Direct Python tool calls retain their one-shot lifecycle.
@@ -222,6 +224,7 @@ def _stealth_config(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
 ) -> SessionConfig:
     """Build the session config the stealth_fetch and search tools share."""
     return SessionConfig(
@@ -242,6 +245,7 @@ def _stealth_config(
         solve_cloudflare=solve_cloudflare,
         solve_datadome=solve_datadome,
         solve_perimeterx=solve_perimeterx,
+        solve_recaptcha=solve_recaptcha,
     )
 
 
@@ -264,6 +268,7 @@ async def fetch(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -310,6 +315,9 @@ async def fetch(
         solve_perimeterx: Hold HUMAN's (PerimeterX) Press & Hold button like
             a person and wait for the real page, for up to 60 s beyond
             timeout_ms. Off by default. Use responsibly.
+        solve_recaptcha: Click a reCAPTCHA v2 or hCaptcha checkbox on a 403,
+            429 or 503 page and wait up to 60 s beyond timeout_ms for the real
+            page. Use responsibly.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -331,6 +339,7 @@ async def fetch(
         solve_cloudflare=solve_cloudflare,
         solve_datadome=solve_datadome,
         solve_perimeterx=solve_perimeterx,
+        solve_recaptcha=solve_recaptcha,
         session=session,
         ctx=ctx,
     )
@@ -364,6 +373,7 @@ async def stealth_fetch(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -421,6 +431,9 @@ async def stealth_fetch(
         solve_perimeterx: Hold HUMAN's (PerimeterX) Press & Hold button like
             a person and wait for the real page, for up to 60 s beyond
             timeout_ms. Off by default. Use responsibly.
+        solve_recaptcha: Click a reCAPTCHA v2 or hCaptcha checkbox on a 403,
+            429 or 503 page and wait up to 60 s beyond timeout_ms for the real
+            page. Use responsibly.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -444,6 +457,7 @@ async def stealth_fetch(
             solve_cloudflare=solve_cloudflare,
             solve_datadome=solve_datadome,
             solve_perimeterx=solve_perimeterx,
+            solve_recaptcha=solve_recaptcha,
         )
         result = await _run_fetch(
             url,
@@ -637,6 +651,7 @@ async def browser_open(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session with no visible window.
 
@@ -671,6 +686,9 @@ async def browser_open(
         solve_perimeterx: With url, hold HUMAN's (PerimeterX) Press & Hold
             button like a person and wait up to 60 s for the real page. Use
             responsibly.
+        solve_recaptcha: With url, click a reCAPTCHA v2 or hCaptcha checkbox
+            on a 403, 429 or 503 page and wait up to 60 s for the real page.
+            Use responsibly.
         virtual_display: Run headed Chromium on a private Xvfb display
             instead of headless (Linux with Xvfb). No HeadlessChrome token
             and full client hints. The display lives as long as the session.
@@ -713,6 +731,7 @@ async def browser_open(
                     solve_cloudflare=solve_cloudflare,
                     solve_datadome=solve_datadome,
                     solve_perimeterx=solve_perimeterx,
+                    solve_recaptcha=solve_recaptcha,
                 ),
                 browser_session.DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
@@ -755,6 +774,7 @@ async def browser_goto(
     solve_cloudflare: bool = False,
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
+    solve_recaptcha: bool = False,
 ) -> dict[str, Any]:
     """Navigate the session's current page to a URL.
 
@@ -777,6 +797,9 @@ async def browser_goto(
         solve_perimeterx: Hold HUMAN's (PerimeterX) Press & Hold button like
             a person and wait up to 60 s beyond timeout_ms for the real page.
             Use responsibly.
+        solve_recaptcha: Click a reCAPTCHA v2 or hCaptcha checkbox on a 403,
+            429 or 503 page and wait up to 60 s beyond timeout_ms for the real
+            page. Use responsibly.
     """
     parsed_wait_until = parse_wait_until(wait_until)
     with _tool_errors():
@@ -791,6 +814,7 @@ async def browser_goto(
             solve_cloudflare=solve_cloudflare,
             solve_datadome=solve_datadome,
             solve_perimeterx=solve_perimeterx,
+            solve_recaptcha=solve_recaptcha,
         ),
         timeout_ms,
     )
@@ -949,6 +973,32 @@ async def browser_interact(
     async def run(page: SessionPage) -> dict[str, Any]:
         await browser_session.element_action(page, action, target, resolved_values)
         return await browser_session.page_state(page)
+
+    return await _browser_action(session, run, timeout_ms)
+
+
+@mcp.tool(
+    title="Tick a CAPTCHA checkbox",
+    annotations=_hints(read_only=False, destructive=True, open_world=True),
+)
+async def browser_solve_captcha(
+    session: str = "default",
+    timeout_ms: float = 30_000,
+) -> dict[str, Any]:
+    """Click the reCAPTCHA v2 or hCaptcha checkbox on the current page like a person.
+
+    For a checkbox inside a form; fill the form first and submit it after.
+    captcha.state is checked, challenge (an image challenge opened and is left
+    alone: stop), gone (the widget left the page), timeout or not_found. Use
+    responsibly.
+
+    Args:
+        session: Browser session name.
+        timeout_ms: Action timeout in milliseconds.
+    """
+
+    async def run(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.solve_captcha(page)
 
     return await _browser_action(session, run, timeout_ms)
 

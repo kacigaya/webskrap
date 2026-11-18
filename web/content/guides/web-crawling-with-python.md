@@ -7,7 +7,7 @@ description: Build browser-aware Python web crawlers with WebSkrap, async concur
 
 WebSkrap is useful for browser-aware web crawling when each URL may need JavaScript rendering, cookies, redirects, or a realistic browser profile.
 
-A crawler should still be polite and bounded. Respect robots policies where applicable, rate limits, terms of service, and access controls. WebSkrap's only CAPTCHA handling is the opt-in Cloudflare Turnstile click (`solve_cloudflare`) DataDome slider drag (`solve_datadome`) and HUMAN Press & Hold (`solve_perimeterx`), and it does not bypass access controls. Use it responsibly.
+A crawler should still be polite and bounded. Respect robots policies where applicable, rate limits, terms of service, and access controls. WebSkrap's only CAPTCHA handling is the opt-in Cloudflare Turnstile click (`solve_cloudflare`) DataDome slider drag (`solve_datadome`) HUMAN Press & Hold (`solve_perimeterx`) and reCAPTCHA/hCaptcha checkbox click (`solve_recaptcha`, `browser_solve_captcha`), and it does not bypass access controls. Use it responsibly.
 
 ## Simple async crawl pattern
 

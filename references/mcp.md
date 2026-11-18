@@ -48,8 +48,11 @@ or `full`) to set how much of the profile pages see.
   a 2-second limit.
 - `fetch`, `stealth_fetch`, `browser_goto` and `browser_open` take
   `solve_cloudflare` to click Cloudflare's Turnstile checkbox and
-  `solve_datadome` to drag DataDome's slider, and `solve_perimeterx` to hold
-  HUMAN's Press & Hold button (all off by default).
+  `solve_datadome` to drag DataDome's slider, `solve_perimeterx` to hold
+  HUMAN's Press & Hold button, and `solve_recaptcha` to click a reCAPTCHA v2
+  or hCaptcha checkbox on a blocking page (all off by default).
+- `browser_solve_captcha` clicks a reCAPTCHA v2 or hCaptcha checkbox inside a
+  form and reports `captcha.state`.
 - `browser_goto` and `browser_open` take `decline_cookies`;
   `browser_screenshot` takes `target` for one element.
 - Both fetch tools default to `domcontentloaded` and `resource_policy="all"`,
@@ -93,7 +96,7 @@ page script.
 
 ## Failures
 
-A known challenge (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF) or provider block
+A known challenge (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) or provider block
 page (Cloudflare, Akamai) arrives as a `blocked` tool error, including pages
 served with HTTP 200. Blocks and challenges get different hints.
 `browser_goto` reports the same check in its `blocked` key instead of failing. Ordinary HTTP error pages return

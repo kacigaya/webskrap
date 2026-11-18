@@ -80,6 +80,7 @@ def test_goto_passes_solve_cloudflare(tmp_path: Path, monkeypatch: pytest.Monkey
             "--solve-cloudflare",
             "--solve-datadome",
             "--solve-perimeterx",
+            "--solve-recaptcha",
             "--format",
             "json",
         ],
@@ -92,8 +93,31 @@ def test_goto_passes_solve_cloudflare(tmp_path: Path, monkeypatch: pytest.Monkey
             "solve_cloudflare": True,
             "solve_datadome": True,
             "solve_perimeterx": True,
+            "solve_recaptcha": True,
         }
     ]
+
+
+@pytest.mark.parametrize("output", ["json", "human"])
+def test_solve_captcha_reports_the_checkbox_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: str
+) -> None:
+    async def run_page_action(_session: str, action: Any, **_: Any) -> Any:
+        return await action(object())
+
+    async def solve_captcha(_page: Any) -> dict[str, Any]:
+        return {"url": "u", "title": "t", "captcha": {"provider": "reCAPTCHA", "state": "checked"}}
+
+    monkeypatch.setattr(browser_session, "run_page_action", run_page_action)
+    monkeypatch.setattr(browser_session, "solve_captcha", solve_captcha)
+    result = runner.invoke(
+        cli.app, ["browser", "solve-captcha", "--format", output], env=_env(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    if output == "json":
+        assert json.loads(result.output)["captcha"] == {"provider": "reCAPTCHA", "state": "checked"}
+    else:
+        assert "CAPTCHA: reCAPTCHA checked" in result.output
 
 
 @pytest.mark.parametrize("session", [".", "..", "../evil"])

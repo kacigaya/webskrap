@@ -397,6 +397,7 @@ class SessionConfig(BaseModel):
     solve_cloudflare: bool = False
     solve_datadome: bool = False
     solve_perimeterx: bool = False
+    solve_recaptcha: bool = False
 
     @model_validator(mode="before")
     @classmethod

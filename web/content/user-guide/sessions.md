@@ -53,9 +53,10 @@ closes the browser on shutdown.
 
 `session.fetch(..., decline_cookies=False)` overrides consent dismissal for one
 call without changing shared config. Omit it to use `SessionConfig.decline_cookies`.
-`solve_cloudflare=True`, `solve_datadome=True` and `solve_perimeterx=True` work
-the same way for Cloudflare's Turnstile checkbox, DataDome's slider and HUMAN's
-Press & Hold button.
+`solve_cloudflare=True`, `solve_datadome=True`, `solve_perimeterx=True` and
+`solve_recaptcha=True` work the same way for Cloudflare's Turnstile checkbox,
+DataDome's slider, HUMAN's Press & Hold button and a reCAPTCHA v2 or hCaptcha
+checkbox on a blocking page.
 
 ## Persistent storage
 
