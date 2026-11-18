@@ -1,7 +1,8 @@
 # Python API
 
 Read this reference for Python API work. Confirm signatures and defaults in
-`src/webskrap/scraping/client.py` and `src/webskrap/config/models.py` before changing code.
+`src/webskrap/scraping/client.py`, `src/webskrap/scraping/session.py` and
+`src/webskrap/config/models.py` before changing code.
 
 ## Fetch or session
 

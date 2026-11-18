@@ -29,13 +29,13 @@ and it does not offer Google.
 
 | Task | Implementation | Tests and contracts |
 | --- | --- | --- |
-| Fetching, sessions, links, or screenshots | `src/webskrap/scraping/client.py`, `src/webskrap/config/models.py` | `tests/scraping/test_client_unit.py`, `tests/config/test_models.py` |
-| Search engines, redirect unwrapping, or results parsing | `src/webskrap/scraping/search.py`, `src/webskrap/config/models.py` | `tests/scraping/test_search.py` and its fixtures under `tests/fixtures/search/` |
+| Fetching, sessions, links, or screenshots | `src/webskrap/scraping/client.py`, `src/webskrap/scraping/session.py` | `tests/scraping/test_client_unit.py` |
+| Search engines, redirect unwrapping, or results parsing | `src/webskrap/scraping/search.py`, `src/webskrap/scraping/results.py` | `tests/scraping/test_search.py` and its fixtures under `tests/fixtures/search/` |
 | Parsing | `src/webskrap/config/parsing.py` | `tests/config/test_parsing.py` |
 | Errors, hints, or exit statuses | `src/webskrap/errors.py`, `src/webskrap/interfaces/cli_output.py` | `tests/test_errors.py`, CLI and MCP callers |
 | Main CLI commands | `src/webskrap/interfaces/cli.py` | `tests/interfaces/test_cli.py`, `tests/browser/test_diagnostics.py` |
 | Persistent browser state | `src/webskrap/browser/browser_session.py`, `src/webskrap/security/paths.py` | `tests/browser/test_browser_session_unit.py`, `tests/security/test_paths.py` |
-| Interactive browser commands | `src/webskrap/interfaces/browser_cli.py`, `src/webskrap/interfaces/mcp_server.py` | `tests/interfaces/test_browser_cli.py`, `tests/browser/test_browser_integration.py`, `tests/interfaces/test_mcp.py` |
+| Interactive browser commands | `src/webskrap/interfaces/browser_cli.py`, `src/webskrap/interfaces/mcp_browser.py` | `tests/interfaces/test_browser_cli.py`, `tests/browser/test_browser_integration.py`, `tests/interfaces/test_mcp.py` |
 | MCP tools, resources, or annotations | `src/webskrap/interfaces/mcp_server.py` | `tests/interfaces/test_mcp.py`, `src/webskrap/guide.md` |
 | Profiles or stealth defaults | `src/webskrap/config/profiles.py`, `src/webskrap/config/models.py`, `src/webskrap/scraping/client.py` | `tests/config/test_profiles.py`, opt-in bot-detection tests when needed |
 | Cookie rejection | `src/webskrap/browser/consent.py` | `tests/browser/test_consent.py`; `tests/live/test_consent_live.py` only for selector rot |
@@ -130,7 +130,7 @@ When public behavior changes, check all applicable items:
 - unit tests for each affected surface
 
 Use the implementation as the source of truth. In particular, read
-`src/webskrap/config/models.py` for result fields, `src/webskrap/errors.py` for error
+`src/webskrap/scraping/results.py` for result fields, `src/webskrap/errors.py` for error
 codes and exits, and `src/webskrap/browser/diagnostics.py` for environment reporting.
 Do not copy these catalogs into the skill.
 

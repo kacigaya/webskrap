@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from webskrap import text_search
+from webskrap.driver.text_search import TextWindow, text_window
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.text_search import search_lines, validate_search
 
@@ -85,3 +86,23 @@ async def test_a_cancelled_search_kills_its_worker(monkeypatch: pytest.MonkeyPat
     with pytest.raises(asyncio.CancelledError):
         await task
     assert started[0].returncode is not None
+
+
+def test_text_window_reports_the_next_offset() -> None:
+    window = text_window("abcdef", 2)
+
+    assert window == TextWindow(text="ab", length=6, offset=0, truncated=True, next_offset=2)
+
+
+def test_text_window_finishes_without_a_next_offset() -> None:
+    window = text_window("abcdef", 2, 4)
+
+    assert window.text == "ef"
+    assert window.truncated is False
+    assert window.next_offset is None
+
+
+def test_text_window_clamps_instead_of_rejecting() -> None:
+    assert text_window("abcdef", 2, 99).text == ""
+    assert text_window("abcdef", -5).text == ""
+    assert text_window("abcdef", 100).text == "abcdef"
