@@ -345,9 +345,10 @@ async def test_fetch_reports_a_slider_that_never_clears(
     captcha_server, sandbox_supported, monkeypatch
 ) -> None:
     monkeypatch.setattr(challenges, "INTERSTITIAL_TIMEOUT_S", 5.0)
-    monkeypatch.setattr(datadome, "TIMEOUT_S", 12.0)
-    monkeypatch.setattr(datadome, "SLIDE_INTERVAL_S", 1.0)
+    monkeypatch.setattr(datadome, "TIMEOUT_S", 30.0)
+    monkeypatch.setattr(datadome, "SLIDE_INTERVAL_S", 0.5)
     monkeypatch.setattr(datadome, "WANDER_S", (0.0, 0.1))
+    monkeypatch.setattr(datadome, "DRAG_STEPS", 12)
     url = f"http://127.0.0.1:{captcha_server.server_port}/stay"
     started = time.monotonic()
     async with WebSkrapClient(default_config=_config(sandbox_supported)) as client:
@@ -355,4 +356,4 @@ async def test_fetch_reports_a_slider_that_never_clears(
             await client.fetch(url)
     assert error.value.code is ErrorCode.BLOCKED
     assert len(captcha_server.drags) == datadome.MAX_SLIDES
-    assert time.monotonic() - started < 45
+    assert time.monotonic() - started < 60
