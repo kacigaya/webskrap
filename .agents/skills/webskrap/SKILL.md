@@ -102,7 +102,8 @@ Read the [CLI](references/cli.md) or [MCP](references/mcp.md) reference for exam
 - Use public pages, local test servers, or targets the user is authorized to
   access.
 - Keep CAPTCHA handling to the opt-in Cloudflare Turnstile checkbox click
-  (`solve_cloudflare`, `turnstile.py`). Do not add token injection, solving
+  (`solve_cloudflare`, `turnstile.py`) and DataDome slider drag
+  (`solve_datadome`, `datadome.py`). Do not add token injection, solving
   services, login-wall bypass, credential bypass, or access-control
   circumvention.
 - Do not commit cookies, storage state, proxy credentials, or persistent browser

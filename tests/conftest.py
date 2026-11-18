@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import ssl
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -95,3 +96,38 @@ async def set_page_content(page: CDPPage, html: str, *, block_requests: bool = T
         page.connection.on("Fetch.requestPaused", fail, session_id=page.session_id)
         await page.send("Fetch.enable", {"patterns": [{"urlPattern": "*"}]})
     await page.send("Page.setDocumentContent", {"frameId": page.target_id, "html": html})
+
+
+def tls_context(directory: Path, host: str) -> ssl.SSLContext:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(hours=1))
+        .not_valid_after(now + timedelta(hours=1))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(host)]), False)
+        .sign(key, hashes.SHA256())
+    )
+    cert_path, key_path = directory / "widget.pem", directory / "widget.key"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(cert_path, key_path)
+    return context

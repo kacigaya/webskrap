@@ -130,7 +130,7 @@ Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
 browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
 Known challenge/block pages return blocked: follow its hint; do not retry.
-browser_goto reports it. solve_cloudflare=true clicks Cloudflare's checkbox.
+browser_goto reports it. solve_cloudflare/solve_datadome=true pass their CAPTCHA.
 Call doctor for unexplained failures; read webskrap://guide for details.
 Screenshots are confined to ./webskrap-output, profiles to ~/.webskrap/profiles.
 Paths must be relative and cannot escape their roots (path_rejected).
@@ -189,6 +189,7 @@ async def _run_fetch(
             "decline_cookies": resolved.decline_cookies,
             "ready_selector": ready_selector,
             "solve_cloudflare": resolved.solve_cloudflare,
+            "solve_datadome": resolved.solve_datadome,
         }
         if not isinstance(runtime, FetchRuntime):
             # Direct Python tool calls retain their one-shot lifecycle.
@@ -218,6 +219,7 @@ def _stealth_config(
     decline_cookies: bool,
     resource_policy: str = "auto",
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
 ) -> SessionConfig:
     """Build the session config the stealth_fetch and search tools share."""
     return SessionConfig(
@@ -236,6 +238,7 @@ def _stealth_config(
         decline_cookies=decline_cookies,
         resource_policy=parse_resource_policy(resource_policy),
         solve_cloudflare=solve_cloudflare,
+        solve_datadome=solve_datadome,
     )
 
 
@@ -256,6 +259,7 @@ async def fetch(
     *,
     ready_selector: str | None = None,
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -296,6 +300,9 @@ async def fetch(
         solve_cloudflare: Click Cloudflare's Turnstile checkbox on its "Just a
             moment" page like a person and wait for the real page, for up to
             60 s beyond timeout_ms. Off by default. Use responsibly.
+        solve_datadome: Drag DataDome's slider CAPTCHA like a person and
+            wait for the real page, for up to 60 s beyond timeout_ms. Off by
+            default. Use responsibly.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -315,6 +322,7 @@ async def fetch(
         wait_until=wait_until,
         resource_policy=resource_policy,
         solve_cloudflare=solve_cloudflare,
+        solve_datadome=solve_datadome,
         session=session,
         ctx=ctx,
     )
@@ -346,6 +354,7 @@ async def stealth_fetch(
     wait_until: str = "domcontentloaded",
     resource_policy: str = "all",
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
     session: str | None = None,
     ctx: Context | None = None,
 ) -> dict[str, Any]:
@@ -397,6 +406,9 @@ async def stealth_fetch(
         solve_cloudflare: Click Cloudflare's Turnstile checkbox on its "Just a
             moment" page like a person and wait for the real page, for up to
             60 s beyond timeout_ms. Off by default. Use responsibly.
+        solve_datadome: Drag DataDome's slider CAPTCHA like a person and
+            wait for the real page, for up to 60 s beyond timeout_ms. Off by
+            default. Use responsibly.
         session: Opt-in warm fetch session. Shares cookies/storage across calls;
             keep profile/config identical and close with fetch_session_close.
         ctx: Server-injected request context.
@@ -418,6 +430,7 @@ async def stealth_fetch(
             decline_cookies=decline_cookies,
             resource_policy=resource_policy,
             solve_cloudflare=solve_cloudflare,
+            solve_datadome=solve_datadome,
         )
         result = await _run_fetch(
             url,
@@ -609,6 +622,7 @@ async def browser_open(
     profile_mode: str = "native",
     profile: str | None = None,
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session with no visible window.
 
@@ -637,6 +651,8 @@ async def browser_open(
         decline_cookies: With url, click a consent notice's reject control;
             cookie_notice_declined reports the strategy or null.
         solve_cloudflare: With url, click Cloudflare's Turnstile checkbox like a
+            person and wait up to 60 s for the real page. Use responsibly.
+        solve_datadome: With url, drag DataDome's slider CAPTCHA like a
             person and wait up to 60 s for the real page. Use responsibly.
         virtual_display: Run headed Chromium on a private Xvfb display
             instead of headless (Linux with Xvfb). No HeadlessChrome token
@@ -678,6 +694,7 @@ async def browser_open(
                     "load",
                     decline_cookies=decline_cookies,
                     solve_cloudflare=solve_cloudflare,
+                    solve_datadome=solve_datadome,
                 ),
                 browser_session.DEFAULT_NAVIGATION_TIMEOUT_MS,
             )
@@ -718,6 +735,7 @@ async def browser_goto(
     timeout_ms: float = 30_000,
     decline_cookies: bool = False,
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
 ) -> dict[str, Any]:
     """Navigate the session's current page to a URL.
 
@@ -734,6 +752,9 @@ async def browser_goto(
         solve_cloudflare: Click Cloudflare's Turnstile checkbox like a person
             and wait up to 60 s beyond timeout_ms for the real page. Use
             responsibly.
+        solve_datadome: Drag DataDome's slider CAPTCHA like a person and
+            wait up to 60 s beyond timeout_ms for the real page. Use
+            responsibly.
     """
     parsed_wait_until = parse_wait_until(wait_until)
     with _tool_errors():
@@ -746,6 +767,7 @@ async def browser_goto(
             parsed_wait_until,
             decline_cookies=decline_cookies,
             solve_cloudflare=solve_cloudflare,
+            solve_datadome=solve_datadome,
         ),
         timeout_ms,
     )

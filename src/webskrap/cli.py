@@ -347,6 +347,13 @@ def fetch_command(
             help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_datadome: Annotated[
+        bool,
+        typer.Option(
+            "--solve-datadome",
+            help="Drag DataDome's slider CAPTCHA and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     profile_mode: ProfileModeOption = "native",
     reduce_fingerprint_surface: ReduceFingerprintSurfaceOption = False,
     mask_headless_user_agent: MaskHeadlessUserAgentOption = False,
@@ -381,6 +388,7 @@ def fetch_command(
             decline_cookies=decline_cookies,
             decline_cookies_timeout_ms=decline_cookies_timeout_ms,
             solve_cloudflare=solve_cloudflare,
+            solve_datadome=solve_datadome,
             profile_mode=profile_mode,
             reduce_fingerprint_surface=reduce_fingerprint_surface,
             mask_headless_user_agent=mask_headless_user_agent,
@@ -417,6 +425,7 @@ async def _fetch(
     decline_cookies: bool,
     decline_cookies_timeout_ms: float,
     solve_cloudflare: bool,
+    solve_datadome: bool,
     profile_mode: str,
     reduce_fingerprint_surface: bool,
     mask_headless_user_agent: bool,
@@ -438,6 +447,7 @@ async def _fetch(
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
         solve_cloudflare=solve_cloudflare,
+        solve_datadome=solve_datadome,
         profile_mode=profile_mode,
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,
@@ -673,6 +683,7 @@ def _session_config(
     launch_args: list[str],
     webrtc_ip_handling_policy: str | None,
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
 ) -> SessionConfig:
     """Build the headless session config that ``fetch`` and ``search`` share."""
     return SessionConfig(
@@ -685,6 +696,7 @@ def _session_config(
         decline_cookies=decline_cookies,
         decline_cookies_timeout_ms=decline_cookies_timeout_ms,
         solve_cloudflare=solve_cloudflare,
+        solve_datadome=solve_datadome,
         profile_mode=parse_cli_value(profile_mode, parse_profile_mode),
         reduce_fingerprint_surface=reduce_fingerprint_surface,
         mask_headless_user_agent=mask_headless_user_agent,

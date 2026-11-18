@@ -9,8 +9,9 @@ Two kinds are told apart, because they need different fixes:
 - A *challenge* asks the browser to prove itself (DataDome, Cloudflare's "Just a
   moment", Akamai's sec-cpt page, AWS WAF's challenge action). A more
   browser-like run can pass it. With ``solve_cloudflare``, Cloudflare's
-  checkbox is clicked by :mod:`webskrap.turnstile`; no other challenge is
-  interacted with, and no token is read or copied.
+  checkbox is clicked by :mod:`webskrap.turnstile`; with ``solve_datadome``,
+  DataDome's slider is dragged by :mod:`webskrap.datadome`. No other challenge
+  is interacted with, and no token is read or copied.
 - A *block* refuses the client outright (a Cloudflare block page, an Akamai
   edge reference page). Only a different exit IP or fingerprint helps.
 
@@ -79,6 +80,8 @@ class Detection:
             hint = blocked_hint(self.kind)
         if (self.provider, self.kind) == ("Cloudflare", "challenge"):
             hint += " solve_cloudflare=True clicks its Turnstile checkbox."
+        if (self.provider, self.kind) == ("DataDome", "challenge"):
+            hint += " solve_datadome=True drags its slider."
         return hint
 
     def payload(self) -> dict[str, str]:
@@ -312,6 +315,7 @@ async def settle(
     wait_until: str,
     deadline: float,
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
 ) -> dict[str, Any]:
     """Let a self-clearing interstitial reload into the requested page.
 
@@ -324,12 +328,15 @@ async def settle(
     too, and its checkbox, once drawn, is clicked by
     :class:`webskrap.turnstile.Checkbox`. A drawn checkbox gets its own
     :data:`webskrap.turnstile.TIMEOUT_S`, past ``deadline`` if need be.
+    ``solve_datadome`` does the same for DataDome's slider CAPTCHA with
+    :class:`webskrap.datadome.Slider`.
 
     Returns:
         The response of the document now on screen, once :func:`detect` finds
         no reloading interstitial there. When the interstitial is still there,
         that is its own response, and :func:`detect` reports it.
     """
+    from webskrap.datadome import Slider
     from webskrap.turnstile import Checkbox
 
     limit = min(deadline, time.monotonic() + INTERSTITIAL_TIMEOUT_S)
@@ -338,6 +345,7 @@ async def settle(
     current_loader, document = _main_document(events, page.target_id)
     current = document if document is not None else response
     checkbox: Checkbox | None = None
+    slider: Slider | None = None
     while True:
         try:
             found = await detect(
@@ -346,11 +354,15 @@ async def settle(
         except CDPError:
             found = Detection("", "challenge", reloads=True)  # the document is being replaced
         waiting = found is not None and found.reloads
+        solver: Checkbox | Slider | None = None
         if solve_cloudflare and found == Detection("Cloudflare", "challenge"):
-            checkbox = checkbox or Checkbox(page)
-            await checkbox.step()
-            if checkbox.seen:
-                limit = max(limit, checkbox.deadline)
+            solver = checkbox = checkbox or Checkbox(page)
+        elif solve_datadome and found == Detection("DataDome", "challenge"):
+            solver = slider = slider or Slider(page)
+        if solver is not None:
+            await solver.step()
+            if solver.seen:
+                limit = max(limit, solver.deadline)
             waiting = True
         if not waiting or time.monotonic() >= limit:
             return current

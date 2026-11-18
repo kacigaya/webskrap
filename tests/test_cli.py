@@ -136,13 +136,16 @@ def test_fetch_json_is_bounded_and_uses_headless_stealth(monkeypatch: Any) -> No
     assert config.profile_mode == "native"
     assert config.decline_cookies is True
     assert config.solve_cloudflare is False
+    assert config.solve_datadome is False
 
 
-def test_fetch_solve_cloudflare_flag(monkeypatch: Any) -> None:
+@pytest.mark.parametrize("name", ["solve_cloudflare", "solve_datadome"])
+def test_fetch_solve_flags(monkeypatch: Any, name: str) -> None:
     _fake_client(monkeypatch)
-    result = runner.invoke(cli.app, ["fetch", "https://example.test", "--solve-cloudflare"])
+    flag = "--" + name.replace("_", "-")
+    result = runner.invoke(cli.app, ["fetch", "https://example.test", flag])
     assert result.exit_code == 0, result.output
-    assert _FakeClient.calls[0]["config"].solve_cloudflare is True
+    assert getattr(_FakeClient.calls[0]["config"], name) is True
 
 
 def test_fetch_no_decline_cookies_flag(monkeypatch: Any) -> None:

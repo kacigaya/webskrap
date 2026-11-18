@@ -201,6 +201,13 @@ def open_command(
             help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_datadome: Annotated[
+        bool,
+        typer.Option(
+            "--solve-datadome",
+            help="Drag DataDome's slider CAPTCHA and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     virtual_display: VirtualDisplayOption = False,
     gpu: GpuOption = GpuBackend.AUTO,
     profile_mode: SessionProfileModeOption = "native",
@@ -262,6 +269,7 @@ def open_command(
                     "load",
                     decline_cookies=decline_cookies,
                     solve_cloudflare=solve_cloudflare,
+                    solve_datadome=solve_datadome,
                 ),
                 output_format,
                 timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
@@ -415,6 +423,13 @@ def goto_command(
             help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
         ),
     ] = False,
+    solve_datadome: Annotated[
+        bool,
+        typer.Option(
+            "--solve-datadome",
+            help="Drag DataDome's slider CAPTCHA and wait up to 60 s for the real page.",
+        ),
+    ] = False,
     format: FormatOption = "human",
 ) -> None:
     """Navigate the current page.
@@ -432,6 +447,7 @@ def goto_command(
             parsed_wait_until,
             decline_cookies=decline_cookies,
             solve_cloudflare=solve_cloudflare,
+            solve_datadome=solve_datadome,
         ),
         output_format,
         timeout_ms=timeout_ms,

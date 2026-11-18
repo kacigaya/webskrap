@@ -18,6 +18,11 @@ history, so they summarize each release rather than list every change.
   CDP and clicked along a human cursor path, again after 20 s if the page has
   not cleared, at most three times within 60 s. Success needs the real page to
   load with no challenge left on it.
+- `solve_datadome` (CLI `--solve-datadome`; same MCP tools) drags DataDome's
+  slider CAPTCHA onto its slot. Off by default. The handle and slot are
+  measured in DataDome's cross-site frame through CDP, and the drag follows a
+  human rhythm, again after 10 s if the page has not cleared, at most three
+  times within 60 s. A hard block has no slider and stays `blocked`.
 
 ### Fixed
 
