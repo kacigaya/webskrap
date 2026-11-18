@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -12,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from conftest import tls_context
+from conftest import browser_modes, tls_context
 
 from webskrap import SessionConfig, WebSkrapClient, challenges, turnstile
 from webskrap.cdp import CDPPage
@@ -324,25 +322,6 @@ def widget_server(tmp_path: Path) -> Iterator[ThreadingHTTPServer]:
         server.server_close()
 
 
-def _modes() -> list[Any]:
-    has_desktop = sys.platform in ("darwin", "win32") or bool(os.environ.get("DISPLAY"))
-    return [
-        pytest.param({}, id="headless"),
-        pytest.param(
-            {"virtual_display": True},
-            id="virtual-display",
-            marks=pytest.mark.skipif(
-                not challenges.xvfb_available(), reason="virtual_display needs Xvfb"
-            ),
-        ),
-        pytest.param(
-            {"headless": False},
-            id="headed",
-            marks=pytest.mark.skipif(not has_desktop, reason="headed needs a desktop"),
-        ),
-    ]
-
-
 def _config(sandbox_supported: bool, mode: dict[str, Any]) -> SessionConfig:
     return SessionConfig(
         channel="chromium",
@@ -355,7 +334,7 @@ def _config(sandbox_supported: bool, mode: dict[str, Any]) -> SessionConfig:
 
 
 @pytest.mark.browser
-@pytest.mark.parametrize("mode", _modes())
+@pytest.mark.parametrize("mode", browser_modes())
 async def test_fetch_clicks_the_drawn_checkbox_and_returns_the_real_page(
     widget_server, sandbox_supported, mode
 ) -> None:

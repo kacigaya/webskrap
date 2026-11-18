@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from test_turnstile import _modes
+from conftest import browser_modes
 
 from webskrap import SessionConfig, WebSkrapClient
 
@@ -83,7 +83,7 @@ def interstitial_server() -> Iterator[ThreadingHTTPServer]:
     server.server_close()
 
 
-@pytest.mark.parametrize("mode", _modes())
+@pytest.mark.parametrize("mode", browser_modes())
 async def test_fetch_passes_the_forced_interactive_test_sitekey(
     interstitial_server, sandbox_supported, mode: dict[str, Any]
 ) -> None:

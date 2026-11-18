@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_browser_integration import _Handler
+from http_fixtures import CDPHandler
 
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
 from webskrap.cdp import find_executable, launch
@@ -19,29 +19,6 @@ from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.models import BrowserProfile, FetchResult, user_agent_metadata
 
 pytestmark = pytest.mark.browser
-
-# Logs an Error whose `stack` getter records access. A driver that enabled the
-# Runtime or Console domain serializes logged errors and trips it.
-CONSOLE_PROBE_PAGE = b"""<html><title>Probe</title><body><p id="out"></p><script>
-let touched = false;
-const bait = new Error('bait');
-Object.defineProperty(bait, 'stack', { get() { touched = true; return ''; } });
-console.debug(bait);
-setTimeout(() => {
-  document.getElementById('out').textContent = JSON.stringify({
-    touched, webdriver: navigator.webdriver,
-  });
-}, 200);
-</script></body></html>"""
-
-# Records the registration outcome in the DOM, where an isolated world reads it.
-SW_PAGE = b"""<html><body><script>
-navigator.serviceWorker.register('/sw.js').then(
-  () => { document.body.dataset.sw = 'registered'; },
-  () => { document.body.dataset.sw = 'refused'; });
-</script></body></html>"""
-
-IMAGE_PAGE = b'<html><title>Images</title><body><img src="/pixel.png">text</body></html>'
 
 EVALUATE_CASES = [
     ("(() => 41 + 1)()", None, 42),
@@ -57,43 +34,10 @@ EVALUATE_CASES = [
 ]
 
 
-class _CDPHandler(_Handler):
-    image_requests = 0
-
-    def do_GET(self) -> None:
-        pages = {"/console-probe": CONSOLE_PROBE_PAGE, "/image-page": IMAGE_PAGE, "/sw": SW_PAGE}
-        if self.path == "/sw.js":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/javascript")
-            self.end_headers()
-            self.wfile.write(b"self.addEventListener('fetch', () => {});")
-            return
-        if self.path == "/csp":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'none'")
-            self.end_headers()
-            self.wfile.write(b"<html><title>CSP</title><body>locked</body></html>")
-            return
-        if self.path in pages:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(pages[self.path])
-            return
-        if self.path == "/pixel.png":
-            type(self).image_requests += 1
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.end_headers()
-            return
-        super().do_GET()
-
-
 @pytest.fixture()
 def server() -> Iterator[str]:
-    _CDPHandler.image_requests = 0
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), _CDPHandler)
+    CDPHandler.image_requests = 0
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), CDPHandler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
@@ -180,12 +124,12 @@ async def test_full_desktop_profile_fits_the_real_browser_window(
 
 async def test_lite_policy_blocks_images(server: str, config: SessionConfig) -> None:
     await fetch(f"{server}/image-page", config=config, wait_until="load")
-    assert _CDPHandler.image_requests == 1
+    assert CDPHandler.image_requests == 1
 
     lite = config.model_copy(update={"resource_policy": ResourcePolicy.LITE})
     result = await fetch(f"{server}/image-page", config=lite, wait_until="load", text_only=True)
     assert result.text == "text"
-    assert _CDPHandler.image_requests == 1
+    assert CDPHandler.image_requests == 1
 
 
 async def test_navigation_errors_and_cleanup(

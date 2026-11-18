@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_cdp_browser import _CDPHandler
+from http_fixtures import CDPHandler
 
 from webskrap import browser_session, cdp_session
 from webskrap.cdp import _WEBSOCKET_GUID, WebSocketTransport, _mask
@@ -306,7 +306,7 @@ WIDE_FRAME_PAGE = b"""<html><body style="margin:0">
 </body></html>"""
 
 
-class _SessionHandler(_CDPHandler):
+class _SessionHandler(CDPHandler):
     def do_GET(self) -> None:
         if self.path == "/frames" or self.path.startswith("/frame/"):
             port = self.server.server_address[1]

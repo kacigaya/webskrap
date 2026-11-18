@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import ssl
+import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -12,6 +14,7 @@ import pytest
 
 from webskrap import browser_session, client
 from webskrap.cdp import CDPPage, find_executable
+from webskrap.challenges import xvfb_available
 from webskrap.client import WebSkrapError
 
 
@@ -131,3 +134,20 @@ def tls_context(directory: Path, host: str) -> ssl.SSLContext:
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert_path, key_path)
     return context
+
+
+def browser_modes() -> list[Any]:
+    has_desktop = sys.platform in ("darwin", "win32") or bool(os.environ.get("DISPLAY"))
+    return [
+        pytest.param({}, id="headless"),
+        pytest.param(
+            {"virtual_display": True},
+            id="virtual-display",
+            marks=pytest.mark.skipif(not xvfb_available(), reason="virtual_display needs Xvfb"),
+        ),
+        pytest.param(
+            {"headless": False},
+            id="headed",
+            marks=pytest.mark.skipif(not has_desktop, reason="headed needs a desktop"),
+        ),
+    ]

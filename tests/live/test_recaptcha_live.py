@@ -24,7 +24,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from test_turnstile import _modes
+from conftest import browser_modes
 
 from webskrap import SessionConfig, WebSkrapClient, browser_session
 
@@ -115,7 +115,7 @@ def _check_token(widget: str, tokens: list[str]) -> None:
 
 
 @pytest.mark.parametrize("widget", list(WIDGETS))
-@pytest.mark.parametrize("mode", _modes())
+@pytest.mark.parametrize("mode", browser_modes())
 async def test_fetch_clicks_the_checkbox_on_a_blocking_page(
     widget_server, sandbox_supported, mode: dict[str, Any], widget: str
 ) -> None:
