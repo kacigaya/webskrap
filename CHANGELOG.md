@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-11-18
+
 ### Added
 
 - `solve_cloudflare` (CLI `--solve-cloudflare`; MCP `fetch`, `stealth_fetch`,
@@ -1152,7 +1154,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.6.1...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/kacigaya/webskrap/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/kacigaya/webskrap/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/kacigaya/webskrap/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/kacigaya/webskrap/compare/v3.4.0...v3.5.0
