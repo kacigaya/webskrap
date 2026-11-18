@@ -989,8 +989,8 @@ async def browser_solve_captcha(
 
     For a checkbox inside a form; fill the form first and submit it after.
     captcha.state is checked, challenge (an image challenge opened and is left
-    alone: stop), gone (the widget left the page), timeout or not_found. Use
-    responsibly.
+    alone: stop), gone (the widget left the page), timeout or not_found (no
+    widget drawn within 5 s). Use responsibly.
 
     Args:
         session: Browser session name.

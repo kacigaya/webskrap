@@ -41,6 +41,7 @@ TIMEOUT_S = 60.0
 CLICK_INTERVAL_S = 15.0
 MAX_CLICKS = 2
 CHECK_TIMEOUT_S = 15.0
+DRAW_WAIT_S = 5.0
 WANDER_S = (1.0, 2.5)
 _MIN_SIDE = 4.0
 _OFF_SCREEN = -1000.0
@@ -109,9 +110,16 @@ async def solve(page: CDPPage, timeout_s: float = CHECK_TIMEOUT_S) -> dict[str, 
     Returns ``{"provider", "state"}``. ``state`` is ``checked`` (ticked),
     ``challenge`` (an image challenge opened; it is left alone), ``gone`` (the
     widget left the page, usually because its callback navigated),
-    ``timeout`` (neither within ``timeout_s``), or ``not_found``.
+    ``timeout`` (neither within ``timeout_s``), or ``not_found`` (no drawn
+    widget within :data:`DRAW_WAIT_S`, since its script renders it late).
     """
+    drawn_by = time.monotonic() + DRAW_WAIT_S
     widget = await locate(page)
+    while (widget is None or (widget.box is None and not widget.challenged)) and (
+        time.monotonic() < drawn_by
+    ):
+        await asyncio.sleep(0.25)
+        widget = await locate(page)
     if widget is None:
         return {"provider": None, "state": "not_found"}
     provider = widget.provider

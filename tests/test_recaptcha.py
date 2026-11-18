@@ -106,6 +106,16 @@ async def test_locate_tells_hcaptcha_frames_apart_by_the_iframe_src(monkeypatch)
     assert await locate(page) is None
 
 
+async def test_solve_waits_for_a_widget_its_script_draws_late(gesture) -> None:
+    drawn = Widget("hCaptcha", BOX, False, False)
+    gesture["locate"].side_effect = [None, Widget("hCaptcha", None, False, False), drawn] + [
+        Widget("hCaptcha", BOX, True, False)
+    ] * 5
+    result = await solve(MagicMock(spec=CDPPage))
+    assert result == {"provider": "hCaptcha", "state": "checked"}
+    gesture["click"].assert_awaited_once_with(gesture["click"].await_args.args[0], BOX)
+
+
 @pytest.fixture
 def gesture(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     mocks = {
@@ -178,7 +188,10 @@ async def test_solve_clicks_once_and_reports_the_outcome(gesture, after, state) 
         (Widget("hCaptcha", BOX, False, True), "challenge"),
     ],
 )
-async def test_solve_does_not_click_when_there_is_nothing_to_tick(gesture, widget, state) -> None:
+async def test_solve_does_not_click_when_there_is_nothing_to_tick(
+    gesture, widget, state, monkeypatch
+) -> None:
+    monkeypatch.setattr(recaptcha, "DRAW_WAIT_S", 0.3)
     gesture["locate"].return_value = widget
     result = await solve(MagicMock(spec=CDPPage))
     assert result["state"] == state
