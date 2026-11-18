@@ -299,7 +299,9 @@ async def test_per_call_options_can_vary_without_relaunch(runtime) -> None:
     async with runtime.use("crawl", SessionConfig(), get_profile(None)) as first:
         pass
     async with runtime.use(
-        "crawl", SessionConfig(decline_cookies=True, solve_cloudflare=True), get_profile(None)
+        "crawl",
+        SessionConfig(decline_cookies=True, solve_cloudflare=True, solve_datadome=True),
+        get_profile(None),
     ) as second:
         assert second is first
     await runtime.close()

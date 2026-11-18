@@ -76,6 +76,7 @@ work as for `fetch`; `full` mode is not offered for sessions.
 ```bash
 webskrap browser open https://example.com --decline-cookies
 webskrap browser goto https://example.com --solve-cloudflare
+webskrap browser goto https://example.com --solve-datadome
 webskrap browser snapshot
 webskrap browser click e15
 webskrap browser fill "input[name=q]" "chromium"

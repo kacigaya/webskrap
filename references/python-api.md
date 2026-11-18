@@ -126,7 +126,8 @@ by the caller.
 
 `SessionConfig(solve_cloudflare=True)`, or `session.fetch(url, solve_cloudflare=True)`
 for one call, clicks Cloudflare's Turnstile checkbox on its "Just a moment"
-page and waits up to 60 seconds for the real page. Use it responsibly.
+page and waits up to 60 seconds for the real page. `solve_datadome=True` does
+the same for DataDome's slider CAPTCHA. Use both responsibly.
 
 Link collection is opt-in with `include_links=True` and capped by `max_links`.
 Links resolve against the final URL. Duplicate and `javascript:` targets are

@@ -56,7 +56,9 @@ Known challenge pages (DataDome, Cloudflare, Akamai, AWS WAF) and provider block
 pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
 checks that reload the page. It does not retry refusals. With
 `solve_cloudflare=True` (CLI `--solve-cloudflare`), it clicks Cloudflare's
-Turnstile checkbox; see [Cloudflare Turnstile](#cloudflare-turnstile).
+Turnstile checkbox; see [Cloudflare Turnstile](#cloudflare-turnstile). With
+`solve_datadome=True` (CLI `--solve-datadome`), it drags DataDome's slider; see
+[DataDome slider](#datadome-slider).
 Ordinary HTTP errors still return `ok=False`.
 For an empty HTTP error body, Chromium can show its own error page. The returned
 text or HTML is that rendered page. The status, headers, and `final_url` still
@@ -149,15 +151,36 @@ It works in headless, headed and `virtual_display` modes. A click only answers
 the widget: Cloudflare still scores the browser and the exit IP, so a headless
 browser or a flagged IP can still be refused. No token is read, copied or
 injected, and no outside solving service is used. Other CAPTCHAs, such as
-DataDome's slider or image and audio puzzles, are reported as `blocked` and
-never touched.
+image and audio puzzles, are reported as `blocked` and never touched.
 
-Use it responsibly: only on sites whose terms and applicable law allow
+## DataDome slider
+
+`solve_datadome=True` (CLI `--solve-datadome`) handles DataDome's slider
+CAPTCHA. It is off by default; without it a DataDome CAPTCHA fails fast with
+`blocked`. With it, WebSkrap waits on the CAPTCHA page. When DataDome draws
+its slider, the cursor wanders for 3 to 5 seconds, moves to the handle, grabs
+it and drags it onto the slot in 35 small moves: slow, then faster, then slow
+again, with a little jitter. The handle and slot positions are read from the
+CAPTCHA frame's DOM before each drag. If the page has not cleared 10 seconds
+later, WebSkrap drags again, at most three times. The slider gets up to 60
+seconds from when it first appears, on top of `timeout_ms`. Success is reported
+only after the real page loads and no challenge is detected on it; otherwise
+the call fails with `blocked`.
+
+A drag only answers the slider: DataDome still scores the browser, the exit IP
+and the gesture. A hard block has no slider and stays `blocked`. Headed and
+`virtual_display` browsers passed in live runs; a headless browser can get the
+hard block instead. No cookie or token is read, copied or injected, no outside
+solving service is used, and DataDome's audio and image puzzles are never
+touched.
+
+Use both responsibly: only on sites whose terms and applicable law allow
 automated access, and at a polite rate. Passing a challenge does not grant
 permission to collect data you may not collect.
 
 ```bash
 webskrap fetch https://example.com --virtual-display --solve-cloudflare
+webskrap fetch https://example.com --virtual-display --solve-datadome
 ```
 
 ## Visual browser interaction

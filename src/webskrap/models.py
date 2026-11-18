@@ -395,6 +395,7 @@ class SessionConfig(BaseModel):
     # notice; set 0 for a single immediate check.
     decline_cookies_timeout_ms: float = Field(default=2_000, ge=0)
     solve_cloudflare: bool = False
+    solve_datadome: bool = False
 
     @model_validator(mode="before")
     @classmethod

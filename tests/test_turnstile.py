@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import os
-import ssl
 import sys
 import threading
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -14,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from conftest import tls_context
 
 from webskrap import SessionConfig, WebSkrapClient, challenges, turnstile
 from webskrap.cdp import CDPPage
@@ -127,7 +126,7 @@ async def test_locate_waits_while_the_widget_verifies(monkeypatch) -> None:
 def gesture(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
     mocks = {
         "locate": AsyncMock(return_value=BOX),
-        "_wander": AsyncMock(),
+        "wander": AsyncMock(),
         "_click": AsyncMock(),
     }
     for name, mock in mocks.items():
@@ -139,7 +138,7 @@ async def test_step_wanders_once_then_clicks_on_schedule(gesture) -> None:
     checkbox = Checkbox(MagicMock(spec=CDPPage))
     await checkbox.step()
     assert checkbox.seen and checkbox.clicks == 1
-    gesture["_wander"].assert_awaited_once()
+    gesture["wander"].assert_awaited_once()
     gesture["_click"].assert_awaited_once_with(checkbox.page, BOX)
     assert checkbox.next_click > time.monotonic() + turnstile.CLICK_INTERVAL_S - 1
     await checkbox.step()
@@ -148,7 +147,7 @@ async def test_step_wanders_once_then_clicks_on_schedule(gesture) -> None:
         checkbox.next_click = 0.0
         await checkbox.step()
     assert checkbox.clicks == turnstile.MAX_CLICKS
-    assert gesture["_wander"].await_count == 1
+    assert gesture["wander"].await_count == 1
 
 
 async def test_step_does_nothing_without_a_checkbox_or_past_the_deadline(gesture) -> None:
@@ -309,45 +308,12 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
-def _tls_context(directory: Path) -> ssl.SSLContext:
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import NameOID
-
-    key = ec.generate_private_key(ec.SECP256R1())
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, turnstile.FRAME_HOST)])
-    now = datetime.now(UTC)
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(name)
-        .public_key(key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(hours=1))
-        .not_valid_after(now + timedelta(hours=1))
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName(turnstile.FRAME_HOST)]), False)
-        .sign(key, hashes.SHA256())
-    )
-    cert_path, key_path = directory / "widget.pem", directory / "widget.key"
-    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
-    key_path.write_bytes(
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        )
-    )
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.load_cert_chain(cert_path, key_path)
-    return context
-
-
 @pytest.fixture
 def widget_server(tmp_path: Path) -> Iterator[ThreadingHTTPServer]:
     page, widget = (ThreadingHTTPServer(("127.0.0.1", 0), _Handler) for _ in range(2))
-    widget.socket = _tls_context(tmp_path).wrap_socket(widget.socket, server_side=True)
+    widget.socket = tls_context(tmp_path, turnstile.FRAME_HOST).wrap_socket(
+        widget.socket, server_side=True
+    )
     page.clicks = widget.clicks = []  # type: ignore[attr-defined]
     page.widget_port = widget.server_port  # type: ignore[attr-defined]
     for server in (page, widget):

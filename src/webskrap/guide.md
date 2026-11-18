@@ -79,10 +79,28 @@ It works in headless, headed and `virtual_display` modes. A click only answers
 the widget: Cloudflare still scores the browser and the exit IP, so a headless
 browser or a flagged IP can still be refused. No token is read, copied or
 injected, and no outside solving service is used. Other CAPTCHAs, such as
-DataDome's slider or image and audio puzzles, are reported as `blocked` and
-never touched.
+image and audio puzzles, are reported as `blocked` and never touched.
 
-Use it responsibly: only on sites whose terms and applicable law allow
+`solve_datadome=True` (CLI `--solve-datadome`) handles DataDome's slider
+CAPTCHA. It is off by default; without it a DataDome CAPTCHA fails fast with
+`blocked`. With it, WebSkrap waits on the CAPTCHA page. When DataDome draws
+its slider, the cursor wanders for 3 to 5 seconds, moves to the handle, grabs
+it and drags it onto the slot in 35 small moves: slow, then faster, then slow
+again, with a little jitter. The handle and slot positions are read from the
+CAPTCHA frame's DOM before each drag. If the page has not cleared 10 seconds
+later, WebSkrap drags again, at most three times. The slider gets up to 60
+seconds from when it first appears, on top of `timeout_ms`. Success is reported
+only after the real page loads and no challenge is detected on it; otherwise
+the call fails with `blocked`.
+
+A drag only answers the slider: DataDome still scores the browser, the exit IP
+and the gesture. A hard block has no slider and stays `blocked`. Headed and
+`virtual_display` browsers passed in live runs; a headless browser can get the
+hard block instead. No cookie or token is read, copied or injected, no outside
+solving service is used, and DataDome's audio and image puzzles are never
+touched.
+
+Use both responsibly: only on sites whose terms and applicable law allow
 automated access, and at a polite rate. Passing a challenge does not grant
 permission to collect data you may not collect.
 
@@ -230,7 +248,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_launch` | Run `webskrap install`. Fetch and search already fall back from `chrome` to Edge and bundled Chromium. |
 | `sandbox` | Check user namespaces and AppArmor for the browser executable; restore sandbox support. |
 | `path_rejected` | Paths are relative to a confined root. |
-| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. For Cloudflare's checkbox, `solve_cloudflare=True`. |
+| `blocked` | A challenge or block page loaded. Follow the hint: `virtual_display=True`, another exit IP, or a persistent `user_data_dir`. For Cloudflare's checkbox, `solve_cloudflare=True`; for DataDome's slider, `solve_datadome=True`. |
 | `usage` | Re-read the argument's documented values. |
 
 ## Limits
@@ -239,7 +257,7 @@ Screenshots are written under `./webskrap-output` and persistent profiles under
 `~/.webskrap/profiles` (`WEBSKRAP_OUTPUT_DIR` and `WEBSKRAP_MCP_PROFILE_DIR` move
 those roots). Absolute paths and traversal are rejected. The sandbox switch is an
 environment variable and never a tool argument, so a page cannot argue a model
-into disabling it. The only CAPTCHA handling is the opt-in Turnstile click; no
+into disabling it. The only CAPTCHA handling is the opt-in Turnstile click and DataDome slider drag; no
 login-wall bypass. Use it responsibly.
 
 ## Python batch fetching

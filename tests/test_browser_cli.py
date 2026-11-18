@@ -73,11 +73,19 @@ def test_goto_passes_solve_cloudflare(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr(browser_session, "goto", goto)
     result = runner.invoke(
         cli.app,
-        ["browser", "goto", "https://example.test", "--solve-cloudflare", "--format", "json"],
+        [
+            "browser",
+            "goto",
+            "https://example.test",
+            "--solve-cloudflare",
+            "--solve-datadome",
+            "--format",
+            "json",
+        ],
         env=_env(tmp_path),
     )
     assert result.exit_code == 0, result.output
-    assert calls == [{"decline_cookies": False, "solve_cloudflare": True}]
+    assert calls == [{"decline_cookies": False, "solve_cloudflare": True, "solve_datadome": True}]
 
 
 @pytest.mark.parametrize("session", [".", "..", "../evil"])

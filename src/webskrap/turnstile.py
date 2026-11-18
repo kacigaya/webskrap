@@ -82,7 +82,7 @@ class Checkbox:
         self.seen = True
         with suppress(WebSkrapError):
             if self.clicks == 0:
-                await _wander(self.page, uniform(*WANDER_S))
+                await wander(self.page, uniform(*WANDER_S))
                 box = await locate(self.page)
                 if box is None:
                     return
@@ -153,7 +153,7 @@ def square(quad: list[float]) -> Box | None:
     return {"x": x, "y": y, "width": min(width, height), "height": height}
 
 
-async def _wander(page: CDPPage, seconds: float) -> None:
+async def wander(page: CDPPage, seconds: float) -> None:
     """Move the cursor between random viewport points for ``seconds``."""
     metrics = await page.send("Page.getLayoutMetrics")
     width = metrics["cssLayoutViewport"]["clientWidth"]

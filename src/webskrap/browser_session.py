@@ -1367,12 +1367,14 @@ async def goto(
     *,
     decline_cookies: bool = False,
     solve_cloudflare: bool = False,
+    solve_datadome: bool = False,
 ) -> dict[str, Any]:
     """Navigate ``page`` to ``url`` and return its status and state.
 
     ``blocked`` reports a recognized challenge or block page (or None)
     without raising. With ``solve_cloudflare``, Cloudflare's Turnstile
-    checkbox is clicked first. With ``decline_cookies``, a consent notice is
+    checkbox is clicked first; with ``solve_datadome``, DataDome's slider is
+    dragged. With ``decline_cookies``, a consent notice is
     dismissed and ``cookie_notice_declined`` reports the strategy, as fetch
     does.
     """
@@ -1382,6 +1384,7 @@ async def goto(
         wait_until,
         decline_cookies=decline_cookies,
         solve_cloudflare=solve_cloudflare,
+        solve_datadome=solve_datadome,
     )
 
 
