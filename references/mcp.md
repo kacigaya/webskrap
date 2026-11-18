@@ -1,8 +1,8 @@
 # MCP
 
 Read this reference for MCP tools, resources, schemas, annotations, and safety
-boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
-`tests/test_mcp.py`.
+boundaries. Confirm the current contract in `src/webskrap/interfaces/mcp_server.py` and
+`tests/interfaces/test_mcp.py`.
 
 ## Select a tool
 

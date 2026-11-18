@@ -6,25 +6,22 @@ Start with :class:`~webskrap.client.WebSkrapClient` for fetching and sessions,
 (``webskrap``) and MCP server (``webskrap-mcp``) are built on the same objects.
 """
 
-from webskrap.client import WebSkrapClient, WebSkrapSession
-from webskrap.consent import decline_cookies
-from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.markup import Element, parse_html
-from webskrap.models import (
+from webskrap.browser.consent import decline_cookies
+from webskrap.config.models import (
     BrowserProfile,
-    FetchResult,
     GpuBackend,
-    Link,
     ProxyConfig,
     ResourcePolicy,
     SearchEngine,
-    SearchHit,
-    SearchResult,
     SessionConfig,
     Viewport,
     WebRtcIPHandlingPolicy,
 )
-from webskrap.profiles import get_profile, list_profiles
+from webskrap.config.profiles import get_profile, list_profiles
+from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.scraping.client import WebSkrapClient, WebSkrapSession
+from webskrap.scraping.markup import Element, parse_html
+from webskrap.scraping.results import FetchResult, Link, SearchHit, SearchResult
 
 __all__ = [
     "BrowserProfile",

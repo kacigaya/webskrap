@@ -1,0 +1,833 @@
+"""Typer commands for persistent browser sessions (`webskrap browser ...`).
+
+A native Python take on the official Playwright CLI (`@playwright/cli`):
+`open` launches a detached Chromium that outlives each CLI invocation, and
+every other command reconnects to it over CDP, acts on the current page, and
+exits. The session/page logic lives in :mod:`webskrap.browser_session`, shared
+with the MCP server; this module only parses arguments and formats output.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from collections.abc import Awaitable, Callable, Coroutine
+from pathlib import Path
+from typing import Annotated, Any, TypeVar
+from uuid import uuid4
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from webskrap.browser import browser_session
+from webskrap.browser.browser_session import (
+    DEFAULT_ACTION_TIMEOUT_MS,
+    DEFAULT_NAVIGATION_TIMEOUT_MS,
+    ELEMENT_ACTIONS,
+    SessionPage,
+)
+from webskrap.config.models import GpuBackend
+from webskrap.config.parsing import (
+    parse_element_state,
+    parse_load_state,
+    parse_session_profile_mode,
+    parse_wait_until,
+    parse_webrtc_ip_handling_policy,
+)
+from webskrap.errors import ErrorCode, WebSkrapError
+from webskrap.interfaces.cli_output import (
+    OutputFormat,
+    fail,
+    parse_cli_value,
+    parse_output_format,
+    print_json,
+    stderr_console,
+)
+
+browser_app = typer.Typer(
+    help="Drive a persistent browser with Playwright CLI-style commands.",
+    no_args_is_help=True,
+)
+console = Console()
+
+T = TypeVar("T")
+
+SessionOption = Annotated[str, typer.Option("--session", "-s", help="Browser session name.")]
+FormatOption = Annotated[str, typer.Option("--format", help="Output format: human or json.")]
+ActionTimeoutOption = Annotated[float, typer.Option("--timeout-ms", min=1, help="Action timeout.")]
+
+ProfileOption = Annotated[
+    str,
+    typer.Option(
+        "--profile",
+        "-p",
+        help="Bundled profile; --profile-mode decides how much of it pages see.",
+    ),
+]
+VirtualDisplayOption = Annotated[
+    bool,
+    typer.Option(
+        "--virtual-display",
+        help="Run headed Chromium on a private Xvfb display instead of headless (Linux).",
+    ),
+]
+GpuOption = Annotated[
+    GpuBackend,
+    typer.Option(
+        "--gpu",
+        help=(
+            "WebGL renderer: auto (Chromium's choice, SwiftShader without a GPU; "
+            "mesa under --virtual-display without a GPU when lavapipe is installed) or "
+            "mesa (Mesa lavapipe; Linux, mesa-vulkan-drivers)."
+        ),
+    ),
+]
+SessionProfileModeOption = Annotated[
+    str,
+    typer.Option(
+        "--profile-mode",
+        help=(
+            "native (the browser's own identity, the default) or locale (--profile's "
+            "timezone and languages, set at launch; Linux)."
+        ),
+    ),
+]
+
+_ELEMENT_COMMAND_HELP = {
+    "click": "Click an element.",
+    "dblclick": "Double-click an element.",
+    "hover": "Hover over an element.",
+    "check": "Check a checkbox or radio.",
+    "uncheck": "Uncheck a checkbox.",
+    "fill": "Fill an input with a value.",
+    "type": "Type text into an element key by key.",
+    "select": "Select option value(s) in a <select>.",
+}
+
+
+def _run(coroutine: Coroutine[Any, Any, T], output_format: OutputFormat) -> T:
+    """Run a browser-session coroutine, converting failures to CLI errors."""
+    try:
+        return asyncio.run(coroutine)
+    except (typer.Exit, typer.Abort, typer.BadParameter):
+        raise
+    except Exception as exc:
+        # Every failure, CDP or otherwise (an unwritable screenshot
+        # path, a dead session), leaves through the shared envelope.
+        fail(exc, output_format)
+
+
+def _run_page_command(
+    session: str,
+    action: Callable[[SessionPage], Awaitable[T]],
+    output_format: OutputFormat,
+    *,
+    timeout_ms: float = DEFAULT_ACTION_TIMEOUT_MS,
+) -> T:
+    return _run(
+        browser_session.run_page_action(session, action, timeout_ms=timeout_ms), output_format
+    )
+
+
+def _emit_state(state: dict[str, Any], output_format: OutputFormat) -> None:
+    if output_format == "json":
+        print_json(state)
+        return
+    if (status := state.get("status")) is not None:
+        console.print(f"[bold]Status:[/bold] {status}")
+    console.print(f"[bold]URL:[/bold] {state['url']}")
+    console.print(f"[bold]Title:[/bold] {state['title']}")
+    if "cookie_notice_declined" in state:
+        declined = state["cookie_notice_declined"] or "no notice found"
+        console.print(f"[bold]Cookie notice:[/bold] {declined}")
+    if captcha := state.get("captcha"):
+        console.print(f"[bold]CAPTCHA:[/bold] {captcha['provider'] or 'none'} {captcha['state']}")
+    if blocked := state.get("blocked"):
+        stderr_console.print(
+            f"[yellow]blocked:[/yellow] {blocked['provider']} {blocked['kind']}. {blocked['hint']}"
+        )
+
+
+@browser_app.command("open")
+def open_command(
+    url: Annotated[str | None, typer.Argument(help="URL to open after launch.")] = None,
+    session: SessionOption = "default",
+    headed: Annotated[
+        bool, typer.Option("--headed", help="Run the browser with a visible window.")
+    ] = False,
+    no_sandbox: Annotated[
+        bool,
+        typer.Option(
+            "--no-sandbox",
+            help="Disable Chromium's OS sandbox (weakens isolation; only where it cannot start).",
+        ),
+    ] = False,
+    proxy: Annotated[
+        str | None,
+        typer.Option(
+            "--proxy",
+            help=(
+                "Route the session through this proxy (http, https, socks4 or socks5 URL, "
+                "no credentials). Set WEBSKRAP_PROXY_USERNAME and WEBSKRAP_PROXY_PASSWORD "
+                "for an http or https proxy that asks for them."
+            ),
+        ),
+    ] = None,
+    webrtc_ip_handling_policy: Annotated[
+        str | None,
+        typer.Option(
+            "--webrtc-ip-handling-policy",
+            help=(
+                "Chromium WebRTC IP policy: default, default_public_and_private_interfaces, "
+                "default_public_interface_only, disable_non_proxied_udp. "
+                "Defaults to disable_non_proxied_udp with --proxy."
+            ),
+        ),
+    ] = None,
+    fake_media_devices: Annotated[
+        bool,
+        typer.Option("--fake-media-devices", help="Use synthetic Chromium camera and microphone."),
+    ] = False,
+    decline_cookies: Annotated[
+        bool,
+        typer.Option(
+            "--decline-cookies", help="With a URL, click a cookie consent notice's reject control."
+        ),
+    ] = False,
+    solve_cloudflare: Annotated[
+        bool,
+        typer.Option(
+            "--solve-cloudflare",
+            help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
+        ),
+    ] = False,
+    solve_datadome: Annotated[
+        bool,
+        typer.Option(
+            "--solve-datadome",
+            help="Drag DataDome's slider CAPTCHA and wait up to 60 s for the real page.",
+        ),
+    ] = False,
+    solve_perimeterx: Annotated[
+        bool,
+        typer.Option(
+            "--solve-perimeterx",
+            help="Hold HUMAN's Press & Hold button and wait up to 60 s for the real page.",
+        ),
+    ] = False,
+    solve_recaptcha: Annotated[
+        bool,
+        typer.Option(
+            "--solve-recaptcha",
+            help="Click a reCAPTCHA v2 or hCaptcha checkbox on a blocked page; wait up to 60 s.",
+        ),
+    ] = False,
+    virtual_display: VirtualDisplayOption = False,
+    gpu: GpuOption = GpuBackend.AUTO,
+    profile_mode: SessionProfileModeOption = "native",
+    profile: Annotated[
+        str | None,
+        typer.Option("--profile", "-p", help="Bundled profile for --profile-mode locale."),
+    ] = None,
+    format: FormatOption = "human",
+) -> None:
+    """Start (or reuse) a persistent browser session.
+
+    The browser keeps Chromium's OS sandbox unless --no-sandbox is passed (or
+    WEBSKRAP_CHROMIUM_SANDBOX=0 is set for hosts that cannot sandbox at all).
+    Without it, a renderer compromised by a hostile page is no longer contained.
+
+    With --proxy, all traffic goes through the proxy and WebRTC stops offering
+    non-proxied UDP candidates, so pages see neither the host's LAN addresses
+    nor its direct public address. The proxy is fixed at launch: reopening a
+    running session with a different one is refused. Proxy credentials come
+    from WEBSKRAP_PROXY_USERNAME and WEBSKRAP_PROXY_PASSWORD, never from the
+    command line; a helper process keeps them in memory while the browser runs.
+
+    --virtual-display keeps the window invisible but runs Chrome headed on a
+    private Xvfb display that lives as long as the session (Linux).
+    """
+    output_format = parse_output_format(format)
+    policy = parse_cli_value(
+        webrtc_ip_handling_policy,
+        parse_webrtc_ip_handling_policy,
+        param_hint="--webrtc-ip-handling-policy",
+    )
+    mode = parse_cli_value(profile_mode, parse_session_profile_mode, param_hint="--profile-mode")
+    payload = _run(
+        browser_session.open_session(
+            session,
+            headless=not headed,
+            # None, not True: an unset flag leaves the environment default in
+            # place, while --no-sandbox is an explicit opt-out that wins.
+            chromium_sandbox=False if no_sandbox else None,
+            proxy_server=proxy,
+            webrtc_ip_handling_policy=policy,
+            fake_media_devices=fake_media_devices,
+            proxy_username=os.environ.get(browser_session.PROXY_USERNAME_ENV) if proxy else None,
+            proxy_password=os.environ.get(browser_session.PROXY_PASSWORD_ENV) if proxy else None,
+            virtual_display=virtual_display,
+            gpu=gpu,
+            profile_mode=mode,
+            profile=profile,
+        ),
+        output_format,
+    )
+    if url:
+        payload.update(
+            _run_page_command(
+                session,
+                lambda page: browser_session.goto(
+                    page,
+                    url,
+                    "load",
+                    decline_cookies=decline_cookies,
+                    solve_cloudflare=solve_cloudflare,
+                    solve_datadome=solve_datadome,
+                    solve_perimeterx=solve_perimeterx,
+                    solve_recaptcha=solve_recaptcha,
+                ),
+                output_format,
+                timeout_ms=DEFAULT_NAVIGATION_TIMEOUT_MS,
+            )
+        )
+
+    if output_format == "json":
+        print_json(payload)
+        return
+    verb = "Reusing" if payload["reused"] else "Opened"
+    console.print(f"{verb} session [bold]{session}[/bold] (pid {payload['pid']})")
+    if payload.get("proxy_server"):
+        auth = " (authenticated)" if payload.get("proxy_auth") else ""
+        console.print(f"Proxy: {payload['proxy_server']}{auth}")
+    if not payload["chromium_sandbox"]:
+        stderr_console.print("[yellow]warning:[/yellow] Chromium sandbox disabled")
+    if url:
+        _emit_state(payload, output_format)
+
+
+@browser_app.command("close")
+def close_command(
+    session: SessionOption = "default",
+    all_sessions: Annotated[bool, typer.Option("--all", help="Close every session.")] = False,
+    delete_data: Annotated[
+        bool, typer.Option("--delete-data", help="Also delete the session's profile data.")
+    ] = False,
+    format: FormatOption = "human",
+) -> None:
+    """Close a browser session (its profile data persists unless --delete-data)."""
+    output_format = parse_output_format(format)
+    try:
+        if all_sessions:
+            names = browser_session.list_session_names()
+        else:
+            directory = browser_session.session_dir(session)
+            if browser_session.read_state(directory) is None and not delete_data:
+                msg = f"session '{session}' is not open"
+                raise WebSkrapError(msg, code=ErrorCode.NO_SESSION)
+            names = [session]
+        closed = [browser_session.close_session(name, delete_data=delete_data) for name in names]
+    except WebSkrapError as exc:
+        fail(exc, output_format)
+    if output_format == "json":
+        print_json({"closed": closed})
+        return
+    for entry in closed:
+        console.print(f"closed [bold]{entry['session']}[/bold]")
+
+
+@browser_app.command("list")
+def list_command(format: FormatOption = "human") -> None:
+    """List browser sessions."""
+    output_format = parse_output_format(format)
+    sessions = browser_session.list_sessions()
+    if output_format == "json":
+        print_json({"sessions": sessions})
+        return
+    table = Table(title="WebSkrap Browser Sessions")
+    table.add_column("Session")
+    table.add_column("Running")
+    table.add_column("PID")
+    table.add_column("Port")
+    table.add_column("Sandbox")
+    table.add_column("Proxy")
+    for entry in sessions:
+        sandbox = entry["chromium_sandbox"]
+        table.add_row(
+            str(entry["session"]),
+            "yes" if entry["running"] else "no",
+            str(entry["pid"] or ""),
+            str(entry["port"] or ""),
+            "" if sandbox is None else ("yes" if sandbox else "no"),
+            str(entry.get("proxy_server") or "") + (" (auth)" if entry.get("proxy_auth") else ""),
+        )
+    console.print(table)
+
+
+def _tab_command(
+    session: str,
+    action: str,
+    output_format: OutputFormat,
+    *,
+    index: int | None = None,
+    url: str | None = None,
+) -> None:
+    payload = _run(browser_session.tabs(session, action, index=index, url=url), output_format)
+    if output_format == "json":
+        print_json(payload)
+        return
+    for tab in payload["tabs"]:
+        marker = "*" if tab["current"] else " "
+        console.print(f"{marker} {tab['index']}  {tab['title'] or '(no title)'}  {tab['url']}")
+
+
+@browser_app.command("tab-list")
+def tab_list_command(session: SessionOption = "default", format: FormatOption = "human") -> None:
+    """List the session's tabs; * marks the one commands act on."""
+    _tab_command(session, "list", parse_output_format(format))
+
+
+@browser_app.command("tab-new")
+def tab_new_command(
+    url: Annotated[str | None, typer.Argument(help="URL to load in the new tab.")] = None,
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Open a tab and make it current."""
+    _tab_command(session, "new", parse_output_format(format), url=url)
+
+
+@browser_app.command("tab-select")
+def tab_select_command(
+    index: Annotated[int, typer.Argument(min=0, help="Tab index from tab-list.")],
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Make a tab current, so later commands act on it."""
+    _tab_command(session, "select", parse_output_format(format), index=index)
+
+
+@browser_app.command("tab-close")
+def tab_close_command(
+    index: Annotated[
+        int | None, typer.Argument(min=0, help="Tab index from tab-list; default current.")
+    ] = None,
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Close a tab; the newest tab left becomes current."""
+    _tab_command(session, "close", parse_output_format(format), index=index)
+
+
+@browser_app.command("goto")
+def goto_command(
+    url: Annotated[str, typer.Argument(help="URL to navigate to.")],
+    session: SessionOption = "default",
+    wait_until: Annotated[
+        str,
+        typer.Option("--wait-until", help="commit, domcontentloaded, load, or networkidle."),
+    ] = "load",
+    timeout_ms: ActionTimeoutOption = DEFAULT_NAVIGATION_TIMEOUT_MS,
+    decline_cookies: Annotated[
+        bool,
+        typer.Option("--decline-cookies", help="Click a cookie consent notice's reject control."),
+    ] = False,
+    solve_cloudflare: Annotated[
+        bool,
+        typer.Option(
+            "--solve-cloudflare",
+            help="Click Cloudflare's Turnstile checkbox and wait up to 60 s for the real page.",
+        ),
+    ] = False,
+    solve_datadome: Annotated[
+        bool,
+        typer.Option(
+            "--solve-datadome",
+            help="Drag DataDome's slider CAPTCHA and wait up to 60 s for the real page.",
+        ),
+    ] = False,
+    solve_perimeterx: Annotated[
+        bool,
+        typer.Option(
+            "--solve-perimeterx",
+            help="Hold HUMAN's Press & Hold button and wait up to 60 s for the real page.",
+        ),
+    ] = False,
+    solve_recaptcha: Annotated[
+        bool,
+        typer.Option(
+            "--solve-recaptcha",
+            help="Click a reCAPTCHA v2 or hCaptcha checkbox on a blocked page; wait up to 60 s.",
+        ),
+    ] = False,
+    format: FormatOption = "human",
+) -> None:
+    """Navigate the current page.
+
+    A known challenge or block page is reported, not raised: the page stays
+    open, and JSON output carries it in "blocked".
+    """
+    output_format = parse_output_format(format)
+    parsed_wait_until = parse_cli_value(wait_until, parse_wait_until)
+    state = _run_page_command(
+        session,
+        lambda page: browser_session.goto(
+            page,
+            url,
+            parsed_wait_until,
+            decline_cookies=decline_cookies,
+            solve_cloudflare=solve_cloudflare,
+            solve_datadome=solve_datadome,
+            solve_perimeterx=solve_perimeterx,
+            solve_recaptcha=solve_recaptcha,
+        ),
+        output_format,
+        timeout_ms=timeout_ms,
+    )
+    _emit_state(state, output_format)
+
+
+def _navigation_command(name: str, help_text: str, method: str) -> None:
+    @browser_app.command(name, help=help_text)
+    def command(
+        session: SessionOption = "default",
+        timeout_ms: ActionTimeoutOption = DEFAULT_NAVIGATION_TIMEOUT_MS,
+        format: FormatOption = "human",
+    ) -> None:
+        output_format = parse_output_format(format)
+
+        async def action(page: SessionPage) -> dict[str, Any]:
+            return await browser_session.history(page, method)
+
+        _emit_state(
+            _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
+            output_format,
+        )
+
+
+_navigation_command("back", "Go back in the current page's history.", "go_back")
+_navigation_command("forward", "Go forward in the current page's history.", "go_forward")
+_navigation_command("reload", "Reload the current page.", "reload")
+
+
+@browser_app.command("snapshot")
+def snapshot_command(
+    session: SessionOption = "default",
+    depth: Annotated[
+        int | None, typer.Option("--depth", min=1, help="Maximum snapshot tree depth.")
+    ] = None,
+    max_chars: Annotated[
+        int, typer.Option("--max-chars", min=0, help="Maximum snapshot characters.")
+    ] = 20_000,
+    offset: Annotated[
+        int,
+        typer.Option(
+            "--offset",
+            min=0,
+            help="Start at this character; pass back next_snapshot_offset to continue.",
+        ),
+    ] = 0,
+    format: FormatOption = "human",
+) -> None:
+    """Print an aria snapshot of the page with `eN` element refs."""
+    output_format = parse_output_format(format)
+    result = browser_session.shape_snapshot(
+        _run_page_command(
+            session, lambda page: browser_session.snapshot(page, depth=depth), output_format
+        ),
+        max_chars,
+        offset,
+    )
+    if output_format == "json":
+        print_json(result)
+        return
+    _emit_state({"url": result["url"], "title": result["title"]}, output_format)
+    typer.echo(result["snapshot"])
+    if result["snapshot_truncated"]:
+        stderr_console.print(
+            f"[yellow]truncated:[/yellow] {result['snapshot_length']} characters; "
+            f"continue with --offset {result['next_snapshot_offset']}"
+        )
+
+
+def _register_element_command(name: str, help_text: str) -> None:
+    """Register an interaction command taking a snapshot ref or selector."""
+
+    @browser_app.command(name, help=help_text)
+    def command(
+        target: Annotated[str, typer.Argument(help="Snapshot ref (e12) or CSS selector.")],
+        value: Annotated[list[str] | None, typer.Argument(help="Value(s) for the action.")] = None,
+        session: SessionOption = "default",
+        timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+        format: FormatOption = "human",
+    ) -> None:
+        output_format = parse_output_format(format)
+        values = value or []
+        try:
+            # Fail on a bad value count before connecting to the browser.
+            browser_session.element_arguments(name, values)
+        except WebSkrapError as exc:
+            fail(exc, output_format)
+
+        async def action(page: SessionPage) -> dict[str, Any]:
+            await browser_session.element_action(page, name, target, values)
+            return await browser_session.page_state(page)
+
+        _emit_state(
+            _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
+            output_format,
+        )
+
+
+for _name in ELEMENT_ACTIONS:
+    _register_element_command(_name, _ELEMENT_COMMAND_HELP[_name])
+
+
+@browser_app.command("solve-captcha")
+def solve_captcha_command(
+    session: SessionOption = "default",
+    timeout_ms: ActionTimeoutOption = 30_000,
+    format: FormatOption = "human",
+) -> None:
+    """Click the page's reCAPTCHA v2 or hCaptcha checkbox like a person."""
+    output_format = parse_output_format(format)
+
+    async def action(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.solve_captcha(page)
+
+    _emit_state(
+        _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
+    )
+
+
+@browser_app.command("press")
+def press_command(
+    key: Annotated[str, typer.Argument(help="Key to press, e.g. Enter or Control+a.")],
+    session: SessionOption = "default",
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    format: FormatOption = "human",
+) -> None:
+    """Press a key on the page."""
+    output_format = parse_output_format(format)
+
+    async def action(page: SessionPage) -> dict[str, Any]:
+        return await browser_session.press(page, key)
+
+    _emit_state(
+        _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
+    )
+
+
+@browser_app.command("wait")
+def wait_command(
+    session: SessionOption = "default",
+    text: Annotated[
+        str | None, typer.Option("--text", help="Wait until this text is visible.")
+    ] = None,
+    text_gone: Annotated[
+        str | None, typer.Option("--text-gone", help="Wait until this text is gone.")
+    ] = None,
+    selector: Annotated[
+        str | None,
+        typer.Option("--selector", help="Wait on a snapshot ref (e12) or CSS selector."),
+    ] = None,
+    state: Annotated[
+        str,
+        typer.Option("--state", help="attached, detached, visible, or hidden (with --selector)."),
+    ] = "visible",
+    load_state: Annotated[
+        str | None,
+        typer.Option("--load-state", help="domcontentloaded, load, or networkidle."),
+    ] = None,
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    format: FormatOption = "human",
+) -> None:
+    """Wait for one condition on the page (text, selector, or load state)."""
+    output_format = parse_output_format(format)
+    parsed_state = parse_cli_value(state, parse_element_state)
+    parsed_load_state = (
+        parse_cli_value(load_state, parse_load_state) if load_state is not None else None
+    )
+    try:
+        # Fail before connecting when the conditions do not add up to exactly one.
+        browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
+    except WebSkrapError as exc:
+        fail(exc, output_format)
+
+    state_payload = _run_page_command(
+        session,
+        lambda page: browser_session.wait_for(
+            page,
+            text=text,
+            text_gone=text_gone,
+            selector=selector,
+            selector_state=parsed_state,
+            load_state=parsed_load_state,
+            timeout_ms=timeout_ms,
+        ),
+        output_format,
+        timeout_ms=timeout_ms,
+    )
+    if output_format == "human":
+        console.print(f"[bold]Matched:[/bold] {state_payload['matched']}")
+    _emit_state(state_payload, output_format)
+
+
+@browser_app.command("screenshot")
+def screenshot_command(
+    path: Annotated[Path | None, typer.Argument(help="Output PNG path.")] = None,
+    session: SessionOption = "default",
+    full_page: Annotated[
+        bool, typer.Option("--full-page", help="Capture the full scrollable page.")
+    ] = False,
+    target: Annotated[
+        str | None,
+        typer.Option(
+            "--target",
+            help="Snapshot ref (e15, f12345e15) or CSS selector: capture only that element.",
+        ),
+    ] = None,
+    format: FormatOption = "human",
+) -> None:
+    """Screenshot the current page, or one element of it."""
+    output_format = parse_output_format(format)
+    destination = path or Path(f"webskrap-{uuid4().hex}.png")
+
+    async def action(page: SessionPage) -> dict[str, Any]:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        return await browser_session.screenshot(
+            page, destination, full_page=full_page, target=target
+        )
+
+    result = _run_page_command(session, action, output_format)
+    if output_format == "json":
+        print_json(result)
+        return
+    console.print(f"[bold]Screenshot:[/bold] {result['path']}", soft_wrap=True)
+
+
+@browser_app.command("view")
+def view_command(
+    path: Annotated[Path | None, typer.Argument(help="Output viewport PNG path.")] = None,
+    session: SessionOption = "default",
+    format: FormatOption = "human",
+) -> None:
+    """Save a viewport image and report its CSS coordinate metadata for vision."""
+    output_format = parse_output_format(format)
+    target = path or Path(f"webskrap-view-{uuid4().hex}.png")
+
+    async def action(page: SessionPage) -> dict[str, str | int | float]:
+        captured = await browser_session.view(page)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(captured.image)
+        return {**captured.metadata(), "path": str(target.resolve())}
+
+    result = _run_page_command(session, action, output_format)
+    if output_format == "json":
+        print_json(result)
+        return
+    console.print(f"[bold]View:[/bold] {result['path']}")
+    typer.echo(f"{result['width']}x{result['height']}; viewport CSS pixels; origin (0, 0)")
+
+
+@browser_app.command("mouse")
+def mouse_command(
+    action: Annotated[str, typer.Argument(help="click, dblclick, move, scroll, or drag.")],
+    x: Annotated[float, typer.Argument(help="Viewport CSS x from the original view.")],
+    y: Annotated[float, typer.Argument(help="Viewport CSS y from the original view.")],
+    session: SessionOption = "default",
+    end_x: Annotated[float | None, typer.Option("--end-x", help="Drag destination x.")] = None,
+    end_y: Annotated[float | None, typer.Option("--end-y", help="Drag destination y.")] = None,
+    delta_x: Annotated[float, typer.Option("--delta-x", help="Horizontal scroll delta.")] = 0,
+    delta_y: Annotated[
+        float, typer.Option("--delta-y", help="Vertical scroll delta (down positive).")
+    ] = 0,
+    button: Annotated[str, typer.Option("--button", help="left, middle, or right.")] = "left",
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    format: FormatOption = "human",
+) -> None:
+    """Use mouse coordinates from a fresh view; reobserve after page changes."""
+    output_format = parse_output_format(format)
+    try:
+        browser_session.validate_mouse(
+            action,
+            x,
+            y,
+            end_x=end_x,
+            end_y=end_y,
+            delta_x=delta_x,
+            delta_y=delta_y,
+            button=button,
+        )
+    except WebSkrapError as exc:
+        fail(exc, output_format)
+    result = _run_page_command(
+        session,
+        lambda page: browser_session.mouse_action(
+            page,
+            action,
+            x,
+            y,
+            end_x=end_x,
+            end_y=end_y,
+            delta_x=delta_x,
+            delta_y=delta_y,
+            button=button,
+        ),
+        output_format,
+        timeout_ms=timeout_ms,
+    )
+    _emit_state(result, output_format)
+
+
+@browser_app.command("insert-text")
+def insert_text_command(
+    text: Annotated[str, typer.Argument(help="Literal text for the focused control.")],
+    session: SessionOption = "default",
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    format: FormatOption = "human",
+) -> None:
+    """Insert literal text after focusing a control; use press for keys."""
+    output_format = parse_output_format(format)
+    _emit_state(
+        _run_page_command(
+            session,
+            lambda page: browser_session.insert_text(page, text),
+            output_format,
+            timeout_ms=timeout_ms,
+        ),
+        output_format,
+    )
+
+
+@browser_app.command("eval")
+def eval_command(
+    expression: Annotated[str, typer.Argument(help="JavaScript expression or function.")],
+    session: SessionOption = "default",
+    timeout_ms: ActionTimeoutOption = DEFAULT_ACTION_TIMEOUT_MS,
+    max_chars: Annotated[
+        int, typer.Option("--max-chars", min=0, help="Maximum encoded result characters.")
+    ] = 20_000,
+    format: FormatOption = "human",
+) -> None:
+    """Evaluate JavaScript on the current page and print the JSON result."""
+    output_format = parse_output_format(format)
+
+    async def action(page: SessionPage) -> Any:
+        return await browser_session.evaluate(page, expression)
+
+    payload = browser_session.shape_eval_result(
+        _run_page_command(session, action, output_format, timeout_ms=timeout_ms), max_chars
+    )
+    if output_format == "json":
+        print_json(payload)
+        return
+    if payload["result_truncated"]:
+        typer.echo(payload["result_json"])
+        stderr_console.print(
+            f"[yellow]truncated:[/yellow] {payload['result_length']} encoded characters"
+        )
+        return
+    typer.echo(json.dumps(payload["result"], ensure_ascii=False))

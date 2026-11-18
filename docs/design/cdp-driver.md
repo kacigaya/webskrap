@@ -99,9 +99,25 @@ are done:
    with a 2.x to 3.0 migration guide.
 6. Parity runs, review, pull request, release.
 
+## Package layout
+
+| Package | Responsibility |
+| --- | --- |
+| `driver/` | CDP connection, transports, page setup, DOM actions, and snapshots |
+| `browser/` | Browser discovery, process lifecycle, persistent sessions, and navigation |
+| `scraping/` | Python client, fetch sessions, search, and result models |
+| `challenges/` | Challenge detection and opt-in handling |
+| `config/` | Session configuration, profiles, and value parsing |
+| `interfaces/` | CLI commands and MCP tools |
+| `security/` | URL policy and path confinement |
+
+Use these packages for internal imports. Existing imports such as
+`webskrap.client`, `webskrap.models`, and `webskrap.cdp` still work. Tests mirror
+the package layout. Tests that call third-party sites live in `tests/live/`.
+
 ## Design
 
-`src/webskrap/cdp.py` is the core:
+`src/webskrap/driver/cdp.py` is the core:
 
 - **Transport.** On Linux and macOS, Chromium starts with
   `--remote-debugging-pipe`. It reads
@@ -125,8 +141,8 @@ are done:
   `--disable-blink-features=AutomationControlled`, because no driver patch
   hides `navigator.webdriver`.
 
-`src/webskrap/client.py` builds `WebSkrapClient` and `WebSkrapSession` on the
-core. `src/webskrap/cdp_setup.py` prepares every page before it navigates:
+`src/webskrap/scraping/client.py` owns `WebSkrapClient`.
+`src/webskrap/scraping/session.py` owns `WebSkrapSession`. `src/webskrap/driver/cdp_setup.py` prepares every page before it navigates:
 
 - `Emulation` and `Network.setExtraHTTPHeaders`: the profile, as
   `SessionConfig.profile_mode` asks. Nothing is overridden by default.

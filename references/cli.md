@@ -1,7 +1,7 @@
 # CLI
 
 Read this reference when changing or using `webskrap` commands. Treat
-`src/webskrap/cli.py` and `src/webskrap/browser_cli.py` as the source of truth
+`src/webskrap/interfaces/cli.py` and `src/webskrap/interfaces/browser_cli.py` as the source of truth
 for arguments and help text.
 
 ## One-shot commands
