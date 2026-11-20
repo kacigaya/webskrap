@@ -24,6 +24,10 @@ history, so they summarize each release rather than list every change.
 
 ### Changed
 
+- Removed flat internal import modules such as `webskrap.client`,
+  `webskrap.models` and `webskrap.cdp`. Import public symbols from `webskrap`;
+  CLI commands and MCP tool names are unchanged. The long MCP guide moved to
+  `src/webskrap/interfaces/guide.md`.
 - A 403, 429 or 503 page that carries a reCAPTCHA v2 or hCaptcha checkbox is
   now detected as a challenge, so fetch raises `blocked` and browser sessions
   report it, instead of returning the page as an ordinary HTTP error.

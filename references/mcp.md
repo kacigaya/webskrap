@@ -72,7 +72,7 @@ annotations. Mark interactions as destructive because clicks and key presses
 can submit forms on external sites.
 
 Keep short operational instructions in the MCP server and long guidance in
-`src/webskrap/guide.md`.
+`src/webskrap/interfaces/guide.md`.
 
 `stealth_fetch.user_data_dir` is relative to the MCP profile root, which
 defaults to `~/.webskrap/profiles` and can be moved with

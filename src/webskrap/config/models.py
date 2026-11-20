@@ -17,13 +17,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from webskrap.config.profile import BrowserProfile as BrowserProfile
-from webskrap.config.profile import ProxyConfig as ProxyConfig
-from webskrap.config.profile import Viewport as Viewport
-from webskrap.config.profile import native_profile_env as native_profile_env
-from webskrap.config.search import SearchEngine as SearchEngine
+from webskrap.config.profile import BrowserProfile, ProxyConfig, Viewport, native_profile_env
 from webskrap.config.user_agent import _user_agent_platform
-from webskrap.config.user_agent import user_agent_metadata as user_agent_metadata
 
 #: Chromium's WebRTC ICE candidate policy; see
 #: :attr:`SessionConfig.webrtc_ip_handling_policy`.
@@ -39,7 +34,7 @@ WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 #: on purpose: it describes the start of a navigation, so there is nothing left
 #: to wait for once the page exists.
 LoadState = Literal["domcontentloaded", "load", "networkidle"]
-#: Element state :func:`~webskrap.browser_session.wait_for` can wait on.
+#: Element state :func:`~webskrap.browser.actions.wait_for` can wait on.
 ElementState = Literal["attached", "detached", "visible", "hidden"]
 #: How much of a BrowserProfile pages see; see :attr:`SessionConfig.profile_mode`.
 ProfileMode = Literal["native", "locale", "full"]

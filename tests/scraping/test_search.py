@@ -13,9 +13,10 @@ from urllib.parse import quote
 
 import pytest
 
+from webskrap.config.search import SearchEngine
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import SearchEngine, SearchHit
-from webskrap.search import _bing_unwrap, _ddg_unwrap, parse_results, search_url
+from webskrap.scraping.results import SearchHit
+from webskrap.scraping.search import _bing_unwrap, _ddg_unwrap, parse_results, search_url
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "search"
 

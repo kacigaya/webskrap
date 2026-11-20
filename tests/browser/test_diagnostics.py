@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from webskrap import browser_session, diagnostics
-from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
+from webskrap.browser import browser_session, diagnostics
+from webskrap.security.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 
 
 def _stub_probe(monkeypatch: Any, **overrides: Any) -> None:

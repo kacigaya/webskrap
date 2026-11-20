@@ -12,7 +12,8 @@ import re
 import tomllib
 from pathlib import Path
 
-from webskrap import errors, mcp_server
+from webskrap import errors
+from webskrap.interfaces import mcp_server
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = ROOT / ".agents" / "skills" / "webskrap"

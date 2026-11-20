@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.urls import (
+from webskrap.security.urls import (
     PRIVATE_NET_ENV,
     private_net_allowed,
     reject_private_network,
@@ -159,7 +159,7 @@ def test_private_network_resolves_decoded_public_hostname(monkeypatch: pytest.Mo
         hosts.append(hostname)
         return False
 
-    monkeypatch.setattr("webskrap.urls._resolve_blocked", resolve)
+    monkeypatch.setattr("webskrap.security.urls._resolve_blocked", resolve)
     url = "https://%65xample.com/path%20name"
     assert asyncio.run(validate_mcp_url(url)) == url
     assert hosts == ["example.com"]

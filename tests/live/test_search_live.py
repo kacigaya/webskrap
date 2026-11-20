@@ -1,6 +1,6 @@
 """Live search against the real engines.
 
-The extractors in ``webskrap.search`` are written against saved fixtures and
+The extractors in ``webskrap.scraping.search`` are written against saved fixtures and
 rot when an engine changes its markup. The unit tests cannot catch that, so
 this one loads real results pages. It is opt-in:
 

@@ -1,6 +1,6 @@
 """Live cookie-consent test against real consent management platforms.
 
-The CMP selectors in ``webskrap.consent`` are hardcoded and rot when platforms
+The CMP selectors in ``webskrap.browser.consent`` are hardcoded and rot when platforms
 rename their buttons. The unit tests use local fixtures and cannot catch that,
 so this one hits real sites. It is opt-in:
 

@@ -155,7 +155,7 @@ def fingerprint_warnings(fingerprint: object) -> list[str]:
 async def diagnose() -> dict[str, Any]:
     """Return the full readiness report.
 
-    Launches one headless Chromium through :func:`~webskrap.client.browser_doctor`
+    Launches one headless Chromium through :func:`~webskrap.browser.probe.browser_doctor`
     and adds the surrounding facts. ``ok`` reflects the launch alone, so a
     report can be ``ok`` while listing sessions that are not running.
     """

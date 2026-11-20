@@ -80,8 +80,8 @@ sessions for unrelated callers.
 
 ## Pages you drive yourself
 
-`session.new_page()` returns a `webskrap.cdp.CDPPage` with the session's
-profile and policies applied. Close it with `session.close_page(page)`.
+`session.new_page()` returns a CDP page with the session's profile and policies
+applied. Close it with `session.close_page(page)`.
 
 ```python
 async with WebSkrapClient() as client:

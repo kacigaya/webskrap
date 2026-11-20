@@ -10,9 +10,11 @@ from uuid import uuid4
 
 from anyio import CancelScope
 
-from webskrap.config.models import BrowserProfile, SessionConfig
+from webskrap.config.models import SessionConfig
+from webskrap.config.profile import BrowserProfile
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.scraping.client import WebSkrapClient, WebSkrapSession
+from webskrap.scraping.client import WebSkrapClient
+from webskrap.scraping.session import WebSkrapSession
 
 MAX_FETCH_CONCURRENCY = 8
 MAX_FETCH_SESSIONS = 8

@@ -11,18 +11,19 @@ from typing import Any
 import pytest
 
 from webskrap.browser import executable
-from webskrap.cdp import (
+from webskrap.browser.executable import find_executable
+from webskrap.config.models import SessionConfig
+from webskrap.config.profile import ProxyConfig
+from webskrap.config.profiles import get_profile
+from webskrap.driver.cdp import (
     _EVALUATE_SCRIPT,
     CDPConnection,
     CDPError,
     CDPPage,
     EventRecorder,
-    PipeTransport,
-    find_executable,
 )
+from webskrap.driver.transport import PipeTransport
 from webskrap.errors import ErrorCode, WebSkrapError, is_launch_failure
-from webskrap.models import ProxyConfig, SessionConfig
-from webskrap.profiles import get_profile
 
 
 class _Writer:
@@ -291,7 +292,7 @@ async def test_a_failing_event_handler_does_not_stop_replies() -> None:
 
 
 def test_the_core_imports_without_fcntl() -> None:
-    import webskrap.cdp as cdp_module
+    import webskrap.driver.cdp as cdp_module
 
     # fcntl does not exist on Windows; importing the CLI must still work there.
     assert "fcntl" not in vars(cdp_module)
@@ -300,7 +301,7 @@ def test_the_core_imports_without_fcntl() -> None:
 def test_find_executable_prefers_chrome_for_testing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from webskrap.install import _COMPLETE_MARKER, executable_in, platform_key
+    from webskrap.browser.install import _COMPLETE_MARKER, executable_in, platform_key
 
     key = platform_key()
     for version in ("150.0.1.2", "156.0.8078.47"):

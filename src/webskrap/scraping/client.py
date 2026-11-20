@@ -1,7 +1,7 @@
 """Async scraping client: Chromium sessions, fetches, searches and clicks.
 
 :class:`WebSkrapClient` hands out :class:`WebSkrapSession` objects; a session
-owns one Chromium driven over WebSkrap's own CDP client (:mod:`webskrap.cdp`)
+owns one Chromium driven over WebSkrap's own CDP client (:mod:`webskrap.driver.cdp`)
 and the pages opened in it. Both are async context managers, and both raise
 :class:`WebSkrapError` for every failure, with an :class:`ErrorCode` that
 says what to do next.
@@ -12,37 +12,24 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Iterable, Mapping
-from contextlib import suppress
+from collections.abc import AsyncIterator, Iterable, Mapping
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import TypeVar
 from uuid import uuid4
 
 from anyio import CancelScope
 
-from webskrap.browser.channels import _fallback_channels as _fallback_channels
-from webskrap.browser.channels import _resolution_locks as _resolution_locks
-from webskrap.browser.channels import _resolved_channels as _resolved_channels
-from webskrap.browser.channels import with_channel_fallback as with_channel_fallback
 from webskrap.browser.display import VirtualDisplay
 from webskrap.browser.executable import find_executable
-from webskrap.browser.gpu import DRM_CLASS_DIR as DRM_CLASS_DIR
-from webskrap.browser.gpu import HARDWARE_GPU_VENDORS as HARDWARE_GPU_VENDORS
-from webskrap.browser.gpu import NVIDIA_DEVICE as NVIDIA_DEVICE
-from webskrap.browser.gpu import VULKAN_ICD_DIRS as VULKAN_ICD_DIRS
-from webskrap.browser.gpu import effective_gpu as effective_gpu
-from webskrap.browser.gpu import hardware_gpu_available as hardware_gpu_available
-from webskrap.browser.gpu import lavapipe_available as lavapipe_available
-from webskrap.browser.gpu import require_lavapipe as require_lavapipe
-from webskrap.browser.probe import browser_doctor as browser_doctor
-from webskrap.config.models import (
-    BrowserProfile,
-    GpuBackend,
-    SearchEngine,
-    SessionConfig,
-    WaitUntil,
+from webskrap.browser.gpu import (
+    effective_gpu,
+    require_lavapipe,
 )
+from webskrap.config.models import GpuBackend, SessionConfig, WaitUntil
+from webskrap.config.profile import BrowserProfile
 from webskrap.config.profiles import get_profile
+from webskrap.config.search import SearchEngine
 from webskrap.driver import cdp_setup
 from webskrap.driver.launch import launch
 from webskrap.errors import (
@@ -50,9 +37,7 @@ from webskrap.errors import (
     WebSkrapError,
 )
 from webskrap.scraping.results import FetchResult, SearchResult
-from webskrap.scraping.session import _EXTRACT_SCRIPT as _EXTRACT_SCRIPT
-from webskrap.scraping.session import LINKS_SCRIPT as LINKS_SCRIPT
-from webskrap.scraping.session import WebSkrapSession as WebSkrapSession
+from webskrap.scraping.session import WebSkrapSession
 from webskrap.security.urls import validate_url
 
 logger = logging.getLogger("webskrap.client")
@@ -72,7 +57,7 @@ class WebSkrapClient:
             bundled ones.
 
     Attributes:
-        default_config: The fallback :class:`~webskrap.models.SessionConfig`.
+        default_config: The fallback :class:`~webskrap.config.models.SessionConfig`.
         profiles: Caller-supplied profiles by name.
     """
 
@@ -143,6 +128,22 @@ class WebSkrapClient:
         if error := next((result for result in results if isinstance(result, BaseException)), None):
             raise error
 
+    @asynccontextmanager
+    async def _temporary_session(
+        self,
+        kind: str,
+        *,
+        config: SessionConfig | None,
+        profile: str | BrowserProfile | None,
+    ) -> AsyncIterator[WebSkrapSession]:
+        name = f"_{kind}_{uuid4().hex}"
+        try:
+            yield await self.session(name, config=config, profile=profile)
+        finally:
+            # A cancelled waiter can leave its shielded browser launch running.
+            with CancelScope(shield=True):
+                await self.close_session(name)
+
     async def fetch(
         self,
         url: str,
@@ -169,7 +170,7 @@ class WebSkrapClient:
 
         Args:
             url: The URL to load.
-            profile: Profile name, :class:`~webskrap.models.BrowserProfile`, or
+            profile: Profile name, :class:`~webskrap.config.profile.BrowserProfile`, or
                 None for the default.
             config: Session config; defaults to ``default_config``.
             wait_until: Load state to wait for.
@@ -191,14 +192,12 @@ class WebSkrapClient:
                 :meth:`WebSkrapSession.fetch`.
 
         Returns:
-            A :class:`~webskrap.models.FetchResult`.
+            A :class:`~webskrap.scraping.results.FetchResult`.
 
         Raises:
             WebSkrapError: If the client is closing or the browser cannot start.
         """
-        name = f"_single_{uuid4().hex}"
-        try:
-            session = await self.session(name, config=config, profile=profile)
+        async with self._temporary_session("single", config=config, profile=profile) as session:
             return await session.fetch(
                 url,
                 wait_until=wait_until,
@@ -214,10 +213,6 @@ class WebSkrapClient:
                 solve_perimeterx=solve_perimeterx,
                 solve_recaptcha=solve_recaptcha,
             )
-        finally:
-            # A cancelled waiter can leave its shielded browser launch running.
-            with CancelScope(shield=True):
-                await self.close_session(name)
 
     async def fetch_many(
         self,
@@ -271,9 +266,7 @@ class WebSkrapClient:
         targets = [validate_url(url) for url in urls]
         if not targets:
             return []
-        name = f"_batch_{uuid4().hex}"
-        try:
-            session = await self.session(name, config=config, profile=profile)
+        async with self._temporary_session("batch", config=config, profile=profile) as session:
             results = []
             for url in targets:
                 results.append(
@@ -290,10 +283,6 @@ class WebSkrapClient:
                     )
                 )
             return results
-        finally:
-            # A cancelled waiter can leave its shielded browser launch running.
-            with CancelScope(shield=True):
-                await self.close_session(name)
 
     async def search(
         self,
@@ -311,27 +300,22 @@ class WebSkrapClient:
             query: Words to search for.
             engine: Which engine's results page to load.
             max_results: How many hits to keep.
-            profile: Profile name, :class:`~webskrap.models.BrowserProfile`, or
+            profile: Profile name, :class:`~webskrap.config.profile.BrowserProfile`, or
                 None for the default.
             config: Session config; defaults to ``default_config``.
             timeout_ms: Navigation timeout override.
 
         Returns:
-            A :class:`~webskrap.models.SearchResult`.
+            A :class:`~webskrap.scraping.results.SearchResult`.
 
         Raises:
             WebSkrapError: If the client is closing, the browser cannot start,
                 the query is blank, or the engine served a bot challenge.
         """
-        name = f"_single_{uuid4().hex}"
-        try:
-            session = await self.session(name, config=config, profile=profile)
+        async with self._temporary_session("single", config=config, profile=profile) as session:
             return await session.search(
                 query, engine=engine, max_results=max_results, timeout_ms=timeout_ms
             )
-        finally:
-            with CancelScope(shield=True):
-                await self.close_session(name)
 
     async def session(
         self,
@@ -350,7 +334,7 @@ class WebSkrapClient:
         Args:
             name: Session name, unique within this client.
             config: Session config; defaults to ``default_config``.
-            profile: Profile name, :class:`~webskrap.models.BrowserProfile`, or
+            profile: Profile name, :class:`~webskrap.config.profile.BrowserProfile`, or
                 None for the default.
 
         Returns:

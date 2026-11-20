@@ -12,11 +12,12 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from conftest import browser_modes, tls_context
 
-from webskrap import SessionConfig, WebSkrapClient, challenges, turnstile
-from webskrap.cdp import CDPPage
-from webskrap.cdp_dom import Frame
+from webskrap import SessionConfig, WebSkrapClient, challenges
+from webskrap.challenges import turnstile
+from webskrap.challenges.turnstile import Checkbox, find_checkbox, locate, square
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.cdp_dom import Frame
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.turnstile import Checkbox, find_checkbox, locate, square
 
 CHALLENGE = {"provider": "Cloudflare", "kind": "challenge", "reloads": False}
 BOX = {"x": 49.0, "y": 94.5, "width": 24.0, "height": 24.0}

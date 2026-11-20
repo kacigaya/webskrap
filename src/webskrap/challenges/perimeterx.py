@@ -10,7 +10,7 @@ the page reaches it without running anything in the page. The button is the
 skipped. The button is measured again right before every hold.
 
 The gesture is the one that passed in live runs: the cursor follows the Bezier
-path of :func:`webskrap.cdp_dom.travel` to the button, presses, and holds with
+path of :func:`webskrap.driver.cdp_dom.travel` to the button, presses, and holds with
 a small hand tremor until the button's progress fill spans it, then lets go
 after a short beat. A hold lasts at most :data:`MAX_HOLD_S`. A hold that does
 not clear the page is repeated after :data:`HOLD_INTERVAL_S`, at most

@@ -18,18 +18,18 @@ from typing import Any
 import pytest
 from http_fixtures import CDPHandler
 
-from webskrap import browser_session
-from webskrap.cdp import _WEBSOCKET_GUID, WebSocketTransport, _mask
-from webskrap.cdp_session import (
+from webskrap.browser import actions, browser_session
+from webskrap.driver.keyboard import key_events
+from webskrap.driver.polling import poll
+from webskrap.driver.targets import (
     PAGE_ORDER_FILE,
     TAB_SELECTION_FILE,
     _ordered_pages,
     _select,
     current_page,
     devtools_path,
-    key_events,
-    poll,
 )
+from webskrap.driver.transport import _WEBSOCKET_GUID, WebSocketTransport, _mask
 from webskrap.errors import ErrorCode, WebSkrapError
 
 
@@ -367,28 +367,20 @@ def test_cdp_session_drives_pages_across_reconnects(
 
         # Each run is a fresh attach, as each CLI command is a new process.
         results["goto"] = await run(
-            lambda page: browser_session.goto(page, f"{session_server}/session", "load")
+            lambda page: actions.goto(page, f"{session_server}/session", "load")
         )
-        await run(lambda page: browser_session.goto(page, f"{session_server}/session-2", "load"))
-        results["back"] = await run(lambda page: browser_session.history(page, "go_back"))
-        await run(lambda page: browser_session.evaluate(page, "location.hash = 'part'"))
+        await run(lambda page: actions.goto(page, f"{session_server}/session-2", "load"))
+        results["back"] = await run(lambda page: actions.history(page, "go_back"))
+        await run(lambda page: actions.evaluate(page, "location.hash = 'part'"))
         # A same-document step fires no load event; it must still finish fast.
         started = asyncio.get_running_loop().time()
-        await run(lambda page: browser_session.history(page, "go_back"))
+        await run(lambda page: actions.history(page, "go_back"))
         results["hash_back_s"] = asyncio.get_running_loop().time() - started
-        results["hash_forward"] = await run(
-            lambda page: browser_session.history(page, "go_forward")
-        )
-        results["main_world"] = await run(
-            lambda page: browser_session.evaluate(page, "window.appValue")
-        )
-        results["function"] = await run(
-            lambda page: browser_session.evaluate(page, "() => document.title")
-        )
+        results["hash_forward"] = await run(lambda page: actions.history(page, "go_forward"))
+        results["main_world"] = await run(lambda page: actions.evaluate(page, "window.appValue"))
+        results["function"] = await run(lambda page: actions.evaluate(page, "() => document.title"))
         results["serialized"] = [
-            await run(
-                lambda page, expression=expression: browser_session.evaluate(page, expression)
-            )
+            await run(lambda page, expression=expression: actions.evaluate(page, expression))
             for expression in (
                 "window",
                 "document.body",
@@ -397,41 +389,31 @@ def test_cdp_session_drives_pages_across_reconnects(
                 "async () => ({ when: new Date(0), nothing: undefined })",
             )
         ]
-        results["text"] = await run(
-            lambda page: browser_session.read_text(page, max_chars=5, offset=6)
-        )
+        results["text"] = await run(lambda page: actions.read_text(page, max_chars=5, offset=6))
         results["wait"] = await run(
-            lambda page: browser_session.wait_for(page, selector="#late", timeout_ms=5_000)
+            lambda page: actions.wait_for(page, selector="#late", timeout_ms=5_000)
         )
-        await run(
-            lambda page: browser_session.evaluate(page, "document.getElementById('q').focus()")
-        )
-        await run(lambda page: browser_session.press(page, "Shift+h"))
-        await run(lambda page: browser_session.insert_text(page, "i!"))
+        await run(lambda page: actions.evaluate(page, "document.getElementById('q').focus()"))
+        await run(lambda page: actions.press(page, "Shift+h"))
+        await run(lambda page: actions.insert_text(page, "i!"))
         results["typed"] = await run(
-            lambda page: browser_session.evaluate(page, "document.getElementById('q').value")
+            lambda page: actions.evaluate(page, "document.getElementById('q').value")
         )
-        view = await run(browser_session.view)
+        view = await run(actions.view)
         results["view"] = (view.width, view.height, view.image[:8])
         box = await run(
-            lambda page: browser_session.evaluate(
+            lambda page: actions.evaluate(
                 page, "(() => { const r = b.getBoundingClientRect(); return [r.x, r.y]; })()"
             )
         )
-        await run(
-            lambda page: browser_session.mouse_action(page, "click", box[0] + 20, box[1] + 20)
-        )
+        await run(lambda page: actions.mouse_action(page, "click", box[0] + 20, box[1] + 20))
         results["clicked"] = await run(
-            lambda page: browser_session.evaluate(
-                page, "document.getElementById('out').textContent"
-            )
+            lambda page: actions.evaluate(page, "document.getElementById('out').textContent")
         )
         results["waits"] = [
             (
                 await run(
-                    lambda page, kwargs=kwargs: browser_session.wait_for(
-                        page, timeout_ms=5_000, **kwargs
-                    )
+                    lambda page, kwargs=kwargs: actions.wait_for(page, timeout_ms=5_000, **kwargs)
                 )
             )["matched"]
             for kwargs in (
@@ -442,10 +424,10 @@ def test_cdp_session_drives_pages_across_reconnects(
             )
         ]
         with pytest.raises(WebSkrapError) as timed_out:
-            await run(lambda page: browser_session.wait_for(page, text="absent", timeout_ms=300))
+            await run(lambda page: actions.wait_for(page, text="absent", timeout_ms=300))
         results["timed_out"] = timed_out.value.code
         await run(
-            lambda page: browser_session.evaluate(
+            lambda page: actions.evaluate(
                 page,
                 "window.__mouse = []; for (const t of ['dblclick', 'mousedown', 'mouseup', "
                 "'dragstart', 'drop', 'wheel']) "
@@ -459,48 +441,40 @@ def test_cdp_session_drives_pages_across_reconnects(
             ("scroll", {"delta_y": 120.0}),
         ):
             await run(
-                lambda page, action=action, extra=extra: browser_session.mouse_action(
+                lambda page, action=action, extra=extra: actions.mouse_action(
                     page, action, 30, 30, **extra
                 )
             )
         # Wheel events reach the page asynchronously, after the input call returns.
         for _ in range(20):
-            results["mouse"] = await run(
-                lambda page: browser_session.evaluate(page, "window.__mouse")
-            )
+            results["mouse"] = await run(lambda page: actions.evaluate(page, "window.__mouse"))
             if "wheel:0" in results["mouse"]:
                 break
             await asyncio.sleep(0.1)
         shot = tmp_path / "full.png"
-        await run(lambda page: browser_session.screenshot(page, shot, full_page=True))
+        await run(lambda page: actions.screenshot(page, shot, full_page=True))
         results["shot"] = shot.read_bytes()[:8]
         # A popup becomes the current page for the next command, as with
         # Playwright's pages[-1]; the opener stays reachable once it closes.
-        await run(lambda page: browser_session.evaluate(page, "window.open('/session-2')"))
-        results["popup"] = await run(browser_session.page_state)
-        await run(lambda page: browser_session.evaluate(page, "window.close()"))
-        results["after_popup"] = await run(browser_session.page_state)
+        await run(lambda page: actions.evaluate(page, "window.open('/session-2')"))
+        results["popup"] = await run(actions.page_state)
+        await run(lambda page: actions.evaluate(page, "window.close()"))
+        results["after_popup"] = await run(actions.page_state)
         # eval carries a user gesture, as in Playwright, so a popup opens
         # without a click first; one gesture allows one popup.
-        await run(lambda page: browser_session.goto(page, f"{session_server}/session", "load"))
-        await run(lambda page: browser_session.evaluate(page, "window.open('/session-2?gesture')"))
-        results["gesture_popup"] = await run(browser_session.page_state)
-        await run(lambda page: browser_session.evaluate(page, "window.close()"))
+        await run(lambda page: actions.goto(page, f"{session_server}/session", "load"))
+        await run(lambda page: actions.evaluate(page, "window.open('/session-2?gesture')"))
+        results["gesture_popup"] = await run(actions.page_state)
+        await run(lambda page: actions.evaluate(page, "window.close()"))
         with pytest.raises(WebSkrapError) as mismatch:
             await browser_session.open_session(name, proxy_server="http://127.0.0.1:9")
         results["mismatch"] = mismatch.value.code
         results["reused"] = await browser_session.open_session(name)
-        await run(
-            lambda page: browser_session.goto(page, f"{session_server}/console-probe", "load")
-        )
+        await run(lambda page: actions.goto(page, f"{session_server}/console-probe", "load"))
         results["probe"] = await run(
-            lambda page: browser_session.wait_for(
-                page, selector="#out:not(:empty)", timeout_ms=5_000
-            )
+            lambda page: actions.wait_for(page, selector="#out:not(:empty)", timeout_ms=5_000)
         )
-        results["probe_text"] = await run(
-            lambda page: browser_session.read_text(page, max_chars=200)
-        )
+        results["probe_text"] = await run(lambda page: actions.read_text(page, max_chars=200))
         return results
 
     try:
@@ -577,27 +551,21 @@ def test_cdp_session_snapshot_refs_drive_elements(
             return await browser_session.run_page_action(name, action, timeout_ms=20_000)
 
         async def act(action: str, target: str, *values: str) -> None:
-            await run(
-                lambda page: browser_session.element_action(page, action, target, list(values))
-            )
+            await run(lambda page: actions.element_action(page, action, target, list(values)))
 
         async def value(script: str) -> Any:
-            return await run(lambda page: browser_session.evaluate(page, script))
+            return await run(lambda page: actions.evaluate(page, script))
 
-        await run(lambda page: browser_session.goto(page, f"{session_server}/form", "load"))
-        tree = (await run(browser_session.snapshot))["snapshot"]
+        await run(lambda page: actions.goto(page, f"{session_server}/form", "load"))
+        tree = (await run(actions.snapshot))["snapshot"]
         results["tree"] = tree
-        results["full"] = (await run(lambda page: browser_session.snapshot(page, depth=0)))[
-            "snapshot"
-        ]
-        results["shallow"] = (await run(lambda page: browser_session.snapshot(page, depth=1)))[
-            "snapshot"
-        ]
+        results["full"] = (await run(lambda page: actions.snapshot(page, depth=0)))["snapshot"]
+        results["shallow"] = (await run(lambda page: actions.snapshot(page, depth=1)))["snapshot"]
         name_ref = _ref(tree, '- textbox "Name"')
         send_ref = _ref(tree, '- button "Send"')
         # Refs resolve on later connections: each run is a fresh attach.
         results["wait_ref"] = await run(
-            lambda page: browser_session.wait_for(page, selector=name_ref, timeout_ms=5_000)
+            lambda page: actions.wait_for(page, selector=name_ref, timeout_ms=5_000)
         )
         await act("fill", name_ref, "Ada")
         results["name"] = await value("document.getElementById('name').value")
@@ -620,7 +588,7 @@ def test_cdp_session_snapshot_refs_drive_elements(
         with pytest.raises(WebSkrapError) as disabled:
             await browser_session.run_page_action(
                 name,
-                lambda page: browser_session.element_action(page, "select", "#locked", ["b"]),
+                lambda page: actions.element_action(page, "select", "#locked", ["b"]),
                 timeout_ms=600,
             )
         results["disabled"] = disabled.value.code
@@ -697,16 +665,12 @@ def test_cdp_session_snapshot_walks_into_iframes(
             return await browser_session.run_page_action(name, action, timeout_ms=20_000)
 
         async def act(action: str, target: str, *values: str) -> None:
-            await run(
-                lambda page: browser_session.element_action(page, action, target, list(values))
-            )
+            await run(lambda page: actions.element_action(page, action, target, list(values)))
 
         async def tree(depth: int | None = None) -> str:
-            return str(
-                (await run(lambda page: browser_session.snapshot(page, depth=depth)))["snapshot"]
-            )
+            return str((await run(lambda page: actions.snapshot(page, depth=depth)))["snapshot"])
 
-        await run(lambda page: browser_session.goto(page, f"{session_server}/frames", "load"))
+        await run(lambda page: actions.goto(page, f"{session_server}/frames", "load"))
         results["tree"] = first = await tree()
         results["shallow"] = await tree(depth=1)
         # 127.0.0.1 and localhost are different sites: the second frame runs
@@ -758,13 +722,13 @@ def test_cdp_session_tabs(persistent_session_env: Path, session_server: str) -> 
         # No command has recorded the tab order yet; the new tab still sorts last.
         results["fresh"] = await tabs("new")
         await tabs("close")
-        await run(lambda page: browser_session.goto(page, f"{session_server}/session", "load"))
+        await run(lambda page: actions.goto(page, f"{session_server}/session", "load"))
         results["new"] = await browser_session.tabs(name, "new", url=f"{session_server}/session-2")
-        results["on_new"] = await run(browser_session.page_state)
+        results["on_new"] = await run(actions.page_state)
         results["selected"] = await tabs("select", index=0)
-        results["on_first"] = await run(browser_session.page_state)
+        results["on_first"] = await run(actions.page_state)
         # A popup becomes current, and closing it returns to the selection.
-        await run(lambda page: browser_session.evaluate(page, "window.open('/session-2?popup')"))
+        await run(lambda page: actions.evaluate(page, "window.open('/session-2?popup')"))
         results["popup"] = await tabs("list")
         results["closed_popup"] = await tabs("close")
         results["closed_second"] = await tabs("close", index=1)
@@ -818,40 +782,40 @@ def test_cdp_session_navigation_reports_and_reads(
             return await browser_session.run_page_action(name, action, timeout_ms=20_000)
 
         results["consent"] = await run(
-            lambda page: browser_session.goto(
+            lambda page: actions.goto(
                 page, f"{session_server}/cmp-banner", "load", decline_cookies=True
             )
         )
         results["plain"] = await run(
-            lambda page: browser_session.goto(page, f"{session_server}/session", "load")
+            lambda page: actions.goto(page, f"{session_server}/session", "load")
         )
         results["blocked"] = await run(
-            lambda page: browser_session.goto(page, f"{session_server}/cf-block", "load")
+            lambda page: actions.goto(page, f"{session_server}/cf-block", "load")
         )
-        await run(lambda page: browser_session.goto(page, f"{session_server}/form", "load"))
+        await run(lambda page: actions.goto(page, f"{session_server}/form", "load"))
         results["grep"] = await run(
-            lambda page: browser_session.search_text(page, "(?i)agree|send", context=1)
+            lambda page: actions.search_text(page, "(?i)agree|send", context=1)
         )
-        results["dpr"] = await run(lambda page: browser_session.evaluate(page, "devicePixelRatio"))
+        results["dpr"] = await run(lambda page: actions.evaluate(page, "devicePixelRatio"))
         results["button"] = await run(
-            lambda page: browser_session.screenshot(
+            lambda page: actions.screenshot(
                 page, tmp_path / "go.png", full_page=False, target="#go"
             )
         )
-        await run(lambda page: browser_session.goto(page, f"{session_server}/frames", "load"))
-        tree = (await run(browser_session.snapshot))["snapshot"]
+        await run(lambda page: actions.goto(page, f"{session_server}/frames", "load"))
+        tree = (await run(actions.snapshot))["snapshot"]
         results["frame"] = await run(
-            lambda page: browser_session.screenshot(
+            lambda page: actions.screenshot(
                 page,
                 tmp_path / "frame.png",
                 full_page=False,
                 target=_ref(tree, '- button "Cross button"'),
             )
         )
-        await run(lambda page: browser_session.goto(page, f"{session_server}/wide-frame", "load"))
-        wide_tree = (await run(browser_session.snapshot))["snapshot"]
+        await run(lambda page: actions.goto(page, f"{session_server}/wide-frame", "load"))
+        wide_tree = (await run(actions.snapshot))["snapshot"]
         results["wide"] = await run(
-            lambda page: browser_session.screenshot(
+            lambda page: actions.screenshot(
                 page,
                 tmp_path / "wide.png",
                 full_page=False,
@@ -860,7 +824,7 @@ def test_cdp_session_navigation_reports_and_reads(
         )
         with pytest.raises(WebSkrapError) as both:
             await run(
-                lambda page: browser_session.screenshot(
+                lambda page: actions.screenshot(
                     page, tmp_path / "x.png", full_page=True, target="h1"
                 )
             )

@@ -23,18 +23,14 @@ from webskrap.browser.browser_session import sandbox_enabled
 from webskrap.browser.channels import with_channel_fallback
 from webskrap.browser.diagnostics import diagnose
 from webskrap.browser.install import install as install_browser
-from webskrap.config.models import (
-    GpuBackend,
-    ResourcePolicy,
-    SearchEngine,
-    SessionConfig,
-)
+from webskrap.config.models import GpuBackend, ResourcePolicy, SessionConfig
 from webskrap.config.parsing import (
     parse_profile_mode,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
 from webskrap.config.profiles import get_profile, list_profiles
+from webskrap.config.search import SearchEngine
 from webskrap.errors import (
     ErrorCode,
     WebSkrapError,

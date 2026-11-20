@@ -10,8 +10,8 @@ import pytest
 from conftest import set_page_content
 
 from webskrap import SessionConfig, WebSkrapClient
-from webskrap.cdp import CDPPage
-from webskrap.consent import REJECT_TEXT_PATTERN, decline_cookies
+from webskrap.browser.consent import REJECT_TEXT_PATTERN, decline_cookies
+from webskrap.driver.cdp import CDPPage
 
 # Each control records its own click in the DOM, where an isolated-world
 # evaluate can read it; input that is not trusted does not count.
@@ -141,7 +141,7 @@ async def test_stops_clicking_once_the_budget_is_spent(
     async with _page(html, sandbox_supported) as page:
         # First call sets the deadline, every later one is far past it.
         calls = iter([0.0])
-        monkeypatch.setattr("webskrap.consent.monotonic", lambda: next(calls, 10_000.0))
+        monkeypatch.setattr("webskrap.browser.consent.monotonic", lambda: next(calls, 10_000.0))
         assert await decline_cookies(page, timeout_ms=0) is None
         assert await _clicked(page) == []
 

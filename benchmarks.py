@@ -46,9 +46,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from statistics import mean
 
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
-from webskrap.browser_session import sandbox_enabled
-from webskrap.fetch_runtime import FetchRuntime
-from webskrap.profiles import get_profile
+from webskrap.browser.browser_session import sandbox_enabled
+from webskrap.config.profiles import get_profile
+from webskrap.scraping.fetch_runtime import FetchRuntime
 
 # Tunables
 

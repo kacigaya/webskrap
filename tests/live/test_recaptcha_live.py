@@ -26,7 +26,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from conftest import browser_modes
 
-from webskrap import SessionConfig, WebSkrapClient, browser_session
+from webskrap import SessionConfig, WebSkrapClient
+from webskrap.browser import actions
 
 pytestmark = [pytest.mark.browser, pytest.mark.live]
 
@@ -134,7 +135,7 @@ async def test_solve_captcha_ticks_a_form_checkbox(
     async with WebSkrapClient(default_config=_config(sandbox_supported, {})) as client:
         page = await (await client.session("form")).new_page()
         await page.goto(url, wait_until="load", timeout_s=60)
-        state = await browser_session.solve_captcha(page)
+        state = await actions.solve_captcha(page)
     provider = "hCaptcha" if widget == "hcaptcha" else "reCAPTCHA"
     assert state["captcha"] == {"provider": provider, "state": "checked"}
     _check_token(widget, widget_server.tokens)

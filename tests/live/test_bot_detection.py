@@ -46,7 +46,7 @@ from live_stealth_helpers import (
 )
 
 from webskrap import SessionConfig, WebSkrapClient
-from webskrap.browser_session import sandbox_enabled
+from webskrap.browser.browser_session import sandbox_enabled
 
 pytestmark = [pytest.mark.browser, pytest.mark.live]
 

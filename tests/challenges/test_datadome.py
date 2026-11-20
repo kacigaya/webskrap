@@ -12,10 +12,11 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from conftest import tls_context
 
-from webskrap import SessionConfig, WebSkrapClient, challenges, datadome
-from webskrap.cdp import CDPPage
-from webskrap.cdp_dom import Frame
-from webskrap.datadome import Slider, box, drag_path, locate
+from webskrap import SessionConfig, WebSkrapClient, challenges
+from webskrap.challenges import datadome
+from webskrap.challenges.datadome import Slider, box, drag_path, locate
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.cdp_dom import Frame
 from webskrap.errors import ErrorCode, WebSkrapError
 
 CAPTCHA = {"provider": "DataDome", "kind": "challenge", "reloads": False}

@@ -4,10 +4,9 @@ import asyncio
 
 import pytest
 
-from webskrap import text_search
-from webskrap.driver.text_search import TextWindow, text_window
+from webskrap.driver import text_search
+from webskrap.driver.text_search import TextWindow, search_lines, text_window, validate_search
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.text_search import search_lines, validate_search
 
 PAGE = """Lamp Slim  499 €
 

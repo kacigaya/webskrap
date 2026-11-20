@@ -7,11 +7,11 @@ import pytest
 from anyio import CancelScope, sleep, sleep_forever
 
 from webskrap import SessionConfig, WebSkrapSession
-from webskrap import fetch_runtime as module
-from webskrap.cdp import CDPBrowser
+from webskrap.config.profiles import get_profile
+from webskrap.driver.launch import CDPBrowser
 from webskrap.errors import WebSkrapError
-from webskrap.fetch_runtime import FetchRuntime
-from webskrap.profiles import get_profile
+from webskrap.scraping import fetch_runtime as module
+from webskrap.scraping.fetch_runtime import FetchRuntime
 
 
 @pytest.fixture

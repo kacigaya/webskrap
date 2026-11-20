@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from webskrap import cdp_setup
-from webskrap.cdp import CDPConnection, CDPError, CDPPage
-from webskrap.profiles import get_profile
+from webskrap.config.profiles import get_profile
+from webskrap.driver import cdp_setup
+from webskrap.driver.cdp import CDPConnection, CDPError, CDPPage
 
 
 async def test_desktop_window_sizing_allows_an_older_browser_without_the_command() -> None:

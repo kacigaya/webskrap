@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from webskrap import browser_session
+from webskrap.browser import actions, browser_session
 from webskrap.errors import (
     EXIT_CODES,
     RECOVERY_HINTS,
@@ -125,7 +125,7 @@ def test_session_name_rejection_is_tagged_at_the_raise_site(name: str, expected:
 
 def test_arity_rejection_is_tagged_at_the_raise_site() -> None:
     with pytest.raises(WebSkrapError) as caught:
-        browser_session.element_arguments("fill", [])
+        actions.element_arguments("fill", [])
 
     assert caught.value.code is ErrorCode.USAGE
 
@@ -206,7 +206,7 @@ def test_error_payload_scrubs_credentials() -> None:
     ],
 )
 def test_rejected_url_error_hides_the_whole_password(url: str) -> None:
-    from webskrap.urls import validate_url
+    from webskrap.security.urls import validate_url
 
     with pytest.raises(WebSkrapError) as caught:
         validate_url(url)

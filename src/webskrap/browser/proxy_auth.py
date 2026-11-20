@@ -1,10 +1,10 @@
 """Answer proxy authentication for a persistent session's browser.
 
 Session actions attach over CDP and disconnect, so nobody would be there
-when the proxy asks for credentials. :func:`webskrap.browser_session.open_session`
+when the proxy asks for credentials. :func:`webskrap.browser.browser_session.open_session`
 starts this module as a detached process instead::
 
-    python -m webskrap.proxy_auth <port> <user-data-dir>
+    python -m webskrap.browser.proxy_auth <port> <user-data-dir>
 
 It reads ``{"username", "password"}`` from stdin, so the credentials never
 reach a command line, an environment or a file. It enables ``Fetch`` on the

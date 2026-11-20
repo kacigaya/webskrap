@@ -15,11 +15,10 @@ from typing import Any
 
 import pytest
 
-from webskrap import browser_session, display
+from webskrap.browser import actions, browser_session, display
 from webskrap.browser import process as browser_process
-from webskrap.client import WebSkrapError
-from webskrap.errors import ErrorCode
-from webskrap.models import GpuBackend
+from webskrap.config.models import GpuBackend
+from webskrap.errors import ErrorCode, WebSkrapError
 
 posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits")
 
@@ -443,7 +442,7 @@ def test_cancelled_lock_wait_releases_after_acquiring(
 )
 def test_wait_condition_requires_exactly_one(kwargs: dict[str, str]) -> None:
     with pytest.raises(WebSkrapError, match="exactly one of") as caught:
-        browser_session.wait_condition(
+        actions.wait_condition(
             kwargs.get("text"),
             kwargs.get("text_gone"),
             kwargs.get("selector"),
@@ -464,7 +463,7 @@ def test_wait_condition_requires_exactly_one(kwargs: dict[str, str]) -> None:
 )
 def test_wait_condition_names_the_single_condition(kwargs: dict[str, str], expected: str) -> None:
     assert (
-        browser_session.wait_condition(
+        actions.wait_condition(
             kwargs.get("text"),
             kwargs.get("text_gone"),
             kwargs.get("selector"),
@@ -477,7 +476,7 @@ def test_wait_condition_names_the_single_condition(kwargs: dict[str, str], expec
 def test_shape_snapshot_pages_through_the_tree() -> None:
     payload = {"url": "https://example.test", "title": "t", "snapshot": "0123456789"}
 
-    first = browser_session.shape_snapshot(payload, 4)
+    first = actions.shape_snapshot(payload, 4)
     assert first["snapshot"] == "0123"
     assert first["snapshot_length"] == 10
     assert first["snapshot_truncated"] is True
@@ -485,14 +484,14 @@ def test_shape_snapshot_pages_through_the_tree() -> None:
     # The page state travels with every window, not just the first.
     assert first["title"] == "t"
 
-    last = browser_session.shape_snapshot(payload, 100, 4)
+    last = actions.shape_snapshot(payload, 100, 4)
     assert last["snapshot"] == "456789"
     assert last["snapshot_truncated"] is False
     assert last["next_snapshot_offset"] is None
 
 
 def test_shape_eval_result_returns_small_values_untouched() -> None:
-    assert browser_session.shape_eval_result({"a": 1}, 100) == {
+    assert actions.shape_eval_result({"a": 1}, 100) == {
         "result": {"a": 1},
         "result_length": 8,
         "result_truncated": False,
@@ -500,7 +499,7 @@ def test_shape_eval_result_returns_small_values_untouched() -> None:
 
 
 def test_shape_eval_result_clips_a_large_value_to_encoded_json() -> None:
-    payload = browser_session.shape_eval_result("x" * 500, 20)
+    payload = actions.shape_eval_result("x" * 500, 20)
 
     assert payload["result"] is None
     assert payload["result_truncated"] is True
@@ -511,11 +510,11 @@ def test_shape_eval_result_clips_a_large_value_to_encoded_json() -> None:
 def test_shape_eval_result_distinguishes_null_from_truncation() -> None:
     # A null result and a clipped one both carry result=None, so only
     # result_truncated tells them apart.
-    assert browser_session.shape_eval_result(None, 100)["result_truncated"] is False
+    assert actions.shape_eval_result(None, 100)["result_truncated"] is False
 
 
 def test_shape_eval_result_encodes_values_json_cannot_represent() -> None:
-    payload = browser_session.shape_eval_result({"n": float("inf")}, 100)
+    payload = actions.shape_eval_result({"n": float("inf")}, 100)
 
     assert payload["result_truncated"] is False
 
@@ -530,7 +529,7 @@ def test_shape_eval_result_encodes_values_json_cannot_represent() -> None:
 )
 def test_goto_rejects_unfetchable_targets(url: str) -> None:
     with pytest.raises(WebSkrapError) as caught:
-        asyncio.run(browser_session.goto(None, url, "load"))  # type: ignore[arg-type]
+        asyncio.run(actions.goto(None, url, "load"))  # type: ignore[arg-type]
 
     assert caught.value.code is ErrorCode.USAGE
 

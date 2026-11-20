@@ -13,7 +13,7 @@ from webskrap.config.models import (
     LoadState,
     WaitUntil,
 )
-from webskrap.driver import cdp_dom, cdp_session, text_search
+from webskrap.driver import cdp_dom, cdp_session, keyboard, text_search
 from webskrap.driver import snapshot as cdp_snapshot
 from webskrap.driver.cdp import CDPPage
 from webskrap.driver.text_search import text_window
@@ -64,7 +64,7 @@ async def element_action(page: CDPPage, action: str, target: str, values: list[s
     ``target`` is a snapshot ref (``e12``) or a CSS selector. Clicks go along a
     human cursor path with a human button hold, refusing a covered element;
     ``type`` clicks into the field and types with human keystroke timing;
-    ``fill`` sets the value at once. See :func:`webskrap.cdp_dom.element_action`.
+    ``fill`` sets the value at once. See :func:`webskrap.driver.cdp_dom.element_action`.
     """
     arguments = element_arguments(action, values)
     await cdp_dom.element_action(page, action, target, arguments)
@@ -75,7 +75,7 @@ async def evaluate(page: CDPPage, expression: str) -> Any:
 
     An ``eval`` caller expects what the page's scripts see, such as
     ``window.app``, so this does not use an isolated world. See
-    :func:`webskrap.cdp_session.evaluate`.
+    :func:`webskrap.driver.cdp_session.evaluate`.
     """
     return await cdp_session.evaluate(page, expression)
 
@@ -240,7 +240,7 @@ async def history(page: CDPPage, method: str) -> dict[str, Any]:
 async def solve_captcha(page: CDPPage) -> dict[str, Any]:
     """Click the reCAPTCHA v2 or hCaptcha checkbox on ``page``; return the state.
 
-    ``captcha`` is :func:`webskrap.recaptcha.solve`'s ``{"provider", "state"}``.
+    ``captcha`` is :func:`webskrap.challenges.recaptcha.solve`'s ``{"provider", "state"}``.
     """
     from webskrap.challenges import recaptcha
 
@@ -250,7 +250,7 @@ async def solve_captcha(page: CDPPage) -> dict[str, Any]:
 
 async def press(page: CDPPage, key: str) -> dict[str, Any]:
     """Press ``key`` (e.g. ``Enter`` or ``Control+a``); return the page state."""
-    await cdp_session.press(page, key)
+    await keyboard.press(page, key)
     return await page_state(page)
 
 

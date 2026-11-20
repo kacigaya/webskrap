@@ -16,10 +16,12 @@ from http_fixtures import BrowserHandler
 from mcp import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
-from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient, browser_session, mcp_server
-from webskrap.client import lavapipe_available
+from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
+from webskrap.browser import actions, browser_session
+from webskrap.browser.gpu import lavapipe_available
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.fetch_runtime import FetchRuntime
+from webskrap.interfaces import mcp_server
+from webskrap.scraping.fetch_runtime import FetchRuntime
 
 pytestmark = pytest.mark.browser
 
@@ -446,7 +448,7 @@ def test_persistent_session_applies_the_webrtc_policy(
     async def exercise() -> list[str]:
         await browser_session.open_session(name, webrtc_ip_handling_policy=policy)
         return await browser_session.run_page_action(
-            name, lambda page: browser_session.evaluate(page, _ICE_CANDIDATE_TYPES)
+            name, lambda page: actions.evaluate(page, _ICE_CANDIDATE_TYPES)
         )
 
     try:
@@ -478,10 +480,10 @@ def test_persistent_actions_produce_human_input_events(persistent_session_env: P
         await browser_session.open_session(name)
 
         async def act(page: Any) -> list[dict[str, Any]]:
-            await browser_session.goto(page, _BEHAVIOR_PAGE, "load")
-            await browser_session.element_action(page, "click", "#go", [])
-            await browser_session.element_action(page, "type", "#q", ["abc"])
-            return await browser_session.evaluate(page, "window.__events")
+            await actions.goto(page, _BEHAVIOR_PAGE, "load")
+            await actions.element_action(page, "click", "#go", [])
+            await actions.element_action(page, "type", "#q", ["abc"])
+            return await actions.evaluate(page, "window.__events")
 
         return await browser_session.run_page_action(name, act, timeout_ms=30_000)
 

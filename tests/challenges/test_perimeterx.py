@@ -10,10 +10,11 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from webskrap import SessionConfig, WebSkrapClient, challenges, perimeterx
-from webskrap.cdp import CDPPage
+from webskrap import SessionConfig, WebSkrapClient, challenges
+from webskrap.challenges import perimeterx
+from webskrap.challenges.perimeterx import Hold, box, find_buttons, measure
+from webskrap.driver.cdp import CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.perimeterx import Hold, box, find_buttons, measure
 
 CHALLENGE = {"provider": "PerimeterX", "kind": "challenge", "reloads": False}
 BUTTON = {"x": 668.0, "y": 375.5, "width": 253.0, "height": 50.0}

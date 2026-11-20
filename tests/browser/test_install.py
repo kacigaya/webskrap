@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from webskrap import install
+from webskrap.browser import install
 from webskrap.errors import ErrorCode, WebSkrapError
 
 

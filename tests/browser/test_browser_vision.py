@@ -16,9 +16,13 @@ from mcp.shared.memory import create_client_server_memory_streams
 from mcp.types import ImageContent
 from typer.testing import CliRunner
 
-from webskrap import browser_session, cli, mcp_server
-from webskrap.cdp import CDPPage, find_executable, launch
+from webskrap.browser import actions, browser_session
+from webskrap.browser.executable import find_executable
+from webskrap.driver import view_types
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.launch import launch
 from webskrap.errors import EXIT_CODES, ErrorCode, WebSkrapError
+from webskrap.interfaces import cli, mcp_server
 
 
 @pytest.mark.parametrize(
@@ -64,7 +68,7 @@ def _fake_page(send: Any = None) -> MagicMock:
 async def test_outside_coordinates_send_no_mouse_input(point) -> None:
     page = _fake_page()
     with pytest.raises(WebSkrapError, match="outside the viewport"):
-        await browser_session.mouse_action(page, "drag", 1, 2, end_x=point[0], end_y=point[1])
+        await actions.mouse_action(page, "drag", 1, 2, end_x=point[0], end_y=point[1])
     page.send.assert_not_called()
 
 
@@ -80,7 +84,7 @@ async def test_coordinate_click_travels_from_the_last_position() -> None:
     }
     page.pointer = (5.0, 5.0)
 
-    await browser_session.mouse_action(page, "click", 50, 40)
+    await actions.mouse_action(page, "click", 50, 40)
 
     events = [args.args[1] for args in page.send.await_args_list if args.args]
     moves = [(event["x"], event["y"]) for event in events if event.get("type") == "mouseMoved"]
@@ -104,7 +108,7 @@ async def test_failed_drag_releases_mouse_button() -> None:
     page = _fake_page(send)
     page.record.return_value = MagicMock(events=[])
     with pytest.raises(RuntimeError, match="disconnected"):
-        await browser_session.mouse_action(page, "drag", 1, 2, end_x=3, end_y=4, button="right")
+        await actions.mouse_action(page, "drag", 1, 2, end_x=3, end_y=4, button="right")
     released = [params for params in sent if params.get("type") == "mouseReleased"]
     assert len(released) == 1 and released[0]["button"] == "right"
 
@@ -160,9 +164,9 @@ async def test_mcp_vision_protocol_and_persistent_interactions(
     monkeypatch.setenv("WEBSKRAP_OUTPUT_DIR", str(output_root))
     await browser_session.open_session(name)
 
-    async def prepare(page) -> browser_session.Viewport:
+    async def prepare(page) -> view_types.Viewport:
         await set_page_content(page, PAGE, block_requests=False)
-        return await browser_session.viewport(page)
+        return await actions.viewport(page)
 
     size = await browser_session.run_page_action(name, prepare)
     width, height = size["width"], size["height"]
@@ -208,7 +212,7 @@ async def test_mcp_vision_protocol_and_persistent_interactions(
                             break
                         await asyncio.sleep(0.1)
                     assert await _input_value(page) == "héllo 世界"
-                    events = await browser_session.evaluate(page, "window.events")
+                    events = await actions.evaluate(page, "window.events")
                     assert all(event["trusted"] for event in events)
                     assert {"click", "dblclick", "input", "wheel"} <= {e["type"] for e in events}
                     assert any(e["type"] == "mousemove" and e["buttons"] == 1 for e in events)
@@ -281,12 +285,12 @@ async def test_view_uses_css_pixels_on_a_high_dpi_page(sandbox_supported) -> Non
             {"width": 320, "height": 240, "deviceScaleFactor": 2, "mobile": False},
         )
         await set_page_content(page, PAGE)
-        captured = await browser_session.view(page)
+        captured = await actions.view(page)
         assert await page.evaluate("devicePixelRatio") == 2
         assert (captured.width, captured.height) == (320, 240)
         assert struct.unpack(">II", captured.image[16:24]) == (320, 240)
-        await browser_session.mouse_action(page, "click", 40, 40)
-        await browser_session.insert_text(page, "css pixels")
+        await actions.mouse_action(page, "click", 40, 40)
+        await actions.insert_text(page, "css pixels")
         assert await _input_value(page) == "css pixels"
     finally:
         await browser.close()

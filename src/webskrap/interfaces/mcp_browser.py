@@ -11,7 +11,7 @@ import re
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
-from webskrap.browser import browser_session
+from webskrap.browser import actions, browser_session
 from webskrap.browser.browser_session import SessionPage
 from webskrap.config.models import GpuBackend
 from webskrap.config.parsing import (
@@ -138,7 +138,7 @@ async def browser_open(
         payload.update(
             await _browser_action(
                 session,
-                lambda page: browser_session.goto(
+                lambda page: actions.goto(
                     page,
                     url,
                     "load",
@@ -219,7 +219,7 @@ async def browser_goto(
         url = await validate_mcp_url(url)
     return await _browser_action(
         session,
-        lambda page: browser_session.goto(
+        lambda page: actions.goto(
             page,
             url,
             parsed_wait_until,
@@ -262,10 +262,10 @@ async def browser_snapshot(
     """
     result = await _browser_action(
         session,
-        lambda page: browser_session.snapshot(page, depth=depth, target=target, boxes=boxes),
-        browser_session.DEFAULT_ACTION_TIMEOUT_MS,
+        lambda page: actions.snapshot(page, depth=depth, target=target, boxes=boxes),
+        actions.DEFAULT_ACTION_TIMEOUT_MS,
     )
-    return browser_session.shape_snapshot(result, max_chars, offset)
+    return actions.shape_snapshot(result, max_chars, offset)
 
 
 async def browser_find(
@@ -301,14 +301,14 @@ async def browser_find(
         tree = await cdp_snapshot.snapshot(page, target=target, pattern=query)
         tree, total = await cdp_snapshot.matching_snapshot(tree, query, max_matches)
         return {
-            **await browser_session.page_state(page),
+            **await actions.page_state(page),
             "snapshot": tree,
             "matches_total": total,
             "matches_truncated": total > max_matches,
         }
 
-    result = await _browser_action(session, find, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
-    return browser_session.shape_snapshot(result, max_chars, offset)
+    result = await _browser_action(session, find, actions.DEFAULT_ACTION_TIMEOUT_MS)
+    return actions.shape_snapshot(result, max_chars, offset)
 
 
 async def browser_text(
@@ -343,15 +343,15 @@ async def browser_text(
             text_search.validate_search(pattern, context=context, max_matches=max_matches)
         return await _browser_action(
             session,
-            lambda page: browser_session.search_text(
+            lambda page: actions.search_text(
                 page, pattern, context=context, max_matches=max_matches
             ),
-            browser_session.DEFAULT_ACTION_TIMEOUT_MS,
+            actions.DEFAULT_ACTION_TIMEOUT_MS,
         )
     return await _browser_action(
         session,
-        lambda page: browser_session.read_text(page, max_chars=max_chars, offset=offset),
-        browser_session.DEFAULT_ACTION_TIMEOUT_MS,
+        lambda page: actions.read_text(page, max_chars=max_chars, offset=offset),
+        actions.DEFAULT_ACTION_TIMEOUT_MS,
     )
 
 
@@ -374,11 +374,11 @@ async def browser_interact(
     """
     resolved_values = values or []
     with _tool_errors():
-        browser_session.element_arguments(action, resolved_values)
+        actions.element_arguments(action, resolved_values)
 
     async def run(page: SessionPage) -> dict[str, Any]:
-        await browser_session.element_action(page, action, target, resolved_values)
-        return await browser_session.page_state(page)
+        await actions.element_action(page, action, target, resolved_values)
+        return await actions.page_state(page)
 
     return await _browser_action(session, run, timeout_ms)
 
@@ -400,7 +400,7 @@ async def browser_solve_captcha(
     """
 
     async def run(page: SessionPage) -> dict[str, Any]:
-        return await browser_session.solve_captcha(page)
+        return await actions.solve_captcha(page)
 
     return await _browser_action(session, run, timeout_ms)
 
@@ -419,7 +419,7 @@ async def browser_press(
     """
 
     async def run(page: SessionPage) -> dict[str, Any]:
-        return await browser_session.press(page, key)
+        return await actions.press(page, key)
 
     return await _browser_action(session, run, timeout_ms)
 
@@ -454,11 +454,11 @@ async def browser_wait_for(
         parsed_selector_state = parse_element_state(selector_state)
         parsed_load_state = parse_load_state(load_state) if load_state is not None else None
         # Rejected before connecting, so an impossible request costs no browser work.
-        browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
+        actions.wait_condition(text, text_gone, selector, parsed_load_state)
 
     return await _browser_action(
         session,
-        lambda page: browser_session.wait_for(
+        lambda page: actions.wait_for(
             page,
             text=text,
             text_gone=text_gone,
@@ -501,11 +501,9 @@ async def browser_screenshot(
         destination = resolve_output_path(path)
 
     async def run(page: SessionPage) -> dict[str, Any]:
-        return await browser_session.screenshot(
-            page, destination, full_page=full_page, target=target
-        )
+        return await actions.screenshot(page, destination, full_page=full_page, target=target)
 
-    return await _browser_action(session, run, browser_session.DEFAULT_ACTION_TIMEOUT_MS)
+    return await _browser_action(session, run, actions.DEFAULT_ACTION_TIMEOUT_MS)
 
 
 async def browser_view(session: str = "default") -> CallToolResult:
@@ -519,9 +517,7 @@ async def browser_view(session: str = "default") -> CallToolResult:
     Args:
         session: Browser session name.
     """
-    captured = await _browser_action(
-        session, browser_session.view, browser_session.DEFAULT_ACTION_TIMEOUT_MS
-    )
+    captured = await _browser_action(session, actions.view, actions.DEFAULT_ACTION_TIMEOUT_MS)
     metadata = captured.metadata()
     return CallToolResult(
         content=[
@@ -568,7 +564,7 @@ async def browser_mouse(
         timeout_ms: Action timeout in milliseconds.
     """
     with _tool_errors():
-        browser_session.validate_mouse(
+        actions.validate_mouse(
             action,
             x,
             y,
@@ -580,7 +576,7 @@ async def browser_mouse(
         )
     return await _browser_action(
         session,
-        lambda page: browser_session.mouse_action(
+        lambda page: actions.mouse_action(
             page,
             action,
             x,
@@ -611,9 +607,7 @@ async def browser_insert_text(
         session: Browser session name.
         timeout_ms: Action timeout in milliseconds.
     """
-    return await _browser_action(
-        session, lambda page: browser_session.insert_text(page, text), timeout_ms
-    )
+    return await _browser_action(session, lambda page: actions.insert_text(page, text), timeout_ms)
 
 
 async def browser_eval(
@@ -658,9 +652,9 @@ async def browser_eval(
     logger.info("browser_eval session=%s len=%d", session, len(expression))
     logger.debug("browser_eval session=%s expression=%s", session, expression)
     result = await _browser_action(
-        session, lambda page: browser_session.evaluate(page, expression), timeout_ms
+        session, lambda page: actions.evaluate(page, expression), timeout_ms
     )
-    return browser_session.shape_eval_result(result, max_chars)
+    return actions.shape_eval_result(result, max_chars)
 
 
 async def browser_close(

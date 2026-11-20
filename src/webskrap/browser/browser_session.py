@@ -2,7 +2,7 @@
 
 ``open_session`` launches a detached Chromium that outlives the calling
 process; every action reconnects to it over CDP with WebSkrap's own client
-(:mod:`webskrap.cdp_session`), acts on the current page, and disconnects. The
+(:mod:`webskrap.driver.cdp_session`), acts on the current page, and disconnects. The
 browser gets the same launch flags as a one-shot fetch, and no action sends
 the CDP ``Runtime.enable`` command that detectors look for. Snapshots carry
 ``eN`` refs that interaction helpers accept alongside CSS selectors.
@@ -29,31 +29,10 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from webskrap.browser import display
-from webskrap.browser.actions import DEFAULT_ACTION_TIMEOUT_MS as DEFAULT_ACTION_TIMEOUT_MS
-from webskrap.browser.actions import ELEMENT_ACTIONS as ELEMENT_ACTIONS
-from webskrap.browser.actions import HISTORY_METHODS as HISTORY_METHODS
-from webskrap.browser.actions import MAX_SEARCH_TEXT_CHARS as MAX_SEARCH_TEXT_CHARS
-from webskrap.browser.actions import element_action as element_action
-from webskrap.browser.actions import element_arguments as element_arguments
-from webskrap.browser.actions import evaluate as evaluate
-from webskrap.browser.actions import goto as goto
-from webskrap.browser.actions import history as history
-from webskrap.browser.actions import insert_text as insert_text
-from webskrap.browser.actions import mouse_action as mouse_action
-from webskrap.browser.actions import page_state as page_state
-from webskrap.browser.actions import press as press
-from webskrap.browser.actions import read_text as read_text
-from webskrap.browser.actions import screenshot as screenshot
-from webskrap.browser.actions import search_text as search_text
-from webskrap.browser.actions import shape_eval_result as shape_eval_result
-from webskrap.browser.actions import shape_snapshot as shape_snapshot
-from webskrap.browser.actions import snapshot as snapshot
-from webskrap.browser.actions import solve_captcha as solve_captcha
-from webskrap.browser.actions import validate_mouse as validate_mouse
-from webskrap.browser.actions import view as view
-from webskrap.browser.actions import viewport as viewport
-from webskrap.browser.actions import wait_condition as wait_condition
-from webskrap.browser.actions import wait_for as wait_for
+from webskrap.browser.actions import (
+    DEFAULT_ACTION_TIMEOUT_MS,
+    goto,
+)
 from webskrap.browser.executable import find_executable
 from webskrap.browser.gpu import effective_gpu, require_lavapipe
 from webskrap.browser.process import (
@@ -81,19 +60,16 @@ from webskrap.browser.session_state import sessions_root as sessions_root
 from webskrap.browser.session_state import state_path as state_path
 from webskrap.browser.session_state import write_state as write_state
 from webskrap.config.models import (
-    BrowserProfile,
     GpuBackend,
-    ProxyConfig,
     SessionConfig,
     SessionProfileMode,
     WebRtcIPHandlingPolicy,
 )
+from webskrap.config.profile import BrowserProfile, ProxyConfig
 from webskrap.config.profiles import get_profile
 from webskrap.driver import targets
 from webskrap.driver.cdp import CDPPage
 from webskrap.driver.launch import base_args
-from webskrap.driver.view_types import BrowserView as BrowserView
-from webskrap.driver.view_types import Viewport as Viewport
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.security.paths import secure_directory
 
@@ -150,7 +126,7 @@ async def chromium_executable() -> str:
     Same order as one-shot fetches. Installed Chrome and Edge ship the
     platform's sandbox support (for example an AppArmor ``userns`` profile on
     Ubuntu 23.10+), which a downloaded Chrome for Testing lacks. See
-    :func:`webskrap.cdp.find_executable`.
+    :func:`webskrap.browser.executable.find_executable`.
 
     Raises:
         WebSkrapError: ``browser_launch`` when no Chromium is installed.
@@ -176,7 +152,7 @@ def _session_config(
 ) -> tuple[SessionConfig, BrowserProfile | None]:
     """Return a detached session's config and the profile its launch applies.
 
-    Built from :class:`~webskrap.models.SessionConfig`, so a session gets the
+    Built from :class:`~webskrap.config.models.SessionConfig`, so a session gets the
     flags a one-shot fetch would: ``--disable-blink-features=AutomationControlled``
     (otherwise a remote-debugging port sets ``navigator.webdriver``), the
     headless virtual screen, ``--no-sandbox`` only when the sandbox is off,
@@ -355,7 +331,7 @@ def _child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
 async def start_proxy_auth(directory: Path, port: int, credentials: tuple[str, str]) -> int:
     """Start the helper that answers the session proxy's challenges; return its PID.
 
-    The helper (:mod:`webskrap.proxy_auth`) gets the credentials on stdin and
+    The helper (:mod:`webskrap.browser.proxy_auth`) gets the credentials on stdin and
     keeps them in memory only. It stays connected to the browser and exits
     when the browser does.
 

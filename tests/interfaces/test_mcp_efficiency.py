@@ -5,11 +5,14 @@ import asyncio
 import pytest
 from conftest import set_page_content
 
-from webskrap import browser_session, mcp_server
-from webskrap.cdp import find_executable, launch
-from webskrap.client import LINKS_SCRIPT, WebSkrapError
-from webskrap.interfaces import mcp_browser
-from webskrap.models import FetchResult, text_window
+from webskrap.browser import actions, browser_session
+from webskrap.browser.executable import find_executable
+from webskrap.driver.launch import launch
+from webskrap.driver.text_search import text_window
+from webskrap.errors import WebSkrapError
+from webskrap.interfaces import mcp_browser, mcp_server
+from webskrap.scraping.results import FetchResult
+from webskrap.scraping.session import LINKS_SCRIPT
 
 
 def test_mcp_response_defaults_and_text_annotations() -> None:
@@ -32,10 +35,10 @@ async def test_browser_text_routes_through_session(monkeypatch: pytest.MonkeyPat
 
     async def action(session, callback, timeout_ms):
         assert session == "reading"
-        assert timeout_ms == browser_session.DEFAULT_ACTION_TIMEOUT_MS
+        assert timeout_ms == actions.DEFAULT_ACTION_TIMEOUT_MS
         return await callback(page)
 
-    monkeypatch.setattr(browser_session, "read_text", read_text)
+    monkeypatch.setattr(actions, "read_text", read_text)
     monkeypatch.setattr(mcp_browser, "_browser_action", action)
     assert await mcp_server.browser_text("reading", max_chars=42, offset=9) == {"text": "window"}
     assert captured == {"max_chars": 42, "offset": 9}
@@ -68,7 +71,7 @@ async def test_visible_text_window_matches_python(page, limit: int, offset: int)
     )
     full = await _body_text(page)
     expected = text_window(full, limit, offset)
-    result = await browser_session.read_text(page, max_chars=limit, offset=offset)
+    result = await actions.read_text(page, max_chars=limit, offset=offset)
     assert result == {
         "url": "about:blank",
         "title": "Reading",
@@ -88,7 +91,7 @@ async def test_text_pages_reassemble_large_unicode_body(page) -> None:
     chunks = []
     offset = 0
     while True:
-        result = await browser_session.read_text(page, max_chars=8000, offset=offset)
+        result = await actions.read_text(page, max_chars=8000, offset=offset)
         assert len(result["text"]) <= 8000
         assert result["text_length"] == len(full)
         chunks.append(result["text"])
@@ -154,8 +157,8 @@ async def test_shallow_snapshot_can_expand_to_full_tree(page) -> None:
     for depth in range(10):
         html = f'<div role="group" aria-label="Level {depth}">{html}</div>'
     await set_page_content(page, html)
-    shallow = await browser_session.snapshot(page, depth=6)
-    full = await browser_session.snapshot(page, depth=None)
+    shallow = await actions.snapshot(page, depth=6)
+    full = await actions.snapshot(page, depth=None)
     assert len(shallow["snapshot"]) < len(full["snapshot"])
     assert "Deep action" not in shallow["snapshot"]
     assert "Deep action" in full["snapshot"]
@@ -206,7 +209,7 @@ async def test_browser_text_pattern_greps_through_session(monkeypatch: pytest.Mo
     async def action(session, callback, timeout_ms):
         return await callback(page)
 
-    monkeypatch.setattr(browser_session, "search_text", search_text)
+    monkeypatch.setattr(actions, "search_text", search_text)
     monkeypatch.setattr(mcp_browser, "_browser_action", action)
     result = await mcp_server.browser_text("reading", pattern="Price", context=2, max_matches=5)
     assert result == {"matches": []}

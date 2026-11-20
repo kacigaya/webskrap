@@ -11,7 +11,7 @@ from ``*.hcaptcha.com``. Both mark it ``role=checkbox`` and report the result
 in ``aria-checked``. CDP's DOM reads them without running anything in the
 page, and the box is measured again right before every click.
 
-The click is Turnstile's (:func:`webskrap.turnstile.click`). When the provider
+The click is Turnstile's (:func:`webskrap.challenges.turnstile.click`). When the provider
 trusts the browser, the box ticks and the page's own callback continues. When
 it does not, it opens an image challenge in a second frame of the same
 provider, parked off-screen until then. That challenge is never touched: the

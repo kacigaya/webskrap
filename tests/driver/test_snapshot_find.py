@@ -5,11 +5,12 @@ import re
 import pytest
 from conftest import set_page_content
 
-from webskrap import browser_session, mcp_server
-from webskrap.cdp import find_executable, launch
+from webskrap.browser import actions
+from webskrap.browser.executable import find_executable
 from webskrap.driver import snapshot as cdp_snapshot
+from webskrap.driver.launch import launch
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.interfaces import mcp_browser
+from webskrap.interfaces import mcp_browser, mcp_server
 
 
 @pytest.fixture
@@ -82,7 +83,7 @@ async def test_find_semantics_limits_password_and_interact(routed_page):
     assert "Other" not in found["snapshot"]
     assert "hidden" not in found["snapshot"]
     ref = re.search(r'button "Save" \[ref=(e\d+)\]', found["snapshot"])[1]
-    await browser_session.element_action(page, "click", ref, [])
+    await actions.element_action(page, "click", ref, [])
     tree = (await mcp_server.browser_snapshot())["snapshot"]
     assert "private-secret" not in tree
     for state in ("checked=mixed", "expanded=false", "pressed=mixed", "busy=true"):
@@ -133,7 +134,7 @@ async def test_find_iframe_and_frame_scope(routed_page):
     assert "iframe" in found["snapshot"]
     scoped = await mcp_server.browser_snapshot(target=ref, boxes=True)
     assert ref in scoped["snapshot"]
-    await browser_session.element_action(page, "click", ref, [])
+    await actions.element_action(page, "click", ref, [])
 
 
 @pytest.mark.parametrize(
@@ -336,7 +337,7 @@ async def test_snapshot_and_find_follow_the_active_modal(routed_page, opening_or
     assert active_label in (await mcp_server.browser_snapshot(target="body"))["snapshot"]
     found = await mcp_server.browser_find(text=active_label)
     ref = re.search(rf'button "{active_label}"[^\n]*\[ref=(e\d+)\]', found["snapshot"])[1]
-    await browser_session.element_action(page, "click", ref, [])
+    await actions.element_action(page, "click", ref, [])
     assert lower_label in (await mcp_server.browser_snapshot())["snapshot"]
     assert (await mcp_server.browser_find(text=lower_label))["matches_total"] == 1
 

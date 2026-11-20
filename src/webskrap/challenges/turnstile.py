@@ -14,7 +14,7 @@ widget verifies, neither has a box and nothing is clicked.
 
 The gesture is the one that passed in live runs: the cursor wanders for
 :data:`WANDER_S` seconds, follows the Bezier path of
-:func:`webskrap.cdp_dom.travel`, pauses, and holds the button like a mouse.
+:func:`webskrap.driver.cdp_dom.travel`, pauses, and holds the button like a mouse.
 A click that does not clear the page is repeated after
 :data:`CLICK_INTERVAL_S`, at most :data:`MAX_CLICKS` times, all within
 :data:`TIMEOUT_S` of the first sighting.

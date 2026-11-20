@@ -13,8 +13,9 @@ from click import unstyle
 from typer import rich_utils
 from typer.testing import CliRunner
 
-from webskrap import browser_session, cli
+from webskrap.browser import actions, browser_session
 from webskrap.errors import EXIT_CODES, RECOVERY_HINTS, ErrorCode
+from webskrap.interfaces import cli
 
 runner = CliRunner()
 
@@ -70,7 +71,7 @@ def test_goto_passes_solve_cloudflare(tmp_path: Path, monkeypatch: pytest.Monkey
         return {"status": 200, "url": url, "title": "t", "blocked": None}
 
     monkeypatch.setattr(browser_session, "run_page_action", run_page_action)
-    monkeypatch.setattr(browser_session, "goto", goto)
+    monkeypatch.setattr(actions, "goto", goto)
     result = runner.invoke(
         cli.app,
         [
@@ -109,7 +110,7 @@ def test_solve_captcha_reports_the_checkbox_state(
         return {"url": "u", "title": "t", "captcha": {"provider": "reCAPTCHA", "state": "checked"}}
 
     monkeypatch.setattr(browser_session, "run_page_action", run_page_action)
-    monkeypatch.setattr(browser_session, "solve_captcha", solve_captcha)
+    monkeypatch.setattr(actions, "solve_captcha", solve_captcha)
     result = runner.invoke(
         cli.app, ["browser", "solve-captcha", "--format", output], env=_env(tmp_path)
     )

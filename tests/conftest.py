@@ -12,10 +12,11 @@ from typing import Any
 
 import pytest
 
-from webskrap import browser_session, client
-from webskrap.cdp import CDPPage, find_executable
+from webskrap.browser import browser_session, channels
+from webskrap.browser.executable import find_executable
 from webskrap.challenges import xvfb_available
-from webskrap.client import WebSkrapError
+from webskrap.driver.cdp import CDPPage
+from webskrap.errors import WebSkrapError
 
 
 def _sandbox_launches() -> bool:
@@ -73,8 +74,8 @@ def persistent_session_env(
 def _forget_resolved_channels() -> None:
     # The channel fallback memo is process-wide; one test's fallback must not
     # skip another test's first launch attempt.
-    client._resolved_channels.clear()
-    client._resolution_locks.clear()
+    channels._resolved_channels.clear()
+    channels._resolution_locks.clear()
 
 
 async def set_page_content(page: CDPPage, html: str, *, block_requests: bool = True) -> None:

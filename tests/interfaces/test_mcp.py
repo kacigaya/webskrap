@@ -10,23 +10,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from webskrap import browser_session, diagnostics, mcp_server
-from webskrap.cdp import CDPBrowser
-from webskrap.client import WebSkrapError, WebSkrapSession
-from webskrap.errors import RECOVERY_HINTS, ErrorCode
-from webskrap.fetch_runtime import FetchRuntime
-from webskrap.interfaces import mcp_browser
-from webskrap.models import (
-    FetchResult,
-    GpuBackend,
-    Link,
-    SearchEngine,
-    SearchHit,
-    SearchResult,
-    SessionConfig,
-)
-from webskrap.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
-from webskrap.profiles import list_profiles
+from webskrap.browser import browser_session, diagnostics
+from webskrap.config.models import GpuBackend, SessionConfig
+from webskrap.config.profiles import list_profiles
+from webskrap.config.search import SearchEngine
+from webskrap.driver.launch import CDPBrowser
+from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError
+from webskrap.interfaces import mcp_browser, mcp_server
+from webskrap.scraping.fetch_runtime import FetchRuntime
+from webskrap.scraping.results import FetchResult, Link, SearchHit, SearchResult
+from webskrap.scraping.session import WebSkrapSession
+from webskrap.security.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
 
 
 class _FakeClient:
@@ -351,7 +345,7 @@ def test_browser_solve_captcha_runs_the_session_action(monkeypatch: Any) -> None
         return {"url": "u", "title": "t", "captcha": {"provider": "hCaptcha", "state": page}}
 
     monkeypatch.setattr(mcp_browser, "_browser_action", browser_action)
-    monkeypatch.setattr(mcp_browser.browser_session, "solve_captcha", solve_captcha)
+    monkeypatch.setattr(mcp_browser.actions, "solve_captcha", solve_captcha)
     result = asyncio.run(mcp_server.browser_solve_captcha(session="form"))
     assert result["captcha"] == {"provider": "hCaptcha", "state": "page"}
     assert calls == [("form", 30_000)]

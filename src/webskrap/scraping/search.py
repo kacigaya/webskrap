@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote_plus, urlsplit
 
-from webskrap.config.models import SearchEngine
+from webskrap.config.search import SearchEngine
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.scraping.results import SearchHit
 

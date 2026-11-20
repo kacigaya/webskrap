@@ -14,11 +14,11 @@ from webskrap.config.models import (
     LoadState,
     ProfileMode,
     ResourcePolicy,
-    SearchEngine,
     SessionProfileMode,
     WaitUntil,
     WebRtcIPHandlingPolicy,
 )
+from webskrap.config.search import SearchEngine
 
 
 def parse_literal(value: str, literal: object, name: str) -> str:
@@ -87,7 +87,7 @@ def parse_element_state(value: str) -> ElementState:
 
 
 def parse_resource_policy(value: str) -> ResourcePolicy:
-    """Parse a :class:`~webskrap.models.ResourcePolicy` name.
+    """Parse a :class:`~webskrap.config.models.ResourcePolicy` name.
 
     Raises:
         ValueError: If ``value`` is not a known policy.
@@ -100,7 +100,7 @@ def parse_resource_policy(value: str) -> ResourcePolicy:
 
 
 def parse_engine(value: str) -> SearchEngine:
-    """Parse a :class:`~webskrap.models.SearchEngine` name.
+    """Parse a :class:`~webskrap.config.search.SearchEngine` name.
 
     Raises:
         ValueError: If ``value`` is not a known engine.

@@ -12,12 +12,12 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from conftest import set_page_content, tls_context
 
-from webskrap import SessionConfig, WebSkrapClient, challenges, recaptcha
-from webskrap.cdp import CDPPage
-from webskrap.cdp_dom import Frame
-from webskrap.challenges import detect
+from webskrap import SessionConfig, WebSkrapClient, challenges
+from webskrap.challenges import detect, recaptcha
+from webskrap.challenges.recaptcha import Tick, Widget, box, locate, provider_of, solve
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.cdp_dom import Frame
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.recaptcha import Tick, Widget, box, locate, provider_of, solve
 
 BOX = {"x": 21.0, "y": 31.0, "width": 28.0, "height": 28.0}
 CHALLENGE = {"provider": "reCAPTCHA", "kind": "challenge", "reloads": False}

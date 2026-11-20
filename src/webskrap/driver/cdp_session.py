@@ -14,31 +14,7 @@ from typing import Any, TypeVar
 from webskrap.config.models import ElementState, LoadState
 from webskrap.driver import cdp_dom
 from webskrap.driver.cdp import CDPError, CDPPage
-from webskrap.driver.keyboard import key_events as key_events
-from webskrap.driver.keyboard import press as press
-from webskrap.driver.polling import _POLL_S as _POLL_S
-from webskrap.driver.polling import _within
-from webskrap.driver.polling import poll as poll
-from webskrap.driver.targets import CLOSE_TAB_TIMEOUT_MS as CLOSE_TAB_TIMEOUT_MS
-from webskrap.driver.targets import PAGE_ORDER_FILE as PAGE_ORDER_FILE
-from webskrap.driver.targets import POINTER_FILE as POINTER_FILE
-from webskrap.driver.targets import TAB_SELECTION_FILE as TAB_SELECTION_FILE
-from webskrap.driver.targets import _listing as _listing
-from webskrap.driver.targets import _ordered_pages as _ordered_pages
-from webskrap.driver.targets import _select as _select
-from webskrap.driver.targets import _tab_at as _tab_at
-from webskrap.driver.targets import _tabs as _tabs
-from webskrap.driver.targets import _write_ids as _write_ids
-from webskrap.driver.targets import attach as attach
-from webskrap.driver.targets import close_tab as close_tab
-from webskrap.driver.targets import connect as connect
-from webskrap.driver.targets import current_page as current_page
-from webskrap.driver.targets import devtools_path as devtools_path
-from webskrap.driver.targets import list_tabs as list_tabs
-from webskrap.driver.targets import new_tab as new_tab
-from webskrap.driver.targets import save_pointer as save_pointer
-from webskrap.driver.targets import saved_pointer as saved_pointer
-from webskrap.driver.targets import select_tab as select_tab
+from webskrap.driver.polling import _POLL_S, _within, poll
 from webskrap.driver.view_types import BrowserView, Viewport
 from webskrap.errors import ErrorCode, WebSkrapError
 
@@ -178,7 +154,7 @@ async def history(page: CDPPage, method: str) -> dict[str, Any]:
 
 
 async def read_text(page: CDPPage, *, max_chars: int, offset: int = 0) -> dict[str, Any]:
-    """Return a visible-text window; see :func:`webskrap.browser_session.read_text`."""
+    """Return a visible-text window; see :func:`webskrap.browser.actions.read_text`."""
     window = await page.evaluate(
         _TEXT_SCRIPT, {"limit": max(0, max_chars), "start": max(0, offset)}
     )
@@ -422,7 +398,7 @@ async def wait_for(
     load_state: LoadState | None = None,
     timeout_ms: float,
 ) -> dict[str, Any]:
-    """Wait for one condition; see :func:`webskrap.browser_session.wait_for`.
+    """Wait for one condition; see :func:`webskrap.browser.actions.wait_for`.
 
     ``selector`` is a snapshot ref or a CSS selector on this driver.
 

@@ -3,7 +3,7 @@
 A native Python take on the official Playwright CLI (`@playwright/cli`):
 `open` launches a detached Chromium that outlives each CLI invocation, and
 every other command reconnects to it over CDP, acts on the current page, and
-exits. The session/page logic lives in :mod:`webskrap.browser_session`, shared
+exits. The session/page logic lives in :mod:`webskrap.browser.browser_session`, shared
 with the MCP server; this module only parses arguments and formats output.
 """
 
@@ -21,13 +21,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from webskrap.browser import browser_session
-from webskrap.browser.browser_session import (
-    DEFAULT_ACTION_TIMEOUT_MS,
-    DEFAULT_NAVIGATION_TIMEOUT_MS,
-    ELEMENT_ACTIONS,
-    SessionPage,
-)
+from webskrap.browser import actions, browser_session
+from webskrap.browser.actions import DEFAULT_ACTION_TIMEOUT_MS, ELEMENT_ACTIONS
+from webskrap.browser.browser_session import DEFAULT_NAVIGATION_TIMEOUT_MS, SessionPage
 from webskrap.config.models import GpuBackend
 from webskrap.config.parsing import (
     parse_element_state,
@@ -279,7 +275,7 @@ def open_command(
         payload.update(
             _run_page_command(
                 session,
-                lambda page: browser_session.goto(
+                lambda page: actions.goto(
                     page,
                     url,
                     "load",
@@ -473,7 +469,7 @@ def goto_command(
     parsed_wait_until = parse_cli_value(wait_until, parse_wait_until)
     state = _run_page_command(
         session,
-        lambda page: browser_session.goto(
+        lambda page: actions.goto(
             page,
             url,
             parsed_wait_until,
@@ -499,7 +495,7 @@ def _navigation_command(name: str, help_text: str, method: str) -> None:
         output_format = parse_output_format(format)
 
         async def action(page: SessionPage) -> dict[str, Any]:
-            return await browser_session.history(page, method)
+            return await actions.history(page, method)
 
         _emit_state(
             _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
@@ -533,10 +529,8 @@ def snapshot_command(
 ) -> None:
     """Print an aria snapshot of the page with `eN` element refs."""
     output_format = parse_output_format(format)
-    result = browser_session.shape_snapshot(
-        _run_page_command(
-            session, lambda page: browser_session.snapshot(page, depth=depth), output_format
-        ),
+    result = actions.shape_snapshot(
+        _run_page_command(session, lambda page: actions.snapshot(page, depth=depth), output_format),
         max_chars,
         offset,
     )
@@ -567,13 +561,13 @@ def _register_element_command(name: str, help_text: str) -> None:
         values = value or []
         try:
             # Fail on a bad value count before connecting to the browser.
-            browser_session.element_arguments(name, values)
+            actions.element_arguments(name, values)
         except WebSkrapError as exc:
             fail(exc, output_format)
 
         async def action(page: SessionPage) -> dict[str, Any]:
-            await browser_session.element_action(page, name, target, values)
-            return await browser_session.page_state(page)
+            await actions.element_action(page, name, target, values)
+            return await actions.page_state(page)
 
         _emit_state(
             _run_page_command(session, action, output_format, timeout_ms=timeout_ms),
@@ -595,7 +589,7 @@ def solve_captcha_command(
     output_format = parse_output_format(format)
 
     async def action(page: SessionPage) -> dict[str, Any]:
-        return await browser_session.solve_captcha(page)
+        return await actions.solve_captcha(page)
 
     _emit_state(
         _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
@@ -613,7 +607,7 @@ def press_command(
     output_format = parse_output_format(format)
 
     async def action(page: SessionPage) -> dict[str, Any]:
-        return await browser_session.press(page, key)
+        return await actions.press(page, key)
 
     _emit_state(
         _run_page_command(session, action, output_format, timeout_ms=timeout_ms), output_format
@@ -652,13 +646,13 @@ def wait_command(
     )
     try:
         # Fail before connecting when the conditions do not add up to exactly one.
-        browser_session.wait_condition(text, text_gone, selector, parsed_load_state)
+        actions.wait_condition(text, text_gone, selector, parsed_load_state)
     except WebSkrapError as exc:
         fail(exc, output_format)
 
     state_payload = _run_page_command(
         session,
-        lambda page: browser_session.wait_for(
+        lambda page: actions.wait_for(
             page,
             text=text,
             text_gone=text_gone,
@@ -697,9 +691,7 @@ def screenshot_command(
 
     async def action(page: SessionPage) -> dict[str, Any]:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        return await browser_session.screenshot(
-            page, destination, full_page=full_page, target=target
-        )
+        return await actions.screenshot(page, destination, full_page=full_page, target=target)
 
     result = _run_page_command(session, action, output_format)
     if output_format == "json":
@@ -719,7 +711,7 @@ def view_command(
     target = path or Path(f"webskrap-view-{uuid4().hex}.png")
 
     async def action(page: SessionPage) -> dict[str, str | int | float]:
-        captured = await browser_session.view(page)
+        captured = await actions.view(page)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(captured.image)
         return {**captured.metadata(), "path": str(target.resolve())}
@@ -751,7 +743,7 @@ def mouse_command(
     """Use mouse coordinates from a fresh view; reobserve after page changes."""
     output_format = parse_output_format(format)
     try:
-        browser_session.validate_mouse(
+        actions.validate_mouse(
             action,
             x,
             y,
@@ -765,7 +757,7 @@ def mouse_command(
         fail(exc, output_format)
     result = _run_page_command(
         session,
-        lambda page: browser_session.mouse_action(
+        lambda page: actions.mouse_action(
             page,
             action,
             x,
@@ -794,7 +786,7 @@ def insert_text_command(
     _emit_state(
         _run_page_command(
             session,
-            lambda page: browser_session.insert_text(page, text),
+            lambda page: actions.insert_text(page, text),
             output_format,
             timeout_ms=timeout_ms,
         ),
@@ -816,9 +808,9 @@ def eval_command(
     output_format = parse_output_format(format)
 
     async def action(page: SessionPage) -> Any:
-        return await browser_session.evaluate(page, expression)
+        return await actions.evaluate(page, expression)
 
-    payload = browser_session.shape_eval_result(
+    payload = actions.shape_eval_result(
         _run_page_command(session, action, output_format, timeout_ms=timeout_ms), max_chars
     )
     if output_format == "json":

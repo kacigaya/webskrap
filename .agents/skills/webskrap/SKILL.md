@@ -36,10 +36,10 @@ and it does not offer Google.
 | Main CLI commands | `src/webskrap/interfaces/cli.py` | `tests/interfaces/test_cli.py`, `tests/browser/test_diagnostics.py` |
 | Persistent browser state | `src/webskrap/browser/browser_session.py`, `src/webskrap/security/paths.py` | `tests/browser/test_browser_session_unit.py`, `tests/security/test_paths.py` |
 | Interactive browser commands | `src/webskrap/interfaces/browser_cli.py`, `src/webskrap/interfaces/mcp_browser.py` | `tests/interfaces/test_browser_cli.py`, `tests/browser/test_browser_integration.py`, `tests/interfaces/test_mcp.py` |
-| MCP tools, resources, or annotations | `src/webskrap/interfaces/mcp_server.py` | `tests/interfaces/test_mcp.py`, `src/webskrap/guide.md` |
+| MCP tools, resources, or annotations | `src/webskrap/interfaces/mcp_server.py` | `tests/interfaces/test_mcp.py`, `src/webskrap/interfaces/guide.md` |
 | Profiles or stealth defaults | `src/webskrap/config/profiles.py`, `src/webskrap/config/models.py`, `src/webskrap/scraping/client.py` | `tests/config/test_profiles.py`, opt-in bot-detection tests when needed |
 | Cookie rejection | `src/webskrap/browser/consent.py` | `tests/browser/test_consent.py`; `tests/live/test_consent_live.py` only for selector rot |
-| Documentation and examples | `README.md`, `src/webskrap/guide.md` | `tests/test_docs.py`, current CLI help, public Python exports |
+| Documentation and examples | `README.md`, `src/webskrap/interfaces/guide.md` | `tests/test_docs.py`, current CLI help, public Python exports |
 
 Search for every constructor, serializer, command, and schema that uses a
 changed model or field. Fetch and search behavior cross Python, CLI, and MCP.
@@ -126,7 +126,7 @@ When public behavior changes, check all applicable items:
 - Python models and exports
 - CLI arguments, help, JSON output, and exit status
 - MCP input schema, result shape, annotations, and server instructions
-- `README.md` and `src/webskrap/guide.md`
+- `README.md` and `src/webskrap/interfaces/guide.md`
 - unit tests for each affected surface
 
 Use the implementation as the source of truth. In particular, read

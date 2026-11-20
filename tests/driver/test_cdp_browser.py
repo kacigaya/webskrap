@@ -14,9 +14,12 @@ import pytest
 from http_fixtures import CDPHandler
 
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
-from webskrap.cdp import find_executable, launch
+from webskrap.browser.executable import find_executable
+from webskrap.config.profile import BrowserProfile
+from webskrap.config.user_agent import user_agent_metadata
+from webskrap.driver.launch import launch
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import BrowserProfile, FetchResult, user_agent_metadata
+from webskrap.scraping.results import FetchResult
 
 pytestmark = pytest.mark.browser
 

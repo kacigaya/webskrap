@@ -21,13 +21,9 @@ from webskrap.challenges import (
     response_status,
     settle,
 )
-from webskrap.config.models import (
-    BrowserProfile,
-    ResourcePolicy,
-    SearchEngine,
-    SessionConfig,
-    WaitUntil,
-)
+from webskrap.config.models import ResourcePolicy, SessionConfig, WaitUntil
+from webskrap.config.profile import BrowserProfile
+from webskrap.config.search import SearchEngine
 from webskrap.driver import cdp_dom, cdp_setup
 from webskrap.driver.cdp import CDPPage
 from webskrap.driver.launch import CDPBrowser
@@ -95,9 +91,9 @@ class WebSkrapSession:
 
     Attributes:
         name: Session name, unique within the owning client.
-        browser: The :class:`~webskrap.cdp.CDPBrowser` behind the session.
-        config: The :class:`~webskrap.models.SessionConfig` it was built from.
-        profile: The :class:`~webskrap.models.BrowserProfile` applied to it.
+        browser: The :class:`~webskrap.driver.launch.CDPBrowser` behind the session.
+        config: The :class:`~webskrap.config.models.SessionConfig` it was built from.
+        profile: The :class:`~webskrap.config.profile.BrowserProfile` applied to it.
     """
 
     def __init__(
@@ -228,7 +224,7 @@ class WebSkrapSession:
                 apart from the navigation timeout.
 
         Returns:
-            A :class:`~webskrap.models.FetchResult`. ``ok`` reflects the HTTP
+            A :class:`~webskrap.scraping.results.FetchResult`. ``ok`` reflects the HTTP
             status, so a 404 returns normally with ``ok=False``.
 
         Raises:
@@ -336,7 +332,7 @@ class WebSkrapSession:
             timeout_ms: Navigation timeout; defaults to the config's.
 
         Returns:
-            A :class:`~webskrap.models.SearchResult`.
+            A :class:`~webskrap.scraping.results.SearchResult`.
 
         Raises:
             WebSkrapError: If the session is closed, the query is blank

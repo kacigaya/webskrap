@@ -37,11 +37,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from webskrap.config.models import (
-    BrowserProfile,
-    ResourcePolicy,
-    SessionConfig,
-)
+from webskrap.config.models import ResourcePolicy, SessionConfig
+from webskrap.config.profile import BrowserProfile
 from webskrap.config.user_agent import user_agent_metadata
 from webskrap.driver import cdp_dom
 from webskrap.driver.cdp import CDPConnection, CDPError, CDPPage

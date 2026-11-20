@@ -15,17 +15,12 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from webskrap import (
-    ProxyConfig,
-    ResourcePolicy,
-    SessionConfig,
-    WebSkrapClient,
-    browser_session,
-    cdp_dom,
-    cdp_session,
-)
+from webskrap import ProxyConfig, ResourcePolicy, SessionConfig, WebSkrapClient
+from webskrap.browser import actions, browser_session, navigation
+from webskrap.config.profile import BrowserProfile
+from webskrap.driver import cdp_dom, cdp_session
+from webskrap.driver import snapshot as cdp_snapshot
 from webskrap.errors import ErrorCode, WebSkrapError
-from webskrap.models import BrowserProfile
 
 pytestmark = pytest.mark.browser
 
@@ -294,7 +289,7 @@ document.querySelector('button').onclick = () => parent.postMessage('done', '*')
     async with WebSkrapClient(default_config=config) as client:
         session = await client.session("device-check")
         page = await session.new_page()
-        state = await cdp_session.goto(page, "http://site-a.test/dd-start", "load")
+        state = await navigation.goto(page, "http://site-a.test/dd-start", "load")
         if outcome == "passed":
             assert state["blocked"] is None
             assert state["title"] == "Quote form"
@@ -310,14 +305,14 @@ document.querySelector('button').onclick = () => parent.postMessage('done', '*')
                 while not any(r["url"].endswith("/challenge.png") for r in _Proxy.requests):
                     await asyncio.sleep(0.01)
             # Stand-in for a person's click on our local test fixture only.
-            tree = await cdp_dom.snapshot(page)
+            tree = await cdp_snapshot.snapshot(page)
             button = re.search(r'"Manual check" \[ref=(f\d+e\d+)\]', tree)
             assert button is not None, tree
             await cdp_dom.element_action(page, "click", button[1], [])
             await cdp_session.wait_for(page, condition="text", text="Ready", timeout_ms=5_000)
             assert (await cdp_session.page_state(page))["title"] == "Quote form"
             assert "manual=done" in await page.evaluate("document.cookie")
-            assert (await cdp_session.goto(page, "http://site-a.test/dd-done", "load"))[
+            assert (await navigation.goto(page, "http://site-a.test/dd-done", "load"))[
                 "blocked"
             ] is None
 
@@ -338,11 +333,9 @@ def test_persistent_session_answers_an_authenticated_proxy(
             return await browser_session.run_page_action(name, action, timeout_ms=20_000)
 
         # Each action attaches and leaves; the helper answers in between.
-        results["goto"] = await run(
-            lambda page: browser_session.goto(page, "http://site-a.test/", "load")
-        )
+        results["goto"] = await run(lambda page: actions.goto(page, "http://site-a.test/", "load"))
         results["again"] = await run(
-            lambda page: browser_session.goto(page, "http://site-b.test/frame", "load")
+            lambda page: actions.goto(page, "http://site-b.test/frame", "load")
         )
         results["reused"] = await browser_session.open_session(name)
         results["listed"] = browser_session.list_sessions()
@@ -354,7 +347,7 @@ def test_persistent_session_answers_an_authenticated_proxy(
                 break
             await asyncio.sleep(0.05)
         with pytest.raises(WebSkrapError) as lost:
-            await run(browser_session.page_state)
+            await run(actions.page_state)
         results["lost"] = lost.value.code
         return results
 

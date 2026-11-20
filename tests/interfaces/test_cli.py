@@ -8,16 +8,11 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
-from webskrap import cli
+from webskrap.config.models import ResourcePolicy
+from webskrap.config.search import SearchEngine
 from webskrap.errors import EXIT_CODES, RECOVERY_HINTS, ErrorCode, WebSkrapError
-from webskrap.models import (
-    FetchResult,
-    Link,
-    ResourcePolicy,
-    SearchEngine,
-    SearchHit,
-    SearchResult,
-)
+from webskrap.interfaces import cli
+from webskrap.scraping.results import FetchResult, Link, SearchHit, SearchResult
 
 runner = CliRunner()
 
@@ -753,7 +748,7 @@ def test_search_blocked_failure_is_a_parseable_envelope(monkeypatch: Any) -> Non
 
 
 def test_mcp_command_runs_the_mcp_server(monkeypatch: Any) -> None:
-    from webskrap import mcp_server
+    from webskrap.interfaces import mcp_server
 
     calls: list[str] = []
     monkeypatch.setattr(mcp_server, "main", lambda: calls.append("run"))

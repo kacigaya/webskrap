@@ -14,6 +14,7 @@ from typing import Any
 from webskrap.browser.session_state import (
     _acquire_session_operation_lock as _acquire_session_operation_lock,
 )
+from webskrap.driver.launch import kill_windows_process_tree
 
 LAUNCH_TIMEOUT_S = 20.0
 
@@ -22,7 +23,7 @@ _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _STILL_ACTIVE = 259
 
 
-PROXY_AUTH_MODULE = "webskrap.proxy_auth"
+PROXY_AUTH_MODULE = "webskrap.browser.proxy_auth"
 
 
 def session_running(directory: Path, state: dict[str, Any] | None) -> bool:
@@ -133,14 +134,7 @@ def kill_browser(pid: int, *, force: bool) -> None:
     ``/F`` is always needed because a headless browser has no window to close.
     """
     if sys.platform == "win32":
-        taskkill = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
-        # Fixed argv, no shell; the PID is an int this module recorded.
-        subprocess.run(  # nosec B603  # noqa: S603
-            [str(taskkill), "/PID", str(pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        kill_windows_process_tree(pid)
         return
     sig = signal.SIGKILL if force else signal.SIGTERM
     try:
@@ -161,4 +155,6 @@ def proxy_auth_running(pid: int) -> bool:
         command: bytes | None = Path(f"/proc/{pid}/cmdline").read_bytes()
     except FileNotFoundError:
         command = None if Path("/proc/self").exists() else _ps_command(pid)
-    return command is not None and PROXY_AUTH_MODULE.encode() in command
+    return command is not None and (
+        PROXY_AUTH_MODULE.encode() in command or b"webskrap.proxy_auth" in command
+    )

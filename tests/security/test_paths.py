@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from webskrap.client import WebSkrapError
-from webskrap.paths import (
+from webskrap.errors import WebSkrapError
+from webskrap.security.paths import (
     DEFAULT_OUTPUT_DIRNAME,
     OUTPUT_DIR_ENV,
     output_root,
@@ -234,7 +234,7 @@ def test_resolve_rejects_a_symlinked_parent_directory(tmp_path: Path) -> None:
 
 
 def test_tree_creation_refuses_to_ascend_above_the_root(tmp_path: Path) -> None:
-    from webskrap.paths import _ensure_owner_only_tree
+    from webskrap.security.paths import _ensure_owner_only_tree
 
     root = tmp_path / "out"
     root.mkdir()

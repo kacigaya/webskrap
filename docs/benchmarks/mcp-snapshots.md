@@ -93,7 +93,15 @@ that extra context cost, which is excluded from the task table.
 
 ## Reproduce
 
-1. Run `git show 914e24576ebe92e08d46c2867d065343b1b71fdc:src/webskrap/cdp_dom.py > /tmp/webskrap-snapshot-baseline.py`.
+1. Extract the historical snapshot code and point its imports at the current modules.
+
+   ```bash
+   git show 914e24576ebe92e08d46c2867d065343b1b71fdc:src/webskrap/cdp_dom.py |
+     sed -e 's/from webskrap\.cdp import /from webskrap.driver.cdp import /' \
+         -e 's/from webskrap\.cdp_session import /from webskrap.driver.keyboard import /' \
+         -e 's/from webskrap\.human import /from webskrap.driver.human import /' \
+     > /tmp/webskrap-snapshot-baseline.py
+   ```
 2. Run `uv run --with tiktoken==0.14.0 python scripts/benchmark_snapshots.py --baseline /tmp/webskrap-snapshot-baseline.py`.
 3. For the optional external comparison, run `uv run --with tiktoken==0.14.0 python scripts/benchmark_playwright_snapshots.py`.
 

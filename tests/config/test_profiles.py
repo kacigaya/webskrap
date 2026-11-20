@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from webskrap.profiles import get_profile, list_profiles
+from webskrap.config.profiles import get_profile, list_profiles
 
 
 def test_builtin_profiles_are_available() -> None:

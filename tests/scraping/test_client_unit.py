@@ -10,26 +10,23 @@ from anyio import CancelScope, sleep
 
 from webskrap.browser import gpu as gpu_module
 from webskrap.browser import probe
-from webskrap.cdp import CDPBrowser, CDPConnection, CDPPage
+from webskrap.browser.channels import with_channel_fallback
+from webskrap.browser.consent import SETTLED_PAGE_TIMEOUT_MS
+from webskrap.browser.gpu import effective_gpu, hardware_gpu_available, lavapipe_available
+from webskrap.browser.probe import browser_doctor
 from webskrap.challenges import _DETECT_SCRIPT
-from webskrap.client import (
-    _EXTRACT_SCRIPT,
-    WebSkrapClient,
-    WebSkrapError,
-    WebSkrapSession,
-    browser_doctor,
-    effective_gpu,
-    hardware_gpu_available,
-    lavapipe_available,
-    with_channel_fallback,
-)
-from webskrap.consent import SETTLED_PAGE_TIMEOUT_MS
-from webskrap.errors import ErrorCode
-from webskrap.human import bezier_path
-from webskrap.models import GpuBackend, ProxyConfig, SearchEngine, SessionConfig
-from webskrap.profiles import get_profile
+from webskrap.config.models import GpuBackend, SessionConfig
+from webskrap.config.profile import ProxyConfig
+from webskrap.config.profiles import get_profile
+from webskrap.config.search import SearchEngine
+from webskrap.driver.cdp import CDPConnection, CDPPage
+from webskrap.driver.human import bezier_path
+from webskrap.driver.launch import CDPBrowser
+from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.scraping import client as client_module
 from webskrap.scraping import session as session_module
+from webskrap.scraping.client import WebSkrapClient
+from webskrap.scraping.session import _EXTRACT_SCRIPT, WebSkrapSession
 
 SEARCH_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "search"
 EXECUTABLE = Path("/browsers/chrome")
@@ -75,7 +72,7 @@ async def test_ua_probe_rewrites_native_version_and_closes_without_sleep(monkeyp
     browser = _fake_browser("Mozilla/5.0 HeadlessChrome/140.0.1 Safari/537.36")
     monkeypatch.setattr(client_module, "launch", AsyncMock(return_value=browser))
     sleep_mock = AsyncMock(side_effect=AssertionError("UA probe must not sleep"))
-    monkeypatch.setattr("webskrap.client.asyncio.sleep", sleep_mock)
+    monkeypatch.setattr("webskrap.scraping.client.asyncio.sleep", sleep_mock)
     ua = await WebSkrapClient()._headless_clean_user_agent(EXECUTABLE, SessionConfig())
     assert ua == "Mozilla/5.0 Chrome/140.0.1 Safari/537.36"
     browser.close.assert_awaited_once()
@@ -141,7 +138,7 @@ def _launch_client(
     async def no_probe(*_args: object) -> str:
         raise AssertionError("the UA probe must not run here")
 
-    monkeypatch.setattr("webskrap.client.VirtualDisplay.start", fake_start)
+    monkeypatch.setattr("webskrap.scraping.client.VirtualDisplay.start", fake_start)
     monkeypatch.setattr(client_module, "launch", launcher)
     monkeypatch.setattr(client_module, "find_executable", lambda _channel: EXECUTABLE)
     client = WebSkrapClient()
@@ -727,7 +724,7 @@ async def test_storage_state_is_restored_once_the_browser_runs(monkeypatch) -> N
     async def apply(browser: object, state: object) -> None:
         restored.append(state)
 
-    monkeypatch.setattr("webskrap.client.cdp_setup.apply_storage_state", apply)
+    monkeypatch.setattr("webskrap.scraping.client.cdp_setup.apply_storage_state", apply)
     state = {"cookies": [], "origins": []}
     session = await client._create_session(
         "state", SessionConfig(storage_state=state), get_profile(None)
@@ -1063,7 +1060,7 @@ async def test_channel_fallback_retries_cdp_startup_failures(message: str) -> No
 
 
 def test_a_real_playwright_storage_state_is_accepted() -> None:
-    from webskrap.cdp_setup import load_storage_state
+    from webskrap.driver.cdp_setup import load_storage_state
 
     state = {
         "cookies": [

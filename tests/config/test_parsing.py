@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from webskrap.models import ResourcePolicy, SearchEngine
-from webskrap.parsing import (
+from webskrap.config.models import ResourcePolicy
+from webskrap.config.parsing import (
     parse_engine,
     parse_resource_policy,
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
+from webskrap.config.search import SearchEngine
 
 
 @pytest.mark.parametrize("value", ["commit", "domcontentloaded", "load", "networkidle"])

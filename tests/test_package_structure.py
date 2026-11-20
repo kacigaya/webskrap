@@ -38,3 +38,8 @@ def test_implementation_imports_are_acyclic():
 
     TopologicalSorter(dependencies).prepare()
     TopologicalSorter(packages).prepare()
+
+
+def test_package_root_only_contains_public_api_and_shared_errors():
+    root = Path(webskrap.__file__).parent
+    assert {path.name for path in root.glob("*.py")} == {"__init__.py", "errors.py"}

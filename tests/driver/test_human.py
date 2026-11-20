@@ -8,8 +8,8 @@ import pytest
 from conftest import set_page_content
 
 from webskrap import SessionConfig, WebSkrapClient
-from webskrap.cdp import CDPError, CDPPage
 from webskrap.driver import cdp_dom, human
+from webskrap.driver.cdp import CDPError, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
 
 

@@ -12,9 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from webskrap import display
-from webskrap.client import WebSkrapError
-from webskrap.errors import ErrorCode
+from webskrap.browser import display
+from webskrap.errors import ErrorCode, WebSkrapError
 
 needs_xvfb = pytest.mark.skipif(
     not sys.platform.startswith("linux") or shutil.which("Xvfb") is None,

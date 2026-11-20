@@ -9,8 +9,8 @@ import pytest
 from conftest import set_page_content
 
 from webskrap import SessionConfig, WebSkrapClient, challenges
-from webskrap.cdp import CDPPage
 from webskrap.challenges import Detection, blocked_hint, detect, raise_for_challenge
+from webskrap.driver.cdp import CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError, error_payload, tool_message
 
 BLOCKS = Path(__file__).resolve().parents[1] / "fixtures" / "blocks"

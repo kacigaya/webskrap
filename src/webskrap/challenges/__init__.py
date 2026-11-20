@@ -10,11 +10,11 @@ Two kinds are told apart, because they need different fixes:
   moment", HUMAN's (PerimeterX) Press & Hold, Akamai's sec-cpt page, AWS WAF's
   challenge action). A more browser-like run can pass it. With
   ``solve_cloudflare``, Cloudflare's checkbox is clicked by
-  :mod:`webskrap.turnstile`; with ``solve_datadome``, DataDome's slider is
-  dragged by :mod:`webskrap.datadome`; with ``solve_perimeterx``, HUMAN's
-  button is held by :mod:`webskrap.perimeterx`; with ``solve_recaptcha``, a
+  :mod:`webskrap.challenges.turnstile`; with ``solve_datadome``, DataDome's slider is
+  dragged by :mod:`webskrap.challenges.datadome`; with ``solve_perimeterx``, HUMAN's
+  button is held by :mod:`webskrap.challenges.perimeterx`; with ``solve_recaptcha``, a
   reCAPTCHA v2 or hCaptcha checkbox on a 403, 429 or 503 page is clicked by
-  :mod:`webskrap.recaptcha`. No other challenge is interacted with, and no
+  :mod:`webskrap.challenges.recaptcha`. No other challenge is interacted with, and no
   token is read or copied.
 - A *block* refuses the client outright (a Cloudflare block page, an Akamai
   edge reference page). Only a different exit IP or fingerprint helps.
@@ -382,13 +382,13 @@ async def settle(
 
     With ``solve_cloudflare``, Cloudflare's "Just a moment" page is waited on
     too, and its checkbox, once drawn, is clicked by
-    :class:`webskrap.turnstile.Checkbox`. A drawn checkbox gets its own
-    :data:`webskrap.turnstile.TIMEOUT_S`, past ``deadline`` if need be.
+    :class:`webskrap.challenges.turnstile.Checkbox`. A drawn checkbox gets its own
+    :data:`webskrap.challenges.turnstile.TIMEOUT_S`, past ``deadline`` if need be.
     ``solve_datadome`` does the same for DataDome's slider CAPTCHA with
-    :class:`webskrap.datadome.Slider`, and ``solve_perimeterx`` for HUMAN's
-    Press & Hold button with :class:`webskrap.perimeterx.Hold`, and
+    :class:`webskrap.challenges.datadome.Slider`, and ``solve_perimeterx`` for HUMAN's
+    Press & Hold button with :class:`webskrap.challenges.perimeterx.Hold`, and
     ``solve_recaptcha`` for a reCAPTCHA v2 or hCaptcha checkbox with
-    :class:`webskrap.recaptcha.Tick`, whose image challenge ends the wait at
+    :class:`webskrap.challenges.recaptcha.Tick`, whose image challenge ends the wait at
     once. Once a widget
     has been seen, a clear detection on the same document waits up to
     :data:`RELOAD_GRACE_S` for the reload the provider starts after a pass,

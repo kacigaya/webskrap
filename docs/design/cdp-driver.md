@@ -111,9 +111,24 @@ are done:
 | `interfaces/` | CLI commands and MCP tools |
 | `security/` | URL policy and path confinement |
 
-Use these packages for internal imports. Existing imports such as
-`webskrap.client`, `webskrap.models`, and `webskrap.cdp` still work. Tests mirror
-the package layout. Tests that call third-party sites live in `tests/live/`.
+```text
+src/webskrap/
+├── __init__.py     # Public Python API
+├── errors.py       # Shared error types and codes
+├── py.typed
+├── browser/       # Browser discovery, process lifecycle, sessions, navigation
+├── challenges/    # Challenge detection and opt-in handling
+├── config/        # Session settings, profiles, and value parsing
+├── driver/        # CDP connection, launch, targets, page setup, snapshots
+├── interfaces/    # CLI, MCP tools, and the MCP guide resource text
+├── scraping/      # Client, fetch sessions, search, result models, HTML parsing
+└── security/      # URL policy and path confinement
+```
+
+Import public symbols from `webskrap`. The former flat internal modules
+(`webskrap.client`, `webskrap.models`, `webskrap.cdp`, and others) are gone.
+CLI commands and MCP tool names remain unchanged. Tests mirror the package
+layout. Tests that call third-party sites live in `tests/live/`.
 
 ## Design
 

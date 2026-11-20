@@ -72,6 +72,18 @@ class CDPBrowser:
         await asyncio.to_thread(shutil.rmtree, self.temp_dir, True)
 
 
+def kill_windows_process_tree(pid: int) -> None:
+    """Stop a Windows process and its descendants with taskkill."""
+    taskkill = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
+    # Fixed argv, no shell; the PID is an int this module recorded.
+    subprocess.run(  # nosec B603  # noqa: S603
+        [str(taskkill), "/PID", str(pid), "/T", "/F"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
 def _stop_process(process: subprocess.Popen[bytes], timeout_s: float) -> None:
     """Wait for a port-launched browser to exit, then kill its process tree.
 
@@ -85,14 +97,7 @@ def _stop_process(process: subprocess.Popen[bytes], timeout_s: float) -> None:
     except subprocess.TimeoutExpired:
         pass
     if sys.platform == "win32":
-        taskkill = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
-        # Fixed argv, no shell; the PID is this process's own child.
-        subprocess.run(  # nosec B603  # noqa: S603
-            [str(taskkill), "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        kill_windows_process_tree(process.pid)
     else:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(process.pid, signal.SIGKILL)

@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 
 from webskrap import GpuBackend, ProxyConfig, WebSkrapSession
-from webskrap.cdp import CDPPage
-from webskrap.cdp_dom import snapshot
 from webskrap.challenges import raise_for_challenge
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.snapshot import snapshot
 
 
 def live_proxy() -> ProxyConfig | None:

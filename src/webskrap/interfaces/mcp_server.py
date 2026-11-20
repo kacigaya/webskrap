@@ -1,7 +1,7 @@
 """Model Context Protocol server exposing WebSkrap over stdio.
 
 Run with ``webskrap-mcp`` (after ``pip install webskrap``) or
-``python -m webskrap.mcp_server``. Point an MCP client (Claude Desktop, Claude
+``python -m webskrap.interfaces.mcp_server``. Point an MCP client (Claude Desktop, Claude
 Code, ...) at that command to drive scraping through the tools below.
 """
 
@@ -18,12 +18,7 @@ from typing import Any, TypeVar
 from webskrap.browser import browser_session
 from webskrap.browser.channels import with_channel_fallback
 from webskrap.browser.diagnostics import diagnose
-from webskrap.config.models import (
-    BrowserProfile,
-    GpuBackend,
-    SessionConfig,
-    WaitUntil,
-)
+from webskrap.config.models import GpuBackend, SessionConfig, WaitUntil
 from webskrap.config.parsing import (
     parse_engine,
     parse_profile_mode,
@@ -31,6 +26,7 @@ from webskrap.config.parsing import (
     parse_wait_until,
     parse_webrtc_ip_handling_policy,
 )
+from webskrap.config.profile import BrowserProfile
 from webskrap.config.profiles import get_profile, list_profiles
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.interfaces.mcp_browser import EVAL_ENV as EVAL_ENV
@@ -591,7 +587,7 @@ def _guide() -> str:
     inlining it would push markdown tables through the source line-length rules
     for no benefit.
     """
-    return resources.files("webskrap").joinpath("guide.md").read_text(encoding="utf-8")
+    return resources.files("webskrap.interfaces").joinpath("guide.md").read_text(encoding="utf-8")
 
 
 @mcp.resource(

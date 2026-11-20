@@ -3,7 +3,7 @@
 Mechanical input is easy to tell from a person's: a cursor that teleports, a
 button held for two milliseconds, a page that scrolls without a wheel event.
 Behavioral detectors score exactly those signals. The helpers here produce
-the human-range values; :mod:`webskrap.cdp_dom` sends them as trusted
+the human-range values; :mod:`webskrap.driver.cdp_dom` sends them as trusted
 ``Input.dispatch*`` events.
 """
 

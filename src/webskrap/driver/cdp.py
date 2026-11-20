@@ -250,7 +250,7 @@ class CDPPage:
         target_id: The page target id, which is also its main frame id.
         pointer: Where this page's mouse last went, in viewport CSS pixels,
             or None before the first mouse event; see
-            :func:`webskrap.cdp_dom.travel`.
+            :func:`webskrap.driver.cdp_dom.travel`.
     """
 
     def __init__(self, connection: CDPConnection, session_id: str, target_id: str) -> None:
@@ -262,7 +262,7 @@ class CDPPage:
         self._events_enabled = False
         self._shared_world: int | None = None
         #: Out-of-process iframes auto-attached to this page, by target id;
-        #: see :func:`webskrap.cdp_dom.frames`. None until auto-attach is on.
+        #: see :func:`webskrap.driver.cdp_dom.frames`. None until auto-attach is on.
         self.iframe_targets: dict[str, dict[str, Any]] | None = None
         self.pointer: tuple[float, float] | None = None
 
