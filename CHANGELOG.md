@@ -37,6 +37,11 @@ history, so they summarize each release rather than list every change.
 - Turnstile's checkbox click is now the public `turnstile.click`, shared with
   the reCAPTCHA and hCaptcha solver.
 
+### Fixed
+
+- Short action timeouts no longer shorten the WebSocket handshake when
+  reconnecting to a browser session.
+
 ## [3.7.0] - 2026-11-18
 
 ### Added
