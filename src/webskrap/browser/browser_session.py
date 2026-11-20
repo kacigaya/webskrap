@@ -14,22 +14,19 @@ layers translate them for their medium.
 from __future__ import annotations
 
 import asyncio
-import errno
 import http.client
 import json
 import logging
 import os
-import re
 import shutil
-import signal
 import subprocess  # nosec B404  # noqa: S404 - fixed argv for Chromium, never a shell
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, BinaryIO, TypeVar
+from typing import Any, TypeVar
 
 from webskrap.browser import display
 from webskrap.browser.actions import DEFAULT_ACTION_TIMEOUT_MS as DEFAULT_ACTION_TIMEOUT_MS
@@ -59,6 +56,30 @@ from webskrap.browser.actions import wait_condition as wait_condition
 from webskrap.browser.actions import wait_for as wait_for
 from webskrap.browser.executable import find_executable
 from webskrap.browser.gpu import effective_gpu, require_lavapipe
+from webskrap.browser.process import (
+    _PROCESS_QUERY_LIMITED_INFORMATION as _PROCESS_QUERY_LIMITED_INFORMATION,
+)
+from webskrap.browser.process import _STILL_ACTIVE as _STILL_ACTIVE
+from webskrap.browser.process import LAUNCH_TIMEOUT_S as LAUNCH_TIMEOUT_S
+from webskrap.browser.process import PROXY_AUTH_MODULE as PROXY_AUTH_MODULE
+from webskrap.browser.process import _ps_command as _ps_command
+from webskrap.browser.process import _windows_process_start as _windows_process_start
+from webskrap.browser.process import _windows_session_running as _windows_session_running
+from webskrap.browser.process import kill_browser as kill_browser
+from webskrap.browser.process import proxy_auth_running as proxy_auth_running
+from webskrap.browser.process import session_running as session_running
+from webskrap.browser.session_state import SESSION_NAME_PATTERN as SESSION_NAME_PATTERN
+from webskrap.browser.session_state import (
+    _acquire_session_operation_lock as _acquire_session_operation_lock,
+)
+from webskrap.browser.session_state import _SessionOperationLock as _SessionOperationLock
+from webskrap.browser.session_state import create_session_dir as create_session_dir
+from webskrap.browser.session_state import is_session_dir as is_session_dir
+from webskrap.browser.session_state import read_state as read_state
+from webskrap.browser.session_state import session_dir as session_dir
+from webskrap.browser.session_state import sessions_root as sessions_root
+from webskrap.browser.session_state import state_path as state_path
+from webskrap.browser.session_state import write_state as write_state
 from webskrap.config.models import (
     BrowserProfile,
     GpuBackend,
@@ -68,8 +89,9 @@ from webskrap.config.models import (
     WebRtcIPHandlingPolicy,
 )
 from webskrap.config.profiles import get_profile
-from webskrap.driver import cdp_session
-from webskrap.driver.cdp import CDPPage, base_args
+from webskrap.driver import targets
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.launch import base_args
 from webskrap.driver.view_types import BrowserView as BrowserView
 from webskrap.driver.view_types import Viewport as Viewport
 from webskrap.errors import ErrorCode, WebSkrapError
@@ -82,19 +104,14 @@ T = TypeVar("T")
 #: The page type session actions receive; see :func:`run_page_action`.
 SessionPage = CDPPage
 
-SESSION_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 DEVTOOLS_PORT_FILE = "DevToolsActivePort"
-LAUNCH_TIMEOUT_S = 20.0
 CLOSE_TIMEOUT_S = 5.0
-_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-_STILL_ACTIVE = 259
 DEFAULT_NAVIGATION_TIMEOUT_MS = 30_000.0
 SANDBOX_ENV = "WEBSKRAP_CHROMIUM_SANDBOX"
 #: Where ``webskrap browser open --proxy`` reads proxy credentials. They are
 #: removed from the environment of the browser and the helper it starts.
 PROXY_USERNAME_ENV = "WEBSKRAP_PROXY_USERNAME"
 PROXY_PASSWORD_ENV = "WEBSKRAP_PROXY_PASSWORD"  # nosec B105  # noqa: S105 - a variable name
-PROXY_AUTH_MODULE = "webskrap.proxy_auth"
 # Chromium logs one of these when its setuid/namespace sandbox cannot start
 # (unprivileged user namespaces off, or running as root in a container).
 # Matched against the browser log, unlike errors.SANDBOX_FAILURE_MARKERS.
@@ -108,89 +125,6 @@ _LOG_SANDBOX_MARKERS = (
 
 #: Actions :func:`tabs` accepts.
 TAB_ACTIONS = ("list", "new", "select", "close")
-
-
-class _SessionOperationLock:
-    """Cross-process exclusive lock for one session's open/close operations."""
-
-    def __init__(self, handle: BinaryIO) -> None:
-        """Keep the locked file open until :meth:`release` is called."""
-        self._handle = handle
-
-    @classmethod
-    def acquire(cls, name: str) -> _SessionOperationLock:
-        """Block until this process exclusively owns ``name``'s operation lock."""
-        # Validate before creating the lock filename. The session directory is
-        # validated again inside the lock before either operation touches it.
-        session_dir(name)
-        root = sessions_root()
-        secure_directory(root, tighten_existing=False)
-        lock_directory = secure_directory(root / ".locks")
-        handle = (lock_directory / f"{name}.lock").open("a+b")
-        try:
-            if os.name == "nt":
-                import msvcrt
-
-                if handle.seek(0, os.SEEK_END) == 0:
-                    handle.write(b"\0")
-                    handle.flush()
-                handle.seek(0)
-                while True:
-                    try:
-                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                        break
-                    except OSError as exc:
-                        if exc.errno not in {errno.EACCES, errno.EDEADLK}:
-                            raise
-                        # LK_LOCK gives up after ten one-second retries, but a
-                        # valid Chromium launch may hold this lock for 20s.
-                        time.sleep(0.05)
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        except BaseException:
-            handle.close()
-            raise
-        return cls(handle)
-
-    def release(self) -> None:
-        """Release the operation lock and close its file handle."""
-        try:
-            if os.name == "nt":
-                import msvcrt
-
-                self._handle.seek(0)
-                msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
-        finally:
-            self._handle.close()
-
-
-async def _acquire_session_operation_lock(name: str) -> _SessionOperationLock:
-    """Acquire a lock in a worker, releasing it if this task is cancelled."""
-    acquire_task = asyncio.create_task(asyncio.to_thread(_SessionOperationLock.acquire, name))
-    try:
-        return await asyncio.shield(acquire_task)
-    except BaseException:
-        # Cancelling to_thread does not stop its worker. Wait for that worker to
-        # acquire, then release, or it would orphan the lock until process exit.
-        operation_lock = await acquire_task
-        await asyncio.to_thread(operation_lock.release)
-        raise
-
-
-def sessions_root() -> Path:
-    """Return the directory holding every persistent session's profile data.
-
-    ``WEBSKRAP_BROWSER_DIR`` overrides the default ``~/.webskrap/browser``.
-    """
-    if override := os.environ.get("WEBSKRAP_BROWSER_DIR"):
-        return Path(override).expanduser()
-    return Path.home() / ".webskrap" / "browser"
 
 
 def sandbox_enabled(chromium_sandbox: bool | None = None) -> bool:
@@ -210,118 +144,6 @@ def sandbox_enabled(chromium_sandbox: bool | None = None) -> bool:
     return value.strip().lower() not in ("0", "false", "no", "off")
 
 
-def session_dir(name: str) -> Path:
-    """Return a session's directory, rejecting names that escape the root.
-
-    Raises:
-        WebSkrapError: If ``name`` is ``.`` or ``..``, or contains characters
-            other than letters, digits, ``.``, ``_`` or ``-``, or if its
-            directory is a symlink.
-    """
-    # Session names become directory names, so reject path separators and
-    # anything else that could escape the sessions root.
-    if name in {".", ".."} or not SESSION_NAME_PATTERN.fullmatch(name):
-        msg = (
-            f"invalid session name '{name}': use letters, digits, '.', '_' or '-', "
-            "but not '.' or '..'"
-        )
-        raise WebSkrapError(msg, code=ErrorCode.USAGE)
-    directory = sessions_root() / name
-    if directory.is_symlink():
-        msg = f"session directory must not be a symlink: {directory}"
-        raise WebSkrapError(msg, code=ErrorCode.PATH_REJECTED)
-    return directory
-
-
-def create_session_dir(name: str) -> Path:
-    """Create a session's directory tree owner-only and return it.
-
-    Profile data under it holds cookies and logged-in state, so the session
-    directory is created (or tightened to) ``0700``. The sessions root is only
-    tightened when WebSkrap creates it: a ``WEBSKRAP_BROWSER_DIR`` the user
-    already set up may be shared on purpose, and the per-session directories
-    inside it are what actually hold the cookies.
-    """
-    directory = session_dir(name)
-    secure_directory(sessions_root(), tighten_existing=False)
-    return secure_directory(directory)
-
-
-def state_path(directory: Path) -> Path:
-    """Return the path of a session directory's state file."""
-    return directory / "state.json"
-
-
-def read_state(directory: Path) -> dict[str, Any] | None:
-    """Return a session's recorded state, or None when missing or unreadable."""
-    try:
-        state = json.loads(state_path(directory).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(state, dict) or "pid" not in state or "port" not in state:
-        return None
-    return state
-
-
-def write_state(directory: Path, state: dict[str, Any]) -> None:
-    """Write a session's state file so readers never see a partial file."""
-    # Atomic replace: a concurrent action must never read a half-written file.
-    temp_path = state_path(directory).with_suffix(".json.tmp")
-    temp_path.write_text(json.dumps(state), encoding="utf-8")
-    os.replace(temp_path, state_path(directory))
-
-
-def session_running(directory: Path, state: dict[str, Any] | None) -> bool:
-    """True when the recorded PID is alive and is this session's browser.
-
-    PIDs get recycled, so before trusting (or killing) one, require its
-    command line to reference this session's user-data directory.
-    """
-    if state is None:
-        return False
-    pid = state["pid"]
-    if sys.platform == "win32":
-        return _windows_session_running(pid, state.get("created_at"))
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except FileNotFoundError:
-        if Path("/proc/self").exists():
-            return False  # Linux: the PID is gone.
-        # No /proc (macOS, BSD): ask ps for the command line instead.
-        command = _ps_command(pid)
-        return command is not None and str(directory / "user-data").encode() in command
-    except OSError:
-        # No /proc (non-Linux): fall back to a liveness-only check.
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            return False
-        return True
-    return str(directory / "user-data").encode() in cmdline
-
-
-def _ps_command(pid: int) -> bytes | None:
-    """Return a process's full command line from ``ps``, or None if it is gone."""
-    # Fixed argv, no shell; the PID is an int this module recorded.
-    result = subprocess.run(  # nosec B603  # noqa: S603
-        ["/bin/ps", "-ww", "-o", "command=", "-p", str(pid)],
-        capture_output=True,
-        check=False,
-    )
-    return result.stdout if result.returncode == 0 else None
-
-
-def is_session_dir(path: Path) -> bool:
-    """True when ``path`` looks like a session directory this tool manages."""
-    if path.is_symlink():
-        return False
-    return (
-        path.is_dir()
-        and SESSION_NAME_PATTERN.fullmatch(path.name) is not None
-        and (state_path(path).exists() or (path / "user-data").is_dir())
-    )
-
-
 async def chromium_executable() -> str:
     """Return the binary sessions launch: installed Chrome, then Edge, then Chromium.
 
@@ -337,93 +159,6 @@ async def chromium_executable() -> str:
         with suppress(WebSkrapError):
             return str(find_executable(channel))
     return str(find_executable("chromium"))
-
-
-def _windows_session_running(pid: int, created_at: str | None) -> bool:
-    """Windows form of :func:`session_running`, without ``/proc``.
-
-    Reading another process's command line needs undocumented NT calls, so a
-    recycled PID is detected by its start time instead: the session browser
-    started at most ``LAUNCH_TIMEOUT_S`` before ``created_at`` was recorded.
-    A state without ``created_at`` cannot be matched, so it never counts.
-    """
-    if created_at is None:
-        return False
-    started = _windows_process_start(pid)
-    if started is None:
-        return False
-    try:
-        recorded = datetime.fromisoformat(created_at)
-    except ValueError:
-        return False
-    # created_at is truncated to whole seconds, so allow one second after it.
-    earliest = recorded - timedelta(seconds=LAUNCH_TIMEOUT_S + 5)
-    return earliest <= started <= recorded + timedelta(seconds=1)
-
-
-def _windows_process_start(pid: int) -> datetime | None:
-    """Return when a live Windows process started, or None if it is gone."""
-    if sys.platform != "win32":
-        return None
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return None
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return None
-        if exit_code.value != _STILL_ACTIVE:
-            return None
-        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-        if not kernel32.GetProcessTimes(
-            handle,
-            ctypes.byref(created),
-            ctypes.byref(exited),
-            ctypes.byref(kernel),
-            ctypes.byref(user),
-        ):
-            return None
-    finally:
-        kernel32.CloseHandle(handle)
-    ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime
-    # FILETIME counts 100 ns intervals since 1601-01-01 UTC.
-    return datetime(1601, 1, 1, tzinfo=UTC) + timedelta(microseconds=ticks // 10)
-
-
-def kill_browser(pid: int, *, force: bool) -> None:
-    """Stop the browser and its child processes; a vanished browser is fine.
-
-    On POSIX the browser is launched with ``start_new_session=True``, so its
-    PID is the group leader. Signalling only the leader (e.g. SIGKILL) would
-    orphan renderer children that keep holding the profile's SingletonLock.
-    Windows has no process groups: ``taskkill /T`` stops the child tree, and
-    ``/F`` is always needed because a headless browser has no window to close.
-    """
-    if sys.platform == "win32":
-        taskkill = Path(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "taskkill.exe")
-        # Fixed argv, no shell; the PID is an int this module recorded.
-        subprocess.run(  # nosec B603  # noqa: S603
-            [str(taskkill), "/PID", str(pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return
-    sig = signal.SIGKILL if force else signal.SIGTERM
-    try:
-        os.killpg(pid, sig)
-    except ProcessLookupError:
-        pass
-    except PermissionError:
-        with suppress(ProcessLookupError):
-            os.kill(pid, sig)
 
 
 def _session_config(
@@ -662,18 +397,6 @@ async def start_proxy_auth(directory: Path, port: int, credentials: tuple[str, s
         if stdout is not None:
             stdout.close()
     return process.pid
-
-
-def proxy_auth_running(pid: int) -> bool:
-    """True when ``pid`` is a live proxy authentication helper."""
-    if sys.platform == "win32":
-        # No command line to check; a recycled PID only skips a warning.
-        return _windows_process_start(pid) is not None
-    try:
-        command: bytes | None = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except FileNotFoundError:
-        command = None if Path("/proc/self").exists() else _ps_command(pid)
-    return command is not None and PROXY_AUTH_MODULE.encode() in command
 
 
 def _sandbox_hint(log_path: Path) -> str:
@@ -1111,13 +834,13 @@ async def run_page_action(
 ) -> T:
     """Connect to the session's browser, run ``action`` on the current page.
 
-    Attaches over WebSkrap's own WebSocket client (:func:`cdp_session.attach`)
-    to the current tab (:func:`cdp_session.current_page`), as each CLI
+    Attaches over WebSkrap's own WebSocket client (:func:`targets.attach`)
+    to the current tab (:func:`targets.current_page`), as each CLI
     command and MCP call is a new connection. Sessions opened by WebSkrap
     2.x, with either driver, attach the same way.
     """
     directory, state = _open_state(name)
-    async with cdp_session.attach(
+    async with targets.attach(
         name, directory / "user-data", state["port"], timeout_ms=timeout_ms
     ) as page:
         return await action(page)
@@ -1157,23 +880,19 @@ async def tabs(
         raise WebSkrapError("only 'new' takes a url", code=ErrorCode.USAGE)
     directory, state = _open_state(name)
     user_data = directory / "user-data"
-    async with cdp_session.connect(
-        name, user_data, state["port"], timeout_ms=timeout_ms
-    ) as connection:
+    async with targets.connect(name, user_data, state["port"], timeout_ms=timeout_ms) as connection:
         if action == "list":
-            listing = await cdp_session.list_tabs(connection, directory)
+            listing = await targets.list_tabs(connection, directory)
         elif action == "new":
-            listing = await cdp_session.new_tab(connection, directory)
+            listing = await targets.new_tab(connection, directory)
         elif action == "select" and index is not None:
-            listing = await cdp_session.select_tab(connection, directory, index)
+            listing = await targets.select_tab(connection, directory, index)
         else:
-            listing = await cdp_session.close_tab(connection, directory, index)
+            listing = await targets.close_tab(connection, directory, index)
     if url is None:
         return {"tabs": listing}
     loaded = await run_page_action(
         name, lambda page: goto(page, url, "load"), timeout_ms=timeout_ms
     )
-    async with cdp_session.connect(
-        name, user_data, state["port"], timeout_ms=timeout_ms
-    ) as connection:
-        return {"tabs": await cdp_session.list_tabs(connection, directory), **loaded}
+    async with targets.connect(name, user_data, state["port"], timeout_ms=timeout_ms) as connection:
+        return {"tabs": await targets.list_tabs(connection, directory), **loaded}

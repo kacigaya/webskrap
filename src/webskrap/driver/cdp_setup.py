@@ -44,7 +44,8 @@ from webskrap.config.models import (
 )
 from webskrap.config.user_agent import user_agent_metadata
 from webskrap.driver import cdp_dom
-from webskrap.driver.cdp import CDPBrowser, CDPConnection, CDPError, CDPPage
+from webskrap.driver.cdp import CDPConnection, CDPError, CDPPage
+from webskrap.driver.launch import CDPBrowser
 from webskrap.errors import ErrorCode, WebSkrapError
 
 #: CDP resource types each policy blocks.

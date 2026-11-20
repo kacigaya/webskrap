@@ -28,8 +28,10 @@ from webskrap.config.models import (
     SessionConfig,
     WaitUntil,
 )
-from webskrap.driver import cdp_dom, cdp_session, cdp_setup
-from webskrap.driver.cdp import CDPBrowser, CDPPage
+from webskrap.driver import cdp_dom, cdp_setup
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.launch import CDPBrowser
+from webskrap.driver.polling import poll
 from webskrap.errors import (
     ErrorCode,
     WebSkrapError,
@@ -545,7 +547,7 @@ async def _wait_visible(
         return await cdp_dom.element_state(page, target) == "visible"
 
     try:
-        await cdp_session.poll(visible, timeout_s * 1000, f"{target} to be visible")
+        await poll(visible, timeout_s * 1000, f"{target} to be visible")
     except WebSkrapError as exc:
         if exc.code is not ErrorCode.TIMEOUT:
             raise
@@ -558,7 +560,7 @@ async def _wait_attached(page: CDPPage, selector: str, *, timeout_s: float) -> N
     async def attached() -> bool:
         return await cdp_dom.element_state(page, selector) != "detached"
 
-    await cdp_session.poll(attached, timeout_s * 1000, selector)
+    await poll(attached, timeout_s * 1000, selector)
 
 
 async def _maybe_screenshot(page: CDPPage, screenshot: bool | str | Path) -> Path | None:

@@ -7,7 +7,7 @@ from typing import Any
 from webskrap.browser.executable import find_executable
 from webskrap.config.models import SessionConfig
 from webskrap.driver import cdp_setup
-from webskrap.driver.cdp import CDPBrowser, launch
+from webskrap.driver.launch import CDPBrowser, launch
 from webskrap.errors import (
     RECOVERY_HINTS,
     ErrorCode,

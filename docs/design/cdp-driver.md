@@ -117,7 +117,14 @@ the package layout. Tests that call third-party sites live in `tests/live/`.
 
 ## Design
 
-`src/webskrap/driver/cdp.py` is the core:
+`src/webskrap/driver/cdp.py` owns the connection, event routing, and page
+commands. `src/webskrap/driver/launch.py` starts and closes Chromium.
+`src/webskrap/driver/targets.py` attaches to running browsers and tracks tab
+selection. `src/webskrap/browser/session_state.py` owns the state files and
+locks for named sessions. `src/webskrap/browser/process.py` checks process
+identity and stops browser process trees.
+
+The driver uses the following mechanisms.
 
 - **Transport.** On Linux and macOS, Chromium starts with
   `--remote-debugging-pipe`. It reads

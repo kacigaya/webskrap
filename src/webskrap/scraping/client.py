@@ -44,7 +44,7 @@ from webskrap.config.models import (
 )
 from webskrap.config.profiles import get_profile
 from webskrap.driver import cdp_setup
-from webskrap.driver.cdp import launch
+from webskrap.driver.launch import launch
 from webskrap.errors import (
     ErrorCode,
     WebSkrapError,

@@ -20,8 +20,9 @@ import sys
 from pathlib import Path
 
 from webskrap.driver import cdp_setup
-from webskrap.driver.cdp import CDPConnection, WebSocketTransport
-from webskrap.driver.cdp_session import devtools_path
+from webskrap.driver.cdp import CDPConnection
+from webskrap.driver.targets import devtools_path
+from webskrap.driver.transport import WebSocketTransport
 
 READY = "ready"
 

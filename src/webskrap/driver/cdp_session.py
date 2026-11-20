@@ -1,40 +1,50 @@
-"""Persistent-session page operations on WebSkrap's own CDP driver.
-
-:func:`attach` reconnects to a session's running browser over the WebSocket on
-its debugging port. The other functions implement
-:mod:`webskrap.browser_session`'s page operations for a
-:class:`~webskrap.cdp.CDPPage`; that module calls them for every session.
-
-Like the fetch backend, nothing here sends ``Runtime.enable``. Reads run in
-isolated worlds. Only :func:`evaluate` touches the page's own world, because a
-caller of ``eval`` expects what page scripts see.
-"""
+"""Page actions for the CDP driver."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import json
-import math
-import os
 import struct
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager, suppress
+from collections.abc import Awaitable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, TypeVar
 
 from webskrap.config.models import ElementState, LoadState
 from webskrap.driver import cdp_dom
-from webskrap.driver.cdp import CDPConnection, CDPError, CDPPage, WebSocketTransport
+from webskrap.driver.cdp import CDPError, CDPPage
 from webskrap.driver.keyboard import key_events as key_events
 from webskrap.driver.keyboard import press as press
+from webskrap.driver.polling import _POLL_S as _POLL_S
+from webskrap.driver.polling import _within
+from webskrap.driver.polling import poll as poll
+from webskrap.driver.targets import CLOSE_TAB_TIMEOUT_MS as CLOSE_TAB_TIMEOUT_MS
+from webskrap.driver.targets import PAGE_ORDER_FILE as PAGE_ORDER_FILE
+from webskrap.driver.targets import POINTER_FILE as POINTER_FILE
+from webskrap.driver.targets import TAB_SELECTION_FILE as TAB_SELECTION_FILE
+from webskrap.driver.targets import _listing as _listing
+from webskrap.driver.targets import _ordered_pages as _ordered_pages
+from webskrap.driver.targets import _select as _select
+from webskrap.driver.targets import _tab_at as _tab_at
+from webskrap.driver.targets import _tabs as _tabs
+from webskrap.driver.targets import _write_ids as _write_ids
+from webskrap.driver.targets import attach as attach
+from webskrap.driver.targets import close_tab as close_tab
+from webskrap.driver.targets import connect as connect
+from webskrap.driver.targets import current_page as current_page
+from webskrap.driver.targets import devtools_path as devtools_path
+from webskrap.driver.targets import list_tabs as list_tabs
+from webskrap.driver.targets import new_tab as new_tab
+from webskrap.driver.targets import save_pointer as save_pointer
+from webskrap.driver.targets import saved_pointer as saved_pointer
+from webskrap.driver.targets import select_tab as select_tab
 from webskrap.driver.view_types import BrowserView, Viewport
 from webskrap.errors import ErrorCode, WebSkrapError
 
+T = TypeVar("T")
+
 _STATE_SCRIPT = "({ url: location.href, title: document.title })"
-#: How long closing a tab waits for Chromium to stop listing it.
-CLOSE_TAB_TIMEOUT_MS = 5_000
 _VIEWPORT_SCRIPT = (
     "({ width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY, "
     "dpr: devicePixelRatio })"
@@ -113,305 +123,9 @@ _UNSERIALIZABLE: dict[str, float] = {
     "-Infinity": float("-inf"),
     "-0": -0.0,
 }
-_POLL_S = 0.1
-T = TypeVar("T")
-#: Session-directory file with page target ids in creation order.
-PAGE_ORDER_FILE = "cdp-pages.json"
-#: Last mouse position per page target, kept between commands.
-POINTER_FILE = "cdp-pointer.json"
-#: Session-directory file with the selected tab and the pages known then.
-TAB_SELECTION_FILE = "cdp-tab.json"
 # networkidle has no live event to subscribe to after the fact; this quiet
 # window matches the 500 ms Chromium's own networkIdle lifecycle event uses.
 _NETWORK_QUIET_S = 0.5
-
-
-def devtools_path(user_data_dir: Path, port: int) -> str:
-    """Return the browser WebSocket path Chromium wrote for ``port``.
-
-    Chromium writes ``DevToolsActivePort`` as the port on line one and the
-    browser target path on line two. The path holds a random id, so it cannot
-    be guessed.
-    """
-    try:
-        lines = (user_data_dir / "DevToolsActivePort").read_text(encoding="utf-8").split()
-    except OSError:
-        lines = []
-    if len(lines) < 2 or lines[0] != str(port):
-        msg = "session browser has no matching DevToolsActivePort file"
-        raise WebSkrapError(msg, code=ErrorCode.SESSION_UNREACHABLE)
-    return lines[1]
-
-
-def _ordered_pages(order_file: Path, current: list[str]) -> list[str]:
-    """Return open page target ids, oldest first, and remember the order.
-
-    ``Target.getTargets`` lists targets in no defined order, and each command
-    is a new connection, so creation order is kept in ``order_file``: known
-    pages keep their place, closed ones drop out, and new ones go last.
-    Patchright's ``context.pages[-1]`` is then the last entry: the newest
-    page, such as a popup the previous command opened. :func:`attach` records
-    pages created while it is attached in creation order. Several pages
-    opened while no command runs have no known order, as with Patchright,
-    which reattaches for every command too.
-    """
-    try:
-        known = json.loads(order_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        known = []
-    if not isinstance(known, list):
-        known = []
-    ordered = [target for target in known if target in current]
-    ordered += [target for target in current if target not in ordered]
-    if ordered != known:
-        _write_ids(order_file, ordered)
-    return ordered
-
-
-def _write_ids(path: Path, data: object) -> None:
-    temp = path.with_suffix(".tmp")
-    # Owner-only like the rest of the session directory; ids only, no data.
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(data, handle)
-    os.replace(temp, path)
-
-
-def saved_pointer(path: Path, target: str) -> tuple[float, float] | None:
-    """Return the mouse position a previous command left on ``target``.
-
-    Each command connects anew, and Chromium keeps the last position, so the
-    next path starts there. None when nothing valid is saved.
-    """
-    try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    point = saved.get(target) if isinstance(saved, dict) else None
-    if (
-        isinstance(point, list)
-        and len(point) == 2
-        and all(isinstance(value, int | float) and math.isfinite(value) for value in point)
-    ):
-        return float(point[0]), float(point[1])
-    return None
-
-
-def save_pointer(path: Path, target: str, pointer: tuple[float, float], live: set[str]) -> None:
-    """Record ``target``'s mouse position, dropping pages that are gone."""
-    try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        saved = {}
-    kept = (
-        {key: value for key, value in saved.items() if key in live}
-        if isinstance(saved, dict)
-        else {}
-    )
-    _write_ids(path, {**kept, target: list(pointer)})
-
-
-def current_page(directory: Path, pages: list[str]) -> str | None:
-    """Return the page commands act on, from ``pages`` in creation order.
-
-    That is the newest page opened after the last tab selection, such as a
-    popup or a new tab; else the selected tab while it is open; else the
-    newest page, as Patchright's ``context.pages[-1]``.
-    """
-    try:
-        selection = json.loads((directory / TAB_SELECTION_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        selection = None
-    if not isinstance(selection, dict):
-        return pages[-1] if pages else None
-    known = selection.get("known")
-    newer = [page for page in pages if not isinstance(known, list) or page not in known]
-    if newer:
-        return newer[-1]
-    target = selection.get("target")
-    return target if target in pages else (pages[-1] if pages else None)
-
-
-def _select(directory: Path, target: str, pages: list[str]) -> None:
-    _write_ids(directory / TAB_SELECTION_FILE, {"target": target, "known": pages})
-
-
-@asynccontextmanager
-async def connect(
-    name: str, user_data_dir: Path, port: int, *, timeout_ms: float
-) -> AsyncIterator[CDPConnection]:
-    """Open a browser-level connection to the session browser.
-
-    Raises:
-        WebSkrapError: ``session_unreachable`` when nothing answers on the
-            session's port.
-    """
-    path = devtools_path(user_data_dir, port)
-    try:
-        transport = await WebSocketTransport.connect(
-            "127.0.0.1", port, path, timeout_s=min(timeout_ms / 1000, 10.0)
-        )
-    except (OSError, ConnectionError, TimeoutError) as exc:
-        msg = (
-            f"session '{name}' is not reachable. "
-            "Run: webskrap browser close, then webskrap browser open"
-        )
-        raise WebSkrapError(msg, code=ErrorCode.SESSION_UNREACHABLE) from exc
-    connection = CDPConnection(transport)
-    connection.default_timeout_s = timeout_ms / 1000
-    connection.start()
-    try:
-        yield connection
-    finally:
-        await connection.close()
-
-
-@asynccontextmanager
-async def attach(
-    name: str, user_data_dir: Path, port: int, *, timeout_ms: float
-) -> AsyncIterator[CDPPage]:
-    """Attach to the session browser's current page and detach on exit.
-
-    Uses :func:`current_page`, and creates a blank page when none is open.
-    The browser keeps running.
-
-    Raises:
-        WebSkrapError: ``session_unreachable`` when nothing answers on the
-            session's port.
-    """
-    async with connect(name, user_data_dir, port, timeout_ms=timeout_ms) as connection:
-        order_file = user_data_dir.parent / PAGE_ORDER_FILE
-        # Discovery first reports every existing target in no set order, so
-        # creations count only from after its reply: pages this command opens
-        # (popups) are then recorded in the order Chromium created them.
-        created: list[str] = []
-
-        def on_created(params: dict[str, Any]) -> None:
-            info = params.get("targetInfo", {})
-            if info.get("type") == "page":
-                created.append(info["targetId"])
-
-        connection.on("Target.targetCreated", on_created)
-        await connection.send("Target.setDiscoverTargets", {"discover": True})
-        created.clear()
-        targets = await connection.send("Target.getTargets")
-        pages = _ordered_pages(
-            order_file,
-            [info["targetId"] for info in targets["targetInfos"] if info["type"] == "page"],
-        )
-        target_id = current_page(user_data_dir.parent, pages)
-        if target_id is None:
-            target_id = (await connection.send("Target.createTarget", {"url": "about:blank"}))[
-                "targetId"
-            ]
-        attached = await connection.send(
-            "Target.attachToTarget", {"targetId": target_id, "flatten": True}
-        )
-        page = CDPPage(connection, attached["sessionId"], target_id)
-        page.default_timeout_s = timeout_ms / 1000
-        pointer_file = user_data_dir.parent / POINTER_FILE
-        page.pointer = saved_pointer(pointer_file, target_id)
-        start = page.pointer
-        try:
-            yield page
-        finally:
-            if created:
-                _ordered_pages(order_file, [*pages, *created])
-            if page.pointer is not None and page.pointer != start:
-                save_pointer(pointer_file, target_id, page.pointer, {*pages, *created})
-            with suppress(WebSkrapError):
-                await connection.send(
-                    "Target.detachFromTarget", {"sessionId": attached["sessionId"]}, timeout_s=2
-                )
-
-
-async def _tabs(connection: CDPConnection, directory: Path) -> list[dict[str, Any]]:
-    infos = (await connection.send("Target.getTargets"))["targetInfos"]
-    pages = {info["targetId"]: info for info in infos if info["type"] == "page"}
-    return [pages[target] for target in _ordered_pages(directory / PAGE_ORDER_FILE, list(pages))]
-
-
-def _listing(directory: Path, tabs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    current = current_page(directory, [tab["targetId"] for tab in tabs])
-    return [
-        {
-            "index": index,
-            "url": tab.get("url", ""),
-            "title": tab.get("title", ""),
-            "current": tab["targetId"] == current,
-        }
-        for index, tab in enumerate(tabs)
-    ]
-
-
-def _tab_at(tabs: list[dict[str, Any]], index: int) -> str:
-    if not 0 <= index < len(tabs):
-        msg = f"no tab {index}: the session has {len(tabs)}. Run: webskrap browser tab-list"
-        raise WebSkrapError(msg, code=ErrorCode.USAGE)
-    return str(tabs[index]["targetId"])
-
-
-async def list_tabs(connection: CDPConnection, directory: Path) -> list[dict[str, Any]]:
-    """Return ``[{"index", "url", "title", "current"}]`` in creation order."""
-    return _listing(directory, await _tabs(connection, directory))
-
-
-async def new_tab(connection: CDPConnection, directory: Path) -> list[dict[str, Any]]:
-    """Open a blank tab, make it current, and return the tab list."""
-    # Record the open tabs first, so the new one sorts last even when no
-    # command has written the order yet.
-    await _tabs(connection, directory)
-    created = await connection.send("Target.createTarget", {"url": "about:blank"})
-    tabs = await _tabs(connection, directory)
-    _select(directory, created["targetId"], [tab["targetId"] for tab in tabs])
-    return _listing(directory, tabs)
-
-
-async def select_tab(
-    connection: CDPConnection, directory: Path, index: int
-) -> list[dict[str, Any]]:
-    """Make tab ``index`` current and bring it to the front.
-
-    Raises:
-        WebSkrapError: ``usage`` when no tab has that index.
-    """
-    tabs = await _tabs(connection, directory)
-    target = _tab_at(tabs, index)
-    await connection.send("Target.activateTarget", {"targetId": target})
-    _select(directory, target, [tab["targetId"] for tab in tabs])
-    return _listing(directory, tabs)
-
-
-async def close_tab(
-    connection: CDPConnection, directory: Path, index: int | None
-) -> list[dict[str, Any]]:
-    """Close tab ``index``, or the current tab, and return the tabs left.
-
-    Closing the current tab makes the newest remaining tab current.
-
-    Raises:
-        WebSkrapError: ``usage`` when no tab has that index.
-    """
-    tabs = await _tabs(connection, directory)
-    if index is None:
-        target = current_page(directory, [tab["targetId"] for tab in tabs])
-        if target is None:
-            return []
-    else:
-        target = _tab_at(tabs, index)
-    await connection.send("Target.closeTarget", {"targetId": target})
-
-    # The target can stay listed for a moment after closeTarget returns, and
-    # the next command would then pick the closed tab as current and fail.
-    async def gone() -> bool:
-        listed = await connection.send("Target.getTargets")
-        return all(info["targetId"] != target for info in listed["targetInfos"])
-
-    with suppress(WebSkrapError):
-        await poll(gone, CLOSE_TAB_TIMEOUT_MS, "the closed tab to go away")
-    left = [tab for tab in tabs if tab["targetId"] != target]
-    _ordered_pages(directory / PAGE_ORDER_FILE, [tab["targetId"] for tab in left])
-    return _listing(directory, left)
 
 
 async def page_state(page: CDPPage) -> dict[str, Any]:
@@ -695,29 +409,6 @@ async def _drag(
 async def _drag_event(page: CDPPage, kind: str, x: float, y: float, data: dict[str, Any]) -> None:
     await page.send("Input.dispatchDragEvent", {"type": kind, "x": x, "y": y, "data": data})
     page.pointer = (x, y)
-
-
-async def _within(awaitable: Awaitable[T], deadline: float) -> T:
-    """Await ``awaitable`` but give up at ``deadline``, raising ``TimeoutError``.
-
-    A busy renderer can stall one evaluation for its whole command timeout;
-    bounding each step keeps a wait inside the time the caller asked for.
-    """
-    return await asyncio.wait_for(awaitable, max(0.0, deadline - time.monotonic()))
-
-
-async def poll(check: Callable[[], Awaitable[bool]], timeout_ms: float, what: str) -> None:
-    """Poll the async predicate ``check`` until it is true or time runs out."""
-    deadline = time.monotonic() + timeout_ms / 1000
-    while True:
-        # A navigation can destroy the isolated world mid-call; poll again.
-        with suppress(CDPError, TimeoutError):
-            if await _within(check(), deadline):
-                return
-        if time.monotonic() >= deadline:
-            msg = f"timed out after {timeout_ms:.0f}ms waiting for {what}"
-            raise WebSkrapError(msg, code=ErrorCode.TIMEOUT)
-        await asyncio.sleep(_POLL_S)
 
 
 async def wait_for(

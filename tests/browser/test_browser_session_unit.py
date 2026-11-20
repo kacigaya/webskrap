@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from webskrap import browser_session, display
+from webskrap.browser import process as browser_process
 from webskrap.client import WebSkrapError
 from webskrap.errors import ErrorCode
 from webskrap.models import GpuBackend
@@ -797,7 +798,7 @@ def test_windows_session_running_rejects_recycled_pid(monkeypatch: pytest.Monkey
     created_at = "2026-01-01T12:00:00+00:00"
     recorded = datetime.fromisoformat(created_at)
     start: list[datetime | None] = [recorded - timedelta(seconds=3)]
-    monkeypatch.setattr(browser_session, "_windows_process_start", lambda _pid: start[0])
+    monkeypatch.setattr(browser_process, "_windows_process_start", lambda _pid: start[0])
 
     assert browser_session._windows_session_running(1, created_at)
     assert not browser_session._windows_session_running(1, None)

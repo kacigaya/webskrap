@@ -8,7 +8,7 @@ can edit a profile without changing the bundled one.
 
 from __future__ import annotations
 
-from webskrap.config.models import BrowserProfile, Viewport
+from webskrap.config.profile import BrowserProfile, Viewport
 
 _PROFILES: dict[str, BrowserProfile] = {
     "desktop-chrome": BrowserProfile(

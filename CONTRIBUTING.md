@@ -83,9 +83,9 @@ lets the same rule catch an unsafe use somewhere else.
 | `browser` | Launches a local Chromium | `pytest -m browser` |
 | `live` | Hits public bot-detection demos | `WEBSKRAP_LIVE=1 pytest -m live` |
 
-Live tests are opt-in because they depend on third-party sites; they are not
-part of CI and a failure there usually says more about the site than about
-your change. Browser tests need `webskrap install` to have run. Live suites
+CI runs the official Turnstile, reCAPTCHA, and hCaptcha test keys in
+`tests/live/`. The other live tests are opt-in because they depend on
+third-party sites. Browser tests need `webskrap install` to have run. Live suites
 honor `WEBSKRAP_CHROMIUM_SANDBOX=0`, and `WEBSKRAP_LIVE_VIRTUAL_DISPLAY=1` runs
 the headless suite on a private Xvfb display (Linux) instead of masking the
 headless user agent. On hosts without a GPU, `WEBSKRAP_LIVE_GPU=mesa` renders
@@ -112,7 +112,8 @@ attributes.
   and exported names go in `__all__`.
 - Update docstrings and the docs site when behavior changes. Public functions,
   classes, and modules need docstrings — Ruff enforces this.
-- Make sure the checks above pass locally. CI runs them on three interpreters.
+- Make sure the checks above pass locally. CI runs unit tests on five Python
+versions and browser tests on Linux, macOS, and Windows.
 
 ## Changelog
 
