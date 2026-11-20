@@ -143,15 +143,16 @@ async def connect(
 ) -> AsyncIterator[CDPConnection]:
     """Open a browser-level connection to the session browser.
 
+    The WebSocket uses its own connection timeout. ``timeout_ms`` sets the
+    default reply timeout for CDP commands after the connection opens.
+
     Raises:
         WebSkrapError: ``session_unreachable`` when nothing answers on the
             session's port.
     """
     path = devtools_path(user_data_dir, port)
     try:
-        transport = await WebSocketTransport.connect(
-            "127.0.0.1", port, path, timeout_s=min(timeout_ms / 1000, 10.0)
-        )
+        transport = await WebSocketTransport.connect("127.0.0.1", port, path)
     except (OSError, ConnectionError, TimeoutError) as exc:
         msg = (
             f"session '{name}' is not reachable. "

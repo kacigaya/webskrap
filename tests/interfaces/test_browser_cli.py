@@ -451,7 +451,7 @@ def test_wait_fails_when_the_condition_never_holds(persistent_session_env: Path)
             env=env,
         )
 
-        assert result.exit_code == EXIT_CODES[ErrorCode.TIMEOUT]
+        assert result.exit_code == EXIT_CODES[ErrorCode.TIMEOUT], result.output
         assert "timed out after 500ms" in result.output
     finally:
         runner.invoke(cli.app, ["browser", "close"], env=env)

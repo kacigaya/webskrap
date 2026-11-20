@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-11-20
+
 ### Added
 
 - `solve_recaptcha` (CLI `--solve-recaptcha`; MCP `fetch`, `stealth_fetch`,
@@ -26,13 +28,19 @@ history, so they summarize each release rather than list every change.
 
 - Removed flat internal import modules such as `webskrap.client`,
   `webskrap.models` and `webskrap.cdp`. Import public symbols from `webskrap`;
-  CLI commands and MCP tool names are unchanged. The long MCP guide moved to
+  CLI commands and MCP tool names stay the same. For module-based MCP startup,
+  use `python -m webskrap.interfaces.mcp_server`. The long MCP guide moved to
   `src/webskrap/interfaces/guide.md`.
 - A 403, 429 or 503 page that carries a reCAPTCHA v2 or hCaptcha checkbox is
   now detected as a challenge, so fetch raises `blocked` and browser sessions
   report it, instead of returning the page as an ordinary HTTP error.
 - Turnstile's checkbox click is now the public `turnstile.click`, shared with
   the reCAPTCHA and hCaptcha solver.
+
+### Fixed
+
+- Short action timeouts no longer shorten the WebSocket handshake when
+  reconnecting to a browser session.
 
 ## [3.7.0] - 2026-11-18
 
@@ -1179,7 +1187,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/kacigaya/webskrap/compare/v3.7.0...v4.0.0
 [3.7.0]: https://github.com/kacigaya/webskrap/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/kacigaya/webskrap/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/kacigaya/webskrap/compare/v3.5.0...v3.6.0

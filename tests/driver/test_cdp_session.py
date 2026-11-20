@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from http_fixtures import CDPHandler
@@ -26,6 +27,7 @@ from webskrap.driver.targets import (
     TAB_SELECTION_FILE,
     _ordered_pages,
     _select,
+    connect,
     current_page,
     devtools_path,
 )
@@ -146,6 +148,18 @@ def test_devtools_path_must_match_the_session_port(tmp_path: Path) -> None:
     with pytest.raises(WebSkrapError) as error:
         devtools_path(tmp_path, 9999)
     assert error.value.code is ErrorCode.SESSION_UNREACHABLE
+
+
+async def test_session_handshake_uses_transport_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "DevToolsActivePort").write_text("4242\n/devtools/browser/abc\n")
+    handshake = AsyncMock(return_value=AsyncMock(spec=WebSocketTransport))
+    monkeypatch.setattr(WebSocketTransport, "connect", handshake)
+
+    async with connect("default", tmp_path, 4242, timeout_ms=500) as connection:
+        handshake.assert_awaited_once_with("127.0.0.1", 4242, "/devtools/browser/abc")
+        assert connection.default_timeout_s == 0.5
 
 
 def test_page_order_keeps_creation_order_across_connections(tmp_path: Path) -> None:
