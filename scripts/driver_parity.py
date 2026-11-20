@@ -1,7 +1,7 @@
 """Compare WebSkrap's client and its bare CDP core on public anti-bot test pages.
 
 The ``client`` path is what callers get: a WebSkrapClient session with its
-page setup. The ``core`` path is a bare :func:`webskrap.cdp.launch` with the
+page setup. The ``core`` path is a bare :func:`webskrap.driver.cdp.launch` with the
 same flags. A gap between them points at the client's page setup.
 
 Each run starts a fresh browser and profile, loads one target, and polls a
@@ -34,12 +34,16 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from webskrap import SessionConfig, WebSkrapClient, browser_session, cdp_dom
-from webskrap.browser_session import sandbox_enabled
-from webskrap.cdp import CDPPage, find_executable, launch
+from webskrap import SessionConfig, WebSkrapClient
+from webskrap.browser import actions, browser_session
+from webskrap.browser.browser_session import sandbox_enabled
+from webskrap.browser.display import VirtualDisplay
+from webskrap.browser.executable import find_executable
 from webskrap.challenges import _DETECT_SCRIPT
-from webskrap.display import VirtualDisplay
-from webskrap.profiles import get_profile
+from webskrap.config.profiles import get_profile
+from webskrap.driver import cdp_dom
+from webskrap.driver.cdp import CDPPage
+from webskrap.driver.launch import launch
 
 REPORT = Path(".webskrap/reports/driver-parity.json")
 
@@ -214,13 +218,13 @@ def _via_session() -> Callable[[str, str], AbstractAsyncContextManager[Page]]:
             async def act(action: Callable[[Any], Awaitable[Any]]) -> Any:
                 return await browser_session.run_page_action(name, action, timeout_ms=60_000)
 
-            await act(lambda page: browser_session.goto(page, url, "commit"))
+            await act(lambda page: actions.goto(page, url, "commit"))
 
             async def evaluate(script: str) -> Any:
-                return await act(lambda page: browser_session.evaluate(page, script))
+                return await act(lambda page: actions.evaluate(page, script))
 
             async def screenshot(path: Path) -> None:
-                await act(lambda page: browser_session.screenshot(page, path, full_page=False))
+                await act(lambda page: actions.screenshot(page, path, full_page=False))
 
             yield Page(evaluate, screenshot)
         finally:

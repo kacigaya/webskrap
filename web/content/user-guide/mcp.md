@@ -52,7 +52,7 @@ uvx webskrap mcp
 You can also run it as a module:
 
 ```bash
-python -m webskrap.mcp_server
+python -m webskrap.interfaces.mcp_server
 ```
 
 ## Tools

@@ -44,8 +44,8 @@ dev = [
 ]
 
 [project.scripts]
-webskrap = "webskrap.cli:app"
-webskrap-mcp = "webskrap.mcp_server:main"
+webskrap = "webskrap.interfaces.cli:app"
+webskrap-mcp = "webskrap.interfaces.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/kacigaya/webskrap"

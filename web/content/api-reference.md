@@ -31,14 +31,14 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 | `SearchEngine` | Results page a search loads: `BING` (default) or `DDG` (DuckDuckGo HTML). Google is not offered. |
 | `WebRtcIPHandlingPolicy` | Allowed WebRTC ICE policy values: `default`, `default_public_and_private_interfaces`, `default_public_interface_only`, `disable_non_proxied_udp`. |
 
-## CLI and MCP internals
+## Internal modules
 
-`webskrap.browser_session` and `webskrap.paths` implement persistent CLI and
-MCP browser sessions, sandbox selection, profile storage, and confined MCP
-output. These modules are not re-exported from `webskrap` and are not part of
-the stable public Python API. Use the [`webskrap browser` CLI](/docs/user-guide/cli/#interactive-browser-sessions)
+The implementation is organized under `webskrap.browser`, `webskrap.driver`,
+`webskrap.interfaces`, and other package directories. These modules are
+internal, not part of the stable Python API. Import public symbols from
+`webskrap`; use the [`webskrap browser` CLI](/docs/user-guide/cli/#interactive-browser-sessions)
 or the [MCP browser tools](/docs/user-guide/mcp/#interactive-browser-tools)
-instead of importing their helpers directly.
+for interactive sessions.
 
 ## Profiles
 

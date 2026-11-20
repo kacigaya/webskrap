@@ -77,7 +77,7 @@ for later commands. On a remote host, use a desktop connection to its display.
 Keep `profile_mode="native"` for the browser's own identity. On Linux with Xvfb,
 `virtual_display=True` runs a headed browser without a visible desktop window.
 Full profile emulation is useful for device tests, but cannot replace every
-worker or iframe value. See the [identity limits](src/webskrap/guide.md).
+worker or iframe value. See the [identity limits](src/webskrap/interfaces/guide.md).
 
 ## Python batches
 

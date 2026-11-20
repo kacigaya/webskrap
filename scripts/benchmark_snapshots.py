@@ -19,8 +19,10 @@ from pathlib import Path
 
 import tiktoken
 
-from webskrap import browser_session, cdp_dom
-from webskrap.cdp import find_executable, launch
+from webskrap.browser import actions
+from webskrap.browser.executable import find_executable
+from webskrap.driver import snapshot as cdp_snapshot
+from webskrap.driver.launch import launch
 
 
 def usage():
@@ -113,21 +115,21 @@ async def run(source, repeats):
                         start = time.perf_counter()
                         if mode == "find":
                             pattern = re.compile("(?i)" + re.escape(label))
-                            tree = await cdp_dom.snapshot(page, pattern=pattern)
-                            tree, total = await cdp_dom.matching_snapshot(tree, pattern, 20)
+                            tree = await cdp_snapshot.snapshot(page, pattern=pattern)
+                            tree, total = await cdp_snapshot.matching_snapshot(tree, pattern, 20)
                             payload = {
-                                **await browser_session.page_state(page),
+                                **await actions.page_state(page),
                                 "snapshot": tree,
                                 "matches_total": total,
                                 "matches_truncated": total > 20,
                             }
                         else:
-                            walker = baseline if mode == "baseline" else cdp_dom
+                            walker = baseline if mode == "baseline" else cdp_snapshot
                             payload = {
-                                **await browser_session.page_state(page),
+                                **await actions.page_state(page),
                                 "snapshot": await walker.snapshot(page, depth=6),
                             }
-                        payload = browser_session.shape_snapshot(payload, 8000, offset)
+                        payload = actions.shape_snapshot(payload, 8000, offset)
                         latencies.append((time.perf_counter() - start) * 1000)
                         responses.append(json.dumps(payload, ensure_ascii=False))
                         match = re.search(
@@ -152,8 +154,8 @@ async def run(source, repeats):
                             }
                         )
                     )
-                    await browser_session.element_action(page, action, ref, values)
-                    responses.append(json.dumps(await browser_session.page_state(page)))
+                    await actions.element_action(page, action, ref, values)
+                    responses.append(json.dumps(await actions.page_state(page)))
                 success = (
                     await page.evaluate("document.querySelector('#result').textContent")
                     == "Saved Updated"

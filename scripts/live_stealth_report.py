@@ -20,8 +20,8 @@ DEFAULT_REPORT_DIR = ROOT / ".webskrap" / "reports"
 DEFAULT_JSON = DEFAULT_REPORT_DIR / "live-stealth-results.json"
 DEFAULT_HTML = DEFAULT_REPORT_DIR / "live-stealth-results.html"
 SUITES = (
-    ROOT / "tests" / "test_bot_detection.py",
-    ROOT / "tests" / "test_bot_detection_headless.py",
+    ROOT / "tests" / "live" / "test_bot_detection.py",
+    ROOT / "tests" / "live" / "test_bot_detection_headless.py",
 )
 
 

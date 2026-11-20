@@ -20,7 +20,7 @@ from benchmark_snapshots import task_html, usage
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from webskrap.cdp import find_executable
+from webskrap.browser.executable import find_executable
 
 
 async def run():

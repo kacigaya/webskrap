@@ -1,0 +1,1062 @@
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from webskrap.browser import browser_session, diagnostics
+from webskrap.config.models import GpuBackend, SessionConfig
+from webskrap.config.profiles import list_profiles
+from webskrap.config.search import SearchEngine
+from webskrap.driver.launch import CDPBrowser
+from webskrap.errors import RECOVERY_HINTS, ErrorCode, WebSkrapError
+from webskrap.interfaces import mcp_browser, mcp_server
+from webskrap.scraping.fetch_runtime import FetchRuntime
+from webskrap.scraping.results import FetchResult, Link, SearchHit, SearchResult
+from webskrap.scraping.session import WebSkrapSession
+from webskrap.security.paths import MCP_PROFILE_DIR_ENV, OUTPUT_DIR_ENV
+
+
+class _FakeClient:
+    calls: list[dict[str, Any]] = []
+
+    async def __aenter__(self) -> _FakeClient:
+        return self
+
+    async def __aexit__(
+        self,
+        _exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
+        return None
+
+    async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+        self.calls.append({"url": url, **kwargs})
+        text = "Readable body" if kwargs.get("text_only") else "<html>abcdef</html>"
+        return FetchResult(
+            url=url,
+            final_url=f"{url}/final",
+            status=200,
+            ok=True,
+            headers={"content-type": "text/html"},
+            text=text,
+            title="Example",
+            cookies=[],
+            timings={"elapsed_ms": 12.34},
+        )
+
+    async def search(self, query: str, **kwargs: Any) -> SearchResult:
+        self.calls.append({"query": query, **kwargs})
+        hits = [
+            SearchHit(title="Example Domain", url="https://example.com/", snippet="Illustrative."),
+            SearchHit(title="IANA", url="https://www.iana.org/help/example-domains"),
+        ]
+        return SearchResult(
+            query=query,
+            engine=kwargs["engine"],
+            url="https://www.bing.com/search?q=example+domain",
+            final_url="https://www.bing.com/search?q=example+domain",
+            status=200,
+            ok=True,
+            hits=hits[: kwargs["max_results"]],
+            hits_total=len(hits),
+            timings={"elapsed_ms": 12.34},
+        )
+
+
+def _fake_client(monkeypatch: Any) -> None:
+    _FakeClient.calls = []
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _FakeClient)
+
+
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_ready_selector_is_forwarded(tool, monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    asyncio.run(tool("https://example.test", ready_selector="#quote"))
+    assert _FakeClient.calls[0]["ready_selector"] == "#quote"
+
+
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_challenge_carries_blocked_code_and_hint(tool, monkeypatch: Any) -> None:
+    calls = []
+
+    class BlockedClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            calls.append(url)
+            raise WebSkrapError("DataDome served a bot challenge", code=ErrorCode.BLOCKED)
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", BlockedClient)
+    with pytest.raises(WebSkrapError) as error:
+        asyncio.run(tool("https://example.test"))
+    assert error.value.code is ErrorCode.BLOCKED
+    assert "[code: blocked]" in str(error.value)
+    assert RECOVERY_HINTS[ErrorCode.BLOCKED] in str(error.value)
+    assert calls == ["https://example.test"]
+
+
+def test_fetch_defaults_to_clean_text(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.fetch("https://example.test"))
+
+    assert _FakeClient.calls[0]["text_only"] is True
+    assert result["text"] == "Readable body"
+
+
+def test_fetch_uses_headless_chrome_by_default(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    asyncio.run(mcp_server.fetch("https://example.test"))
+
+    config = _FakeClient.calls[0]["config"]
+    assert config.channel == "chrome"
+    assert config.headless is True
+    assert _FakeClient.calls[0]["wait_until"] == "domcontentloaded"
+
+
+def test_fetch_text_only_false_returns_html(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.fetch("https://example.test", text_only=False))
+
+    assert _FakeClient.calls[0]["text_only"] is False
+    assert result["text"] == "<html>abcdef</html>"
+
+
+def test_stealth_fetch_defaults_to_clean_text(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.stealth_fetch("https://example.test"))
+
+    assert _FakeClient.calls[0]["text_only"] is True
+    assert result["text"] == "Readable body"
+
+
+def test_stealth_fetch_exposes_resource_and_wait_controls(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    asyncio.run(
+        mcp_server.stealth_fetch("https://example.test", resource_policy="lite", wait_until="load")
+    )
+    assert _FakeClient.calls[0]["config"].resource_policy.value == "lite"
+    assert _FakeClient.calls[0]["wait_until"] == "load"
+    assert _FakeClient.calls[0]["decline_cookies"] is True
+    assert _FakeClient.calls[0]["solve_cloudflare"] is False
+    assert _FakeClient.calls[0]["solve_datadome"] is False
+    assert _FakeClient.calls[0]["solve_perimeterx"] is False
+    assert _FakeClient.calls[0]["solve_recaptcha"] is False
+
+
+@pytest.mark.parametrize(
+    "name", ["solve_cloudflare", "solve_datadome", "solve_perimeterx", "solve_recaptcha"]
+)
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_tools_pass_solve_flags(monkeypatch: Any, tool: Any, name: str) -> None:
+    _fake_client(monkeypatch)
+    asyncio.run(tool("https://example.test", **{name: True}))
+    assert _FakeClient.calls[0][name] is True
+    assert getattr(_FakeClient.calls[0]["config"], name) is True
+
+
+@pytest.mark.parametrize("kwargs", [{"resource_policy": "invalid"}, {"wait_until": "invalid"}])
+def test_stealth_fetch_rejects_bad_controls_before_launch(monkeypatch, kwargs) -> None:
+    _fake_client(monkeypatch)
+    with pytest.raises(WebSkrapError):
+        asyncio.run(mcp_server.stealth_fetch("https://example.test", **kwargs))
+    assert _FakeClient.calls == []
+
+
+def test_context_is_injected_and_not_exposed_in_fetch_schema() -> None:
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    for name in ("fetch", "stealth_fetch", "fetch_session_close"):
+        assert "ctx" not in tools[name].input_schema["properties"]
+        assert "session" in tools[name].input_schema["properties"]
+    assert tools["fetch_session_close"].annotations.destructive_hint is True
+
+
+def test_stealth_fetch_confines_persistent_profile(monkeypatch: Any, tmp_path: Path) -> None:
+    _fake_client(monkeypatch)
+    root = tmp_path / "profiles"
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(root))
+
+    asyncio.run(mcp_server.stealth_fetch("https://example.test", user_data_dir="accounts/shop"))
+
+    config = _FakeClient.calls[0]["config"]
+    assert config.user_data_dir == root / "accounts" / "shop"
+    assert config.user_data_dir.is_dir()
+
+
+@pytest.mark.parametrize("path", [".", "..", "../escape", "/tmp/escape"])
+def test_stealth_fetch_rejects_profile_paths_outside_root(
+    monkeypatch: Any, tmp_path: Path, path: str
+) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(tmp_path / "profiles"))
+
+    with pytest.raises(WebSkrapError, match="profile path must"):
+        asyncio.run(mcp_server.stealth_fetch("https://example.test", user_data_dir=path))
+
+    assert _FakeClient.calls == []
+
+
+def test_stealth_fetch_rejects_profile_symlink_outside_root(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    _fake_client(monkeypatch)
+    root = tmp_path / "profiles"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "escape").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(root))
+
+    with pytest.raises(WebSkrapError, match="profile path must stay inside"):
+        asyncio.run(
+            mcp_server.stealth_fetch(
+                "https://example.test",
+                user_data_dir="escape/account",
+            )
+        )
+
+    assert _FakeClient.calls == []
+
+
+def test_search_is_registered_read_only_and_open_world() -> None:
+    tools = {tool.name: tool for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    tool = tools["search"]
+    assert tool.title == "Search the web"
+    assert tool.annotations is not None
+    assert tool.annotations.read_only_hint is True
+    assert tool.annotations.open_world_hint is True
+    assert tool.input_schema["required"] == ["query"]
+    assert tool.input_schema["properties"]["engine"]["default"] == "bing"
+    assert tool.input_schema["properties"]["max_results"]["default"] == 10
+
+
+def test_search_returns_the_shared_payload(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.search("example domain", max_results=1))
+
+    assert result == {
+        "query": "example domain",
+        "engine": "bing",
+        "url": "https://www.bing.com/search?q=example+domain",
+        "final_url": "https://www.bing.com/search?q=example+domain",
+        "status": 200,
+        "ok": True,
+        "hits": [
+            {"title": "Example Domain", "url": "https://example.com/", "snippet": "Illustrative."}
+        ],
+        "hits_total": 2,
+        "hits_truncated": True,
+        "elapsed_ms": 12.3,
+        "cookie_notice_declined": None,
+    }
+
+
+def test_search_uses_the_stealth_fetch_configuration(monkeypatch: Any, tmp_path: Path) -> None:
+    _fake_client(monkeypatch)
+    root = tmp_path / "profiles"
+    monkeypatch.setenv(MCP_PROFILE_DIR_ENV, str(root))
+
+    asyncio.run(
+        mcp_server.search(
+            "example domain",
+            engine="ddg",
+            user_data_dir="search/ddg",
+            webrtc_ip_handling_policy="disable_non_proxied_udp",
+            fake_media_devices=True,
+            decline_cookies=False,
+        )
+    )
+
+    call = _FakeClient.calls[0]
+    assert call["engine"] is SearchEngine.DDG
+    config = call["config"]
+    assert config.channel == "chrome"
+    assert config.headless is True
+    assert config.user_data_dir == root / "search" / "ddg"
+    assert config.webrtc_ip_handling_policy == "disable_non_proxied_udp"
+    assert config.fake_media_devices is True
+    assert config.decline_cookies is False
+
+
+def test_search_rejects_an_unknown_engine(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    with pytest.raises(WebSkrapError) as excinfo:
+        asyncio.run(mcp_server.search("example domain", engine="google"))
+
+    assert excinfo.value.code is ErrorCode.USAGE
+    assert "engine must be one of: ddg, bing" in str(excinfo.value)
+    assert _FakeClient.calls == []
+
+
+def test_search_blocked_failure_carries_its_hint(monkeypatch: Any) -> None:
+    class _BlockedClient(_FakeClient):
+        async def search(self, query: str, **kwargs: Any) -> SearchResult:
+            raise WebSkrapError("ddg answered with a bot challenge", code=ErrorCode.BLOCKED)
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _BlockedClient)
+
+    with pytest.raises(WebSkrapError) as excinfo:
+        asyncio.run(mcp_server.search("example domain"))
+
+    assert excinfo.value.code is ErrorCode.BLOCKED
+    assert "[code: blocked]" in str(excinfo.value)
+    assert RECOVERY_HINTS[ErrorCode.BLOCKED] in str(excinfo.value)
+
+
+def test_browser_tools_are_registered() -> None:
+    names = {tool.name for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    assert {
+        "browser_open",
+        "browser_goto",
+        "browser_snapshot",
+        "browser_interact",
+        "browser_wait_for",
+        "browser_press",
+        "browser_solve_captcha",
+        "browser_screenshot",
+        "browser_eval",
+        "browser_close",
+        "browser_list",
+        "browser_tabs",
+    } <= names
+
+
+def test_browser_solve_captcha_runs_the_session_action(monkeypatch: Any) -> None:
+    calls: list[Any] = []
+
+    async def browser_action(session: str, run: Any, timeout_ms: float) -> dict[str, Any]:
+        calls.append((session, timeout_ms))
+        return await run("page")
+
+    async def solve_captcha(page: Any) -> dict[str, Any]:
+        return {"url": "u", "title": "t", "captcha": {"provider": "hCaptcha", "state": page}}
+
+    monkeypatch.setattr(mcp_browser, "_browser_action", browser_action)
+    monkeypatch.setattr(mcp_browser.actions, "solve_captcha", solve_captcha)
+    result = asyncio.run(mcp_server.browser_solve_captcha(session="form"))
+    assert result["captcha"] == {"provider": "hCaptcha", "state": "page"}
+    assert calls == [("form", 30_000)]
+
+
+def test_browser_interact_rejects_unknown_action() -> None:
+    with pytest.raises(WebSkrapError, match="unknown action"):
+        asyncio.run(mcp_server.browser_interact("explode", "e1"))
+
+
+def test_browser_interact_validates_value_arity() -> None:
+    with pytest.raises(WebSkrapError, match="exactly one value"):
+        asyncio.run(mcp_server.browser_interact("fill", "e1"))
+    with pytest.raises(WebSkrapError, match="no value"):
+        asyncio.run(mcp_server.browser_interact("click", "e1", values=["x"]))
+
+
+def test_browser_action_without_open_session(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_goto("https://example.test"))
+
+
+def test_browser_list_empty(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    assert asyncio.run(mcp_server.browser_list()) == {"sessions": []}
+
+
+def test_browser_screenshot_generates_a_name_in_the_output_root(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    # No session is open, so the tool fails after the path has been accepted:
+    # the directory is created, which is what this asserts.
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_screenshot())
+
+    assert (tmp_path / "out").is_dir()
+
+
+def test_browser_screenshot_creates_nested_directories(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_screenshot(path="runs/today/shot.png"))
+
+    assert (tmp_path / "out" / "runs" / "today").is_dir()
+
+
+@pytest.mark.parametrize(
+    ("path", "message"),
+    [
+        pytest.param("../escape.png", "escapes it", id="parent"),
+        pytest.param("runs/../../escape.png", "escapes it", id="normalized-traversal"),
+        pytest.param("/etc/escape.png", "is absolute", id="absolute"),
+        pytest.param("/tmp/escape.png", "is absolute", id="absolute-tmp"),
+    ],
+)
+def test_browser_screenshot_rejects_paths_outside_the_output_root(
+    monkeypatch: Any, tmp_path: Path, path: str, message: str
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    with pytest.raises(WebSkrapError, match=message):
+        asyncio.run(mcp_server.browser_screenshot(path=path))
+
+    assert not (tmp_path / "escape.png").exists()
+
+
+@pytest.mark.parametrize("session", [".", ".."])
+def test_browser_close_delete_data_rejects_traversal(
+    monkeypatch: Any, tmp_path: Path, session: str
+) -> None:
+    browser_root = tmp_path / "browser"
+    browser_root.mkdir()
+    marker = tmp_path / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(browser_root))
+
+    with pytest.raises(WebSkrapError, match="invalid session name"):
+        asyncio.run(mcp_server.browser_close(session=session, delete_data=True))
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.browser
+def test_browser_mcp_lifecycle(monkeypatch: Any, persistent_session_env: Path) -> None:
+    tmp_path = persistent_session_env
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+    page = (
+        "data:text/html,<title>mcp-test</title>"
+        "<button onclick=\"this.textContent='clicked'\">Press me</button>"
+    )
+
+    opened = asyncio.run(mcp_server.browser_open())
+    assert opened["reused"] is False
+    try:
+        goto = asyncio.run(mcp_server.browser_goto(page))
+        assert goto["title"] == "mcp-test"
+
+        snapshot = asyncio.run(mcp_server.browser_snapshot())
+        assert snapshot["snapshot_truncated"] is False
+        ref = snapshot["snapshot"].split('button "Press me" [ref=')[1].split("]")[0]
+
+        short = asyncio.run(mcp_server.browser_snapshot(max_chars=10))
+        assert short["snapshot_truncated"] is True
+        assert len(short["snapshot"]) == 10
+        # The clipped tail is reachable rather than lost.
+        rest = asyncio.run(mcp_server.browser_snapshot(offset=short["next_snapshot_offset"]))
+        assert short["snapshot"] + rest["snapshot"] == snapshot["snapshot"]
+        assert rest["next_snapshot_offset"] is None
+
+        clicked = asyncio.run(mcp_server.browser_interact("click", ref))
+        assert clicked["title"] == "mcp-test"
+
+        evaluated = asyncio.run(
+            mcp_server.browser_eval("document.querySelector('button').textContent")
+        )
+        assert evaluated["result"] == "clicked"
+        assert evaluated["result_truncated"] is False
+
+        # Screenshots are confined to the output root, so ask for a relative
+        # name and assert it landed inside it.
+        shot = asyncio.run(mcp_server.browser_screenshot(path="runs/shot.png"))
+        assert shot["path"] == str(tmp_path / "out" / "runs" / "shot.png")
+        assert Path(shot["path"]).stat().st_size > 0
+
+        listed = asyncio.run(mcp_server.browser_list())
+        assert listed["sessions"][0]["running"] is True
+    finally:
+        closed = asyncio.run(mcp_server.browser_close())
+
+    assert closed["closed"] == [{"session": "default", "deleted_data": False}]
+    with pytest.raises(WebSkrapError, match="not open"):
+        asyncio.run(mcp_server.browser_snapshot())
+
+
+def test_fetch_pages_through_text_with_offset(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    first = asyncio.run(mcp_server.fetch("https://example.test", max_chars=5))
+    assert first["text"] == "Reada"
+    assert first["next_text_offset"] == 5
+
+    rest = asyncio.run(
+        mcp_server.fetch("https://example.test", max_chars=5, offset=first["next_text_offset"])
+    )
+    assert rest["text"] == "ble b"
+
+
+def test_stealth_fetch_accepts_an_offset(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.stealth_fetch("https://example.test", max_chars=4, offset=9))
+
+    assert result["text"] == "body"
+    assert result["text_offset"] == 9
+    assert result["next_text_offset"] is None
+
+
+def test_fetch_does_not_collect_links_unless_asked(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    result = asyncio.run(mcp_server.fetch("https://example.test"))
+
+    assert _FakeClient.calls[0]["include_links"] is False
+    assert result["links"] == []
+    assert result["links_truncated"] is False
+
+
+def test_fetch_forwards_the_link_budget(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+
+    asyncio.run(mcp_server.fetch("https://example.test", include_links=True, max_links=5))
+
+    assert _FakeClient.calls[0]["include_links"] is True
+    assert _FakeClient.calls[0]["max_links"] == 5
+
+
+def test_shaped_links_report_what_the_cap_dropped(monkeypatch: Any) -> None:
+    class _LinkClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            result = await super().fetch(url, **kwargs)
+            return result.model_copy(
+                update={"links": [Link(href="https://a.test", text="A")], "links_total": 4}
+            )
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _LinkClient)
+
+    result = asyncio.run(mcp_server.fetch("https://example.test", include_links=True))
+
+    assert result["links"] == [{"href": "https://a.test", "text": "A"}]
+    assert result["links_total"] == 4
+    assert result["links_truncated"] is True
+
+
+def test_browser_wait_for_requires_exactly_one_condition() -> None:
+    with pytest.raises(WebSkrapError, match="exactly one of"):
+        asyncio.run(mcp_server.browser_wait_for())
+    with pytest.raises(WebSkrapError, match="exactly one of"):
+        asyncio.run(mcp_server.browser_wait_for(text="a", selector="b"))
+
+
+def test_browser_wait_for_rejects_a_load_state_that_cannot_be_awaited() -> None:
+    with pytest.raises(WebSkrapError, match="load_state must be one of") as caught:
+        asyncio.run(mcp_server.browser_wait_for(load_state="commit"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+@pytest.mark.browser
+def test_browser_wait_for_deferred_text(persistent_session_env: Path) -> None:
+    page = (
+        "data:text/html,<title>deferred</title><p id=status>Loading</p>"
+        "<script>setTimeout(() => {"
+        "document.getElementById('status').textContent = 'Ready';"
+        "}, 400)</script>"
+    )
+    asyncio.run(mcp_server.browser_open(page))
+    try:
+        waited = asyncio.run(mcp_server.browser_wait_for(text="Ready"))
+        assert waited["matched"] == "text"
+        assert waited["title"] == "deferred"
+
+        gone = asyncio.run(mcp_server.browser_wait_for(text_gone="Loading"))
+        assert gone["matched"] == "text_gone"
+
+        idle = asyncio.run(mcp_server.browser_wait_for(load_state="networkidle"))
+        assert idle["matched"] == "load_state"
+    finally:
+        asyncio.run(mcp_server.browser_close())
+
+
+@pytest.mark.browser
+def test_browser_eval_bounds_a_large_result(persistent_session_env: Path) -> None:
+    asyncio.run(mcp_server.browser_open("data:text/html,<title>big</title>"))
+    try:
+        bounded = asyncio.run(mcp_server.browser_eval("'x'.repeat(500)", max_chars=20))
+
+        assert bounded["result"] is None
+        assert bounded["result_truncated"] is True
+        assert bounded["result_length"] == 502
+        assert len(bounded["result_json"]) == 20
+    finally:
+        asyncio.run(mcp_server.browser_close())
+
+
+def test_doctor_reports_configuration(monkeypatch: Any, tmp_path: Path) -> None:
+    async def fake_doctor(**_kwargs: Any) -> dict[str, Any]:
+        return {"ok": True, "message": "ready", "channel": "chrome"}
+
+    monkeypatch.setattr(diagnostics, "browser_doctor", fake_doctor)
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    report = asyncio.run(mcp_server.doctor())
+
+    assert report["ok"] is True
+    assert report["versions"]["webskrap"]
+    assert report["paths"]["sessions_root"] == str(tmp_path)
+    assert report["sessions"] == []
+
+
+def test_server_instructions_carry_the_tool_choice_rules() -> None:
+    instructions = mcp_server.mcp.instructions or ""
+
+    # The rule an agent most needs before its first call, and the two limits it
+    # otherwise discovers by wasting a call.
+    assert "Prefer it over fetch" in instructions
+    assert "search: find URLs" in instructions
+    assert "No Google" in instructions
+    assert "browser_tabs" in instructions
+    assert "next_text_offset" in instructions
+
+
+def test_server_instructions_stay_short_enough_to_ship_in_a_system_prompt() -> None:
+    # These are prepended to a client's context on every session, so they are
+    # budgeted rather than allowed to grow into a manual. SKILL.md is where the
+    # long form lives.
+    assert len(mcp_server.mcp.instructions or "") < 3_000
+
+
+def test_every_tool_declares_a_title_and_annotations() -> None:
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+
+    assert tools
+    for tool in tools:
+        assert tool.title, tool.name
+        assert tool.annotations is not None, tool.name
+
+
+def test_read_only_tools_are_marked_read_only() -> None:
+    annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    for name in ("fetch", "stealth_fetch", "search", "doctor", "browser_snapshot", "browser_list"):
+        assert annotations[name].read_only_hint is True, name
+    for name in ("browser_interact", "browser_eval", "browser_close"):
+        assert annotations[name].read_only_hint is False, name
+
+
+def test_tools_that_can_lose_data_or_submit_forms_are_marked_destructive() -> None:
+    annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    # browser_close --delete_data throws away cookies and logins; a click or an
+    # Enter can submit a form on a site WebSkrap does not own.
+    assert annotations["browser_close"].destructive_hint is True
+    assert annotations["browser_interact"].destructive_hint is True
+    assert annotations["browser_press"].destructive_hint is True
+    assert annotations["browser_solve_captcha"].destructive_hint is True
+    # Listing sessions must not look like closing one.
+    assert annotations["browser_list"].destructive_hint is False
+
+
+def test_tools_that_reach_the_open_web_say_so() -> None:
+    annotations = {tool.name: tool.annotations for tool in asyncio.run(mcp_server.mcp.list_tools())}
+
+    for name in ("fetch", "stealth_fetch", "search", "browser_goto", "browser_interact"):
+        assert annotations[name].open_world_hint is True, name
+    for name in ("doctor", "browser_list", "browser_snapshot"):
+        assert annotations[name].open_world_hint is False, name
+
+
+def test_tool_failures_carry_their_code_and_hint(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_snapshot())
+
+    message = str(caught.value)
+    assert "is not open" in message
+    assert "[code: no_session]" in message
+    assert RECOVERY_HINTS[ErrorCode.NO_SESSION] in message
+    assert caught.value.code is ErrorCode.NO_SESSION
+
+
+def test_a_guarded_failure_is_not_annotated_twice(monkeypatch: Any, tmp_path: Path) -> None:
+    # browser_open guards the launch and then runs a page action through
+    # _browser_action, which guards again; the hint must appear once.
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_close(session="../escape"))
+
+    assert str(caught.value).count("[code:") == 1
+
+
+def test_fetch_failures_are_classified(monkeypatch: Any) -> None:
+    class _BrokenClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            raise RuntimeError("net::ERR_NAME_NOT_RESOLVED at https://nope.test")
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _BrokenClient)
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.fetch("https://nope.test"))
+
+    assert caught.value.code is ErrorCode.NAVIGATION
+    assert "[code: navigation]" in str(caught.value)
+
+
+def test_a_multiline_error_is_reduced_to_its_first_line(monkeypatch: Any) -> None:
+    class _ChattyClient(_FakeClient):
+        async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+            raise RuntimeError("Timeout 30000ms exceeded\nCall log:\n  - navigating\n  - waiting")
+
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _ChattyClient)
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.fetch("https://slow.test"))
+
+    assert "Call log" not in str(caught.value)
+    assert caught.value.code is ErrorCode.TIMEOUT
+
+
+def test_resources_are_registered() -> None:
+    resources = {str(resource.uri) for resource in asyncio.run(mcp_server.mcp.list_resources())}
+
+    assert resources == {"webskrap://guide", "webskrap://profiles", "webskrap://sessions"}
+
+
+def test_profiles_resource_lists_the_names_the_fetch_tools_accept() -> None:
+    payload = json.loads(mcp_server.profiles_resource())
+
+    names = {profile["name"] for profile in payload["profiles"]}
+    assert "desktop-chrome" in names
+    assert names == {profile.name for profile in list_profiles()}
+
+
+def test_sessions_resource_matches_the_browser_list_tool(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+    (tmp_path / "shop" / "user-data").mkdir(parents=True)
+
+    assert json.loads(mcp_server.sessions_resource()) == asyncio.run(mcp_server.browser_list())
+
+
+def test_guide_documents_every_registered_tool() -> None:
+    guide = mcp_server.guide_resource()
+
+    # The guide is the long form the short instructions point at, so a tool
+    # that never reaches it is a tool an agent will not find.
+    for tool in asyncio.run(mcp_server.mcp.list_tools()):
+        assert f"`{tool.name}`" in guide, tool.name
+
+
+def test_guide_documents_every_error_code() -> None:
+    guide = mcp_server.guide_resource()
+
+    for code in ErrorCode:
+        if code is ErrorCode.INTERNAL:
+            continue
+        assert f"`{code}`" in guide, code
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("file:///etc/passwd", id="file"),
+        pytest.param("ftp://example.test/x", id="ftp"),
+        pytest.param("https://user:pass@example.test/", id="userinfo"),
+        pytest.param("http://169.254.169.254/", id="link-local"),
+        pytest.param("http://%31%32%37.0.0.1/", id="encoded-loopback"),
+        pytest.param(r"http://127.0.0.1\example.com/", id="backslash-host"),
+    ],
+)
+def test_fetch_rejects_untrusted_targets_before_launch(monkeypatch: Any, url: str) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.delenv("WEBSKRAP_ALLOW_PRIVATE_NET", raising=False)
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.fetch(url))
+
+    assert caught.value.code is ErrorCode.USAGE
+    assert _FakeClient.calls == []
+
+
+def test_stealth_fetch_rejects_private_targets_before_launch(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.delenv("WEBSKRAP_ALLOW_PRIVATE_NET", raising=False)
+
+    with pytest.raises(WebSkrapError, match="private or local"):
+        asyncio.run(mcp_server.stealth_fetch("http://127.0.0.1:8000/"))
+
+    assert _FakeClient.calls == []
+
+
+def test_private_opt_out_reaches_the_client(monkeypatch: Any) -> None:
+    _fake_client(monkeypatch)
+    monkeypatch.setenv("WEBSKRAP_ALLOW_PRIVATE_NET", "1")
+
+    asyncio.run(mcp_server.fetch("http://127.0.0.1:8000/"))
+
+    assert _FakeClient.calls[0]["url"] == "http://127.0.0.1:8000/"
+
+
+def test_browser_goto_rejects_unfetchable_targets(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_goto("file:///etc/passwd"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_open_rejects_unfetchable_urls(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_open("file:///etc/passwd"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_eval_rejects_oversize_expressions() -> None:
+    with pytest.raises(WebSkrapError, match="under 10000"):
+        asyncio.run(mcp_server.browser_eval("x" * 10_001))
+
+
+def test_browser_eval_env_gate_disables_the_tool(monkeypatch: Any) -> None:
+    monkeypatch.setenv("WEBSKRAP_ALLOW_EVAL", "0")
+
+    with pytest.raises(WebSkrapError, match="disabled") as caught:
+        asyncio.run(mcp_server.browser_eval("1 + 1"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"session": name, "reused": False, "proxy_server": None}
+
+    monkeypatch.setattr(browser_session, "open_session", fake_open)
+
+    asyncio.run(
+        mcp_server.browser_open(
+            webrtc_ip_handling_policy="disable_non_proxied_udp", fake_media_devices=True
+        )
+    )
+
+    assert calls == [
+        {
+            "headless": True,
+            "webrtc_ip_handling_policy": "disable_non_proxied_udp",
+            "fake_media_devices": True,
+            "virtual_display": False,
+            "gpu": GpuBackend.AUTO,
+            "profile_mode": "native",
+            "profile": None,
+        }
+    ]
+
+
+def test_browser_open_passes_the_stealth_launch_settings(monkeypatch: Any) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"session": name, "reused": False, "proxy_server": None}
+
+    monkeypatch.setattr(browser_session, "open_session", fake_open)
+
+    asyncio.run(
+        mcp_server.browser_open(
+            virtual_display=True, gpu=GpuBackend.MESA, profile_mode="locale", profile="desktop-edge"
+        )
+    )
+
+    assert calls[0]["virtual_display"] is True
+    assert calls[0]["gpu"] is GpuBackend.MESA
+    assert calls[0]["profile_mode"] == "locale"
+    assert calls[0]["profile"] == "desktop-edge"
+
+
+def test_browser_open_refuses_full_profile_mode() -> None:
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_open(profile_mode="full"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_open_rejects_an_unknown_webrtc_policy() -> None:
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_open(webrtc_ip_handling_policy="leaky"))
+
+    assert caught.value.code is ErrorCode.USAGE
+
+
+def test_browser_open_takes_no_proxy_from_the_model() -> None:
+    # Page text can steer a model; a model-chosen proxy could reroute traffic.
+    assert "proxy" not in " ".join(inspect.signature(mcp_server.browser_open).parameters)
+
+
+class _ChromeMissingClient(_FakeClient):
+    """Fails like a launch does on hosts with no Chrome build (Linux ARM64)."""
+
+    attempts: list[str | None] = []
+
+    def _launch(self, config: Any) -> None:
+        self.attempts.append(config.channel)
+        if config.channel != "chromium":
+            raise WebSkrapError(
+                f"Chromium distribution '{config.channel}' is not found at /opt/google/chrome",
+                code=ErrorCode.BROWSER_LAUNCH,
+            )
+
+    async def fetch(self, url: str, **kwargs: Any) -> FetchResult:
+        self._launch(kwargs["config"])
+        return await super().fetch(url, **kwargs)
+
+    async def search(self, query: str, **kwargs: Any) -> SearchResult:
+        self._launch(kwargs["config"])
+        return await super().search(query, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("tool", "arg"),
+    [
+        (mcp_server.fetch, "https://example.test"),
+        (mcp_server.stealth_fetch, "https://example.test"),
+        (mcp_server.search, "example"),
+    ],
+)
+def test_tools_fall_back_to_chromium_when_chrome_is_missing(monkeypatch: Any, tool, arg) -> None:
+    _FakeClient.calls = []
+    _ChromeMissingClient.attempts = []
+    monkeypatch.setattr(mcp_server, "WebSkrapClient", _ChromeMissingClient)
+
+    first = asyncio.run(tool(arg))
+    second = asyncio.run(tool(arg))
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    # The second call starts from the channel that launched.
+    assert _ChromeMissingClient.attempts == ["chrome", "msedge", "chromium", "chromium"]
+
+
+async def test_warm_session_survives_the_channel_fallback(monkeypatch: Any) -> None:
+    runtime = FetchRuntime()
+    launched: list[str | None] = []
+
+    async def create(name, config, profile):
+        launched.append(config.channel)
+        if config.channel != "chromium":
+            raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
+        browser = MagicMock(spec=CDPBrowser)
+        browser.close = AsyncMock()
+        return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
+
+    monkeypatch.setattr(runtime.client, "_create_session", create)
+    monkeypatch.setattr(WebSkrapSession, "fetch", AsyncMock(return_value="page"))
+    ctx = SimpleNamespace(request_context=SimpleNamespace(lifespan_context=runtime))
+    options: dict[str, Any] = {
+        "config": SessionConfig(channel="chrome"),
+        "profile": list_profiles()[0],
+        "wait_until": "domcontentloaded",
+        "timeout_ms": 1000,
+        "text_only": True,
+        "include_links": False,
+        "max_links": 0,
+        "session": "crawl",
+        "ctx": ctx,
+    }
+
+    assert await mcp_server._run_fetch("https://example.com", **options) == "page"
+    # Same requested config again: must reuse the session, not report changed options.
+    assert await mcp_server._run_fetch("https://example.com", **options) == "page"
+    assert launched == ["chrome", "msedge", "chromium"]
+    await runtime.close()
+
+
+async def test_concurrent_first_calls_on_one_session_share_the_fallback(monkeypatch: Any) -> None:
+    runtime = FetchRuntime()
+    launched: list[str | None] = []
+
+    async def create(name, config, profile):
+        launched.append(config.channel)
+        await asyncio.sleep(0)
+        if config.channel != "chromium":
+            raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
+        browser = MagicMock(spec=CDPBrowser)
+        browser.close = AsyncMock()
+        return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
+
+    monkeypatch.setattr(runtime.client, "_create_session", create)
+    monkeypatch.setattr(WebSkrapSession, "fetch", AsyncMock(return_value="page"))
+    ctx = SimpleNamespace(request_context=SimpleNamespace(lifespan_context=runtime))
+    options: dict[str, Any] = {
+        "config": SessionConfig(channel="chrome"),
+        "profile": list_profiles()[0],
+        "wait_until": "domcontentloaded",
+        "timeout_ms": 1000,
+        "text_only": True,
+        "include_links": False,
+        "max_links": 0,
+        "session": "crawl",
+        "ctx": ctx,
+    }
+
+    results = await asyncio.gather(
+        *(mcp_server._run_fetch("https://example.com", **options) for _ in range(3))
+    )
+
+    assert results == ["page", "page", "page"]
+    assert launched == ["chrome", "msedge", "chromium"]
+    await runtime.close()
+
+
+def test_browser_tabs_validates_the_url_and_passes_through(monkeypatch: Any) -> None:
+    calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    async def fake_tabs(name: str, action: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append((name, action, kwargs))
+        return {"tabs": []}
+
+    monkeypatch.setattr(browser_session, "tabs", fake_tabs)
+
+    asyncio.run(mcp_server.browser_tabs("select", index=2))
+    with pytest.raises(WebSkrapError) as caught:
+        asyncio.run(mcp_server.browser_tabs("new", url="http://127.0.0.1/"))
+
+    assert calls == [("default", "select", {"index": 2, "url": None})]
+    assert caught.value.code is ErrorCode.USAGE  # private hosts are refused before any tab opens
+
+
+def test_browser_screenshot_rejects_a_target_with_full_page(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv(OUTPUT_DIR_ENV, str(tmp_path / "out"))
+
+    with pytest.raises(WebSkrapError, match=r"\[code: usage\]"):
+        asyncio.run(mcp_server.browser_screenshot(target="#go", full_page=True))
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("tool", [mcp_server.fetch, mcp_server.stealth_fetch])
+def test_fetch_task_defaults_and_explicit_overrides(monkeypatch, tool):
+    _fake_client(monkeypatch)
+    asyncio.run(tool("https://example.test"))
+    call = _FakeClient.calls[-1]
+    assert call["config"].resource_policy.value == "all"
+    assert call["config"].decline_cookies is True
+    assert call["wait_until"] == "domcontentloaded"
+    asyncio.run(tool("https://example.test", resource_policy="lite", wait_until="networkidle"))
+    call = _FakeClient.calls[-1]
+    assert call["config"].resource_policy.value == "lite"
+    assert call["wait_until"] == "networkidle"

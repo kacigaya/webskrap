@@ -1,7 +1,8 @@
 # Python API
 
 Read this reference for Python API work. Confirm signatures and defaults in
-`src/webskrap/client.py` and `src/webskrap/models.py` before changing code.
+`src/webskrap/scraping/client.py`, `src/webskrap/scraping/session.py` and
+`src/webskrap/config/models.py` before changing code.
 
 ## Fetch or session
 
@@ -79,8 +80,8 @@ sessions for unrelated callers.
 
 ## Pages you drive yourself
 
-`session.new_page()` returns a `webskrap.cdp.CDPPage` with the session's
-profile and policies applied. Close it with `session.close_page(page)`.
+`session.new_page()` returns a CDP page with the session's profile and policies
+applied. Close it with `session.close_page(page)`.
 
 ```python
 async with WebSkrapClient() as client:

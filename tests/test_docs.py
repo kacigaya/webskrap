@@ -12,7 +12,8 @@ import re
 import tomllib
 from pathlib import Path
 
-from webskrap import errors, mcp_server
+from webskrap import errors
+from webskrap.interfaces import mcp_server
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = ROOT / ".agents" / "skills" / "webskrap"
@@ -52,12 +53,12 @@ def test_agent_skill_folders_share_one_copy() -> None:
 
 def test_skill_routes_dynamic_contracts_to_their_sources() -> None:
     for source in (
-        "src/webskrap/models.py",
+        "src/webskrap/config/models.py",
         "src/webskrap/errors.py",
-        "src/webskrap/diagnostics.py",
-        "src/webskrap/cli.py",
-        "src/webskrap/browser_cli.py",
-        "src/webskrap/mcp_server.py",
+        "src/webskrap/browser/diagnostics.py",
+        "src/webskrap/interfaces/cli.py",
+        "src/webskrap/interfaces/browser_cli.py",
+        "src/webskrap/interfaces/mcp_server.py",
     ):
         assert f"`{source}`" in SKILL
 
@@ -65,7 +66,7 @@ def test_skill_routes_dynamic_contracts_to_their_sources() -> None:
 def test_skill_states_how_search_works_and_what_it_excludes() -> None:
     assert "calls no search API" in SKILL
     assert "does not offer Google" in SKILL
-    assert "`src/webskrap/search.py`" in SKILL
+    assert "`src/webskrap/scraping/search.py`" in SKILL
 
 
 def test_mcp_guide_lists_every_registered_tool() -> None:

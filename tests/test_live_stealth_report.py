@@ -19,10 +19,10 @@ def test_live_stealth_report_renders_summary_and_comparison() -> None:
     report = _load_report_module()
     results = [
         report.TestResult(
-            "tests/test_bot_detection.py::test_alpha", "headed", "test_alpha", "passed", 1.2
+            "tests/live/test_bot_detection.py::test_alpha", "headed", "test_alpha", "passed", 1.2
         ),
         report.TestResult(
-            "tests/test_bot_detection_headless.py::test_alpha_headless",
+            "tests/live/test_bot_detection_headless.py::test_alpha_headless",
             "headless",
             "test_alpha_headless",
             "failed",
@@ -49,7 +49,11 @@ def test_live_stealth_report_report_only_exits_zero(monkeypatch, tmp_path: Path)
             1,
             [
                 report.TestResult(
-                    "tests/test_bot_detection.py::test_alpha", "headed", "test_alpha", "failed", 0.1
+                    "tests/live/test_bot_detection.py::test_alpha",
+                    "headed",
+                    "test_alpha",
+                    "failed",
+                    0.1,
                 )
             ],
             1.0,

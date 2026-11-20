@@ -1,8 +1,8 @@
 # MCP
 
 Read this reference for MCP tools, resources, schemas, annotations, and safety
-boundaries. Confirm the current contract in `src/webskrap/mcp_server.py` and
-`tests/test_mcp.py`.
+boundaries. Confirm the current contract in `src/webskrap/interfaces/mcp_server.py`,
+`src/webskrap/interfaces/mcp_browser.py` and `tests/interfaces/test_mcp.py`.
 
 ## Select a tool
 
@@ -72,7 +72,7 @@ annotations. Mark interactions as destructive because clicks and key presses
 can submit forms on external sites.
 
 Keep short operational instructions in the MCP server and long guidance in
-`src/webskrap/guide.md`.
+`src/webskrap/interfaces/guide.md`.
 
 `stealth_fetch.user_data_dir` is relative to the MCP profile root, which
 defaults to `~/.webskrap/profiles` and can be moved with

@@ -99,9 +99,47 @@ are done:
    with a 2.x to 3.0 migration guide.
 6. Parity runs, review, pull request, release.
 
+## Package layout
+
+| Package | Responsibility |
+| --- | --- |
+| `driver/` | CDP connection, transports, page setup, DOM actions, and snapshots |
+| `browser/` | Browser discovery, process lifecycle, persistent sessions, and navigation |
+| `scraping/` | Python client, fetch sessions, search, and result models |
+| `challenges/` | Challenge detection and opt-in handling |
+| `config/` | Session configuration, profiles, and value parsing |
+| `interfaces/` | CLI commands and MCP tools |
+| `security/` | URL policy and path confinement |
+
+```text
+src/webskrap/
+├── __init__.py     # Public Python API
+├── errors.py       # Shared error types and codes
+├── py.typed
+├── browser/       # Browser discovery, process lifecycle, sessions, navigation
+├── challenges/    # Challenge detection and opt-in handling
+├── config/        # Session settings, profiles, and value parsing
+├── driver/        # CDP connection, launch, targets, page setup, snapshots
+├── interfaces/    # CLI, MCP tools, and the MCP guide resource text
+├── scraping/      # Client, fetch sessions, search, result models, HTML parsing
+└── security/      # URL policy and path confinement
+```
+
+Import public symbols from `webskrap`. The former flat internal modules
+(`webskrap.client`, `webskrap.models`, `webskrap.cdp`, and others) are gone.
+CLI commands and MCP tool names remain unchanged. Tests mirror the package
+layout. Tests that call third-party sites live in `tests/live/`.
+
 ## Design
 
-`src/webskrap/cdp.py` is the core:
+`src/webskrap/driver/cdp.py` owns the connection, event routing, and page
+commands. `src/webskrap/driver/launch.py` starts and closes Chromium.
+`src/webskrap/driver/targets.py` attaches to running browsers and tracks tab
+selection. `src/webskrap/browser/session_state.py` owns the state files and
+locks for named sessions. `src/webskrap/browser/process.py` checks process
+identity and stops browser process trees.
+
+The driver uses the following mechanisms.
 
 - **Transport.** On Linux and macOS, Chromium starts with
   `--remote-debugging-pipe`. It reads
@@ -125,8 +163,8 @@ are done:
   `--disable-blink-features=AutomationControlled`, because no driver patch
   hides `navigator.webdriver`.
 
-`src/webskrap/client.py` builds `WebSkrapClient` and `WebSkrapSession` on the
-core. `src/webskrap/cdp_setup.py` prepares every page before it navigates:
+`src/webskrap/scraping/client.py` owns `WebSkrapClient`.
+`src/webskrap/scraping/session.py` owns `WebSkrapSession`. `src/webskrap/driver/cdp_setup.py` prepares every page before it navigates:
 
 - `Emulation` and `Network.setExtraHTTPHeaders`: the profile, as
   `SessionConfig.profile_mode` asks. Nothing is overridden by default.
