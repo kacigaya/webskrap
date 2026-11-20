@@ -69,10 +69,10 @@ class FetchResult(BaseModel):
     def css(self, selector: str) -> list[Element]:
         """Return elements of ``text`` that match ``selector``, in document order.
 
-        ``text`` is parsed once with :func:`~webskrap.markup.parse_html`, and
+        ``text`` is parsed once with :func:`~webskrap.scraping.markup.parse_html`, and
         the tree is reused until ``text`` changes. Text from a ``text_only``
         fetch is not HTML, so query a fetch without it. See
-        :mod:`webskrap.markup` for the supported selectors.
+        :mod:`webskrap.scraping.markup` for the supported selectors.
 
         Raises:
             ValueError: If ``selector`` is empty or uses unsupported syntax.

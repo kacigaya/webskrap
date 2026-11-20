@@ -58,7 +58,8 @@ def _hints(
     WebSkrap does not own, and that is not undoable from here.
 
     These are hints, not enforcement: the confinement and sandbox rules that
-    actually constrain the tools live in paths.py and browser_session.py.
+    actually constrain the tools live in :mod:`webskrap.security.paths` and
+    :mod:`webskrap.browser.browser_session`.
     """
     return ToolAnnotations(
         read_only_hint=read_only,

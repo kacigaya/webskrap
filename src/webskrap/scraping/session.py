@@ -321,7 +321,7 @@ class WebSkrapSession:
 
         The page is loaded like a :meth:`fetch` -- same session, so its proxy,
         consent dismissal and persistent profile apply unchanged -- and parsed
-        by :mod:`webskrap.search`. Nothing is retried: an engine that serves a
+        by :mod:`webskrap.scraping.search`. Nothing is retried: an engine that serves a
         challenge page is reported, not argued with.
 
         Args:

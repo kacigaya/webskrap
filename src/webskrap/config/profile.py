@@ -74,7 +74,7 @@ class ProxyConfig(BaseModel):
 class BrowserProfile(BaseModel):
     """The identity a session presents: viewport, locale, timezone, headers.
 
-    Bundled profiles come from :mod:`webskrap.profiles`. By default most of
+    Bundled profiles come from :mod:`webskrap.config.profiles`. By default most of
     this is ignored on purpose, so the browser presents its real fingerprint;
     :attr:`SessionConfig.profile_mode` opts in to the locale parts or to all
     of it.
