@@ -49,9 +49,12 @@ class CDPBrowser:
     process: subprocess.Popen[bytes] | None = None
     _closed: bool = field(default=False, init=False)
 
-    async def new_page(self) -> CDPPage:
+    async def new_page(self, *, context_id: str | None = None) -> CDPPage:
         """Create a blank page target and attach to it with a flat session."""
-        target = await self.connection.send("Target.createTarget", {"url": "about:blank"})
+        params = {"url": "about:blank"}
+        if context_id is not None:
+            params["browserContextId"] = context_id
+        target = await self.connection.send("Target.createTarget", params)
         attached = await self.connection.send(
             "Target.attachToTarget", {"targetId": target["targetId"], "flatten": True}
         )

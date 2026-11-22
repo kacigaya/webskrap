@@ -19,11 +19,41 @@ from mcp.shared.memory import create_client_server_memory_streams
 from webskrap import ResourcePolicy, SessionConfig, WebSkrapClient
 from webskrap.browser import actions, browser_session
 from webskrap.browser.gpu import lavapipe_available
+from webskrap.config.profiles import get_profile
 from webskrap.errors import ErrorCode, WebSkrapError
 from webskrap.interfaces import mcp_server
 from webskrap.scraping.fetch_runtime import FetchRuntime
 
 pytestmark = pytest.mark.browser
+
+
+async def test_unnamed_fetch_contexts_isolate_cookies_and_storage(
+    test_server: str, sandbox_supported: bool
+) -> None:
+    runtime = FetchRuntime()
+    config = SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
+    profile = get_profile(None)
+    try:
+        async with runtime.use(None, config, profile) as first:
+            result = await first.fetch(f"{test_server}/set-cookie")
+            assert [cookie["name"] for cookie in result.cookies] == ["webskrap_test"]
+            first_page = await first.new_page()
+            await first_page.goto(test_server, wait_until="load", timeout_s=30)
+            await first_page.evaluate("localStorage.setItem('key', 'first')")
+            async with runtime.use(None, config, profile) as second:
+                assert first.browser is second.browser
+                result = await second.fetch(f"{test_server}/echo-cookie")
+                assert "webskrap_test" not in result.text
+                assert result.cookies == []
+                second_page = await second.new_page()
+                await second_page.goto(test_server, wait_until="load", timeout_s=30)
+                assert await second_page.evaluate("localStorage.getItem('key')") is None
+            assert await first_page.evaluate("localStorage.getItem('key')") == "first"
+            contexts = await first.browser.connection.send("Target.getBrowserContexts")
+            assert contexts["browserContextIds"] == [first._context_id]
+        assert runtime.client._sessions == {}
+    finally:
+        await runtime.close()
 
 
 async def test_mcp_protocol_reuses_fetch_sessions_and_keeps_unnamed_calls_isolated(

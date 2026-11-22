@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from anyio import CancelScope
+from anyio.lowlevel import checkpoint_if_cancelled
 
 from webskrap.config.models import SessionConfig
 from webskrap.config.profile import BrowserProfile
@@ -38,10 +39,10 @@ class _Entry:
 
 
 class FetchRuntime:
-    """Keep the driver warm and reuse only explicitly named browser contexts.
+    """Share Chromium across overlapping fetches with compatible settings.
 
-    Owned by the MCP lifespan. Calls without a name still get a fresh browser
-    and profile. At most eight fetches run and eight named sessions stay open.
+    Only named sessions share a browser context and persist after their last
+    fetch. At most eight fetches run and eight named sessions stay open.
     """
 
     def __init__(self) -> None:
@@ -50,6 +51,7 @@ class FetchRuntime:
         self._slots = asyncio.Semaphore(MAX_FETCH_CONCURRENCY)
         self._lock = asyncio.Lock()
         self._entries: dict[str, _Entry] = {}
+        self._transient: dict[str, _Entry] = {}
         self._closed = False
 
     @asynccontextmanager
@@ -63,16 +65,8 @@ class FetchRuntime:
             if self._closed:
                 raise WebSkrapError("fetch runtime is closed", code=ErrorCode.USAGE)
             if name is None:
-                # The client owns cleanup even if launch is cancelled.
-                transient_name = f"_fetch_{uuid4().hex}"
-                try:
-                    session = await self.client.session(
-                        transient_name, config=config, profile=profile
-                    )
+                async with self._use_unnamed(config, profile) as session:
                     yield session
-                finally:
-                    with CancelScope(shield=True):
-                        await self.client.close_session(transient_name)
                 return
             async with self._lock:
                 entry = self._entries.get(name)
@@ -111,6 +105,89 @@ class FetchRuntime:
                             entry.closing = True
                     if abandoned_launch:
                         await self._close_entry(name, entry)
+
+    @asynccontextmanager
+    async def _use_unnamed(
+        self, config: SessionConfig, profile: BrowserProfile
+    ) -> AsyncIterator[WebSkrapSession]:
+        if (
+            not config.launch_headless
+            or config.user_data_dir is not None
+            or config.storage_state is not None
+        ):
+            async with self.client._temporary_session(
+                "fetch", config=config, profile=profile
+            ) as session:
+                yield session
+            return
+
+        options = config.model_dump(exclude=_PER_CALL)
+        async with self._lock:
+            if self._closed:
+                raise WebSkrapError("fetch runtime is closed", code=ErrorCode.USAGE)
+            for candidate, entry in self._transient.items():
+                if (
+                    not entry.closing
+                    and entry.profile == profile
+                    and entry.config.model_dump(exclude=_PER_CALL) == options
+                ):
+                    name = candidate
+                    break
+            else:
+                name = f"_fetch_{uuid4().hex}"
+                entry = _Entry(config.model_copy(deep=True), profile.model_copy(deep=True))
+                self._transient[name] = entry
+            entry.active += 1
+
+        try:
+            owner = await self.client.session(name, config=entry.config, profile=entry.profile)
+            cancelled = None
+            creation = asyncio.create_task(
+                owner.browser.connection.send(
+                    "Target.createBrowserContext", {"disposeOnDetach": True}
+                )
+            )
+            try:
+                with CancelScope(shield=True):
+                    while not creation.done():
+                        try:
+                            await asyncio.wait((creation,))
+                        except asyncio.CancelledError as exc:
+                            cancelled = exc
+                context = creation.result()
+            except BaseException:
+                entry.closing = True
+                if cancelled is not None:
+                    raise cancelled from None
+                raise
+            session = WebSkrapSession(
+                name=name,
+                browser=owner.browser,
+                config=config,
+                profile=profile,
+                context_id=context["browserContextId"],
+            )
+            try:
+                if cancelled is not None:
+                    raise cancelled
+                await checkpoint_if_cancelled()
+                yield session
+            finally:
+                try:
+                    await session.close()
+                except BaseException as exc:
+                    entry.closing = True
+                    if not isinstance(exc, WebSkrapError):
+                        raise
+        finally:
+            with CancelScope(shield=True):
+                async with self._lock:
+                    entry.active -= 1
+                    idle = entry.active == 0
+                    if idle:
+                        self._transient.pop(name)
+                if idle:
+                    await self.client.close_session(name)
 
     async def close_session(self, name: str) -> bool:
         """Close an idle fetch session; refuse to interrupt active callers."""
