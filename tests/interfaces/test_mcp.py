@@ -959,6 +959,7 @@ async def test_warm_session_survives_the_channel_fallback(monkeypatch: Any) -> N
             raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
         browser = MagicMock(spec=CDPBrowser)
         browser.close = AsyncMock()
+        browser.connection = SimpleNamespace(send=AsyncMock(return_value={"browserContextId": "1"}))
         return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
 
     monkeypatch.setattr(runtime.client, "_create_session", create)
@@ -994,6 +995,7 @@ async def test_concurrent_first_calls_on_one_session_share_the_fallback(monkeypa
             raise RuntimeError(f"Chromium distribution '{config.channel}' is not found at /opt/x")
         browser = MagicMock(spec=CDPBrowser)
         browser.close = AsyncMock()
+        browser.connection = SimpleNamespace(send=AsyncMock(return_value={"browserContextId": "1"}))
         return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
 
     monkeypatch.setattr(runtime.client, "_create_session", create)

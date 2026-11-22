@@ -51,6 +51,17 @@ async def test_named_session_reuses_browser_and_close_releases_it(runtime: Fetch
     assert third._closed
 
 
+async def test_named_session_can_reopen_after_close_error(runtime) -> None:
+    config, profile = SessionConfig(), get_profile(None)
+    async with runtime.use("crawl", config, profile) as first:
+        first.browser.close.side_effect = RuntimeError("close failed")
+    with pytest.raises(RuntimeError, match="close failed"):
+        await runtime.close_session("crawl")
+    async with runtime.use("crawl", config, profile) as second:
+        assert second.browser is not first.browser
+    await runtime.close()
+
+
 async def test_overlapping_unnamed_fetches_share_browser_until_last_release(runtime) -> None:
     config = SessionConfig()
     profile = get_profile(None)
@@ -68,6 +79,41 @@ async def test_overlapping_unnamed_fetches_share_browser_until_last_release(runt
     first.browser.close.assert_awaited_once()
     assert runtime.client._sessions == {}
     await runtime.close()
+
+
+async def test_named_pool_never_reuses_unnamed_or_incompatible_sessions(runtime, tmp_path) -> None:
+    config = SessionConfig()
+    profile = get_profile(None)
+    try:
+        async with runtime.use("first", config, profile) as first:
+            pass
+        async with runtime.use("compatible", SessionConfig(decline_cookies=True), profile) as peer:
+            assert peer.browser is first.browser
+            assert peer._context_id != first._context_id
+        async with runtime.use(None, config, profile) as unnamed:
+            assert unnamed.browser is not first.browser
+        async with runtime.use("different", SessionConfig(channel="chrome"), profile) as different:
+            assert different.browser is not first.browser
+        async with runtime.use("profile", config, get_profile("mobile-chrome")) as mobile:
+            assert mobile.browser is not first.browser
+        for dedicated in (
+            SessionConfig(headless=False),
+            SessionConfig(virtual_display=True),
+            SessionConfig(user_data_dir=tmp_path),
+            SessionConfig(storage_state=tmp_path / "state.json"),
+        ):
+            async with (
+                runtime.use("dedicated", dedicated, profile) as one,
+                runtime.use("other", dedicated, profile) as two,
+            ):
+                assert one.browser is not two.browser
+                assert one._context_id is two._context_id is None
+            assert await runtime.close_session("dedicated")
+            assert await runtime.close_session("other")
+    finally:
+        await runtime.close()
+    assert first._closed and peer._closed
+    first.browser.close.assert_awaited_once()
 
 
 async def test_unnamed_pool_keeps_incompatible_settings_separate(runtime, tmp_path) -> None:
@@ -100,14 +146,15 @@ async def test_unnamed_pool_retires_browser_when_context_creation_fails(runtime)
 
 
 @pytest.mark.parametrize("cancel_scope", [False, True])
+@pytest.mark.parametrize("names", [(None, None), ("first", "second")])
 async def test_cancelled_context_creation_disposes_context_while_browser_is_shared(
-    runtime, cancel_scope
+    runtime, cancel_scope, names
 ) -> None:
     config = SessionConfig()
     profile = get_profile(None)
     started, release = asyncio.Event(), asyncio.Event()
     scope = CancelScope()
-    async with runtime.use(None, config, profile) as first:
+    async with runtime.use(names[0], config, profile) as first:
         send = first.browser.connection.send
         create_context = send.side_effect
 
@@ -122,7 +169,7 @@ async def test_cancelled_context_creation_disposes_context_while_browser_is_shar
 
         async def borrow():
             with scope:
-                async with runtime.use(None, config, profile):
+                async with runtime.use(names[1], config, profile):
                     pytest.fail("cancelled fetch ran")
 
         task = asyncio.create_task(borrow())
@@ -142,7 +189,7 @@ async def test_cancelled_context_creation_disposes_context_while_browser_is_shar
             "Target.disposeBrowserContext", {"browserContextId": "1"}, timeout_s=5
         )
         first.browser.close.assert_not_awaited()
-        async with runtime.use(None, config, profile) as second:
+        async with runtime.use(names[1], config, profile) as second:
             assert first.browser is second.browser
     await runtime.close()
 
@@ -309,6 +356,34 @@ async def test_closed_runtime_rejects_waiting_and_new_calls(runtime) -> None:
     with pytest.raises(WebSkrapError, match="runtime is closed"):
         async with runtime.use(None, SessionConfig(), get_profile(None)):
             pytest.fail("closed runtime reopened")
+
+
+async def test_shutdown_releases_named_context_opening_during_shutdown(
+    runtime, monkeypatch
+) -> None:
+    create = runtime.client._create_session
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked_create(*args):
+        started.set()
+        await release.wait()
+        return await create(*args)
+
+    monkeypatch.setattr(runtime.client, "_create_session", blocked_create)
+
+    async def borrow():
+        async with runtime.use("opening", SessionConfig(), get_profile(None)):
+            pytest.fail("closed runtime exposed the opening context")
+
+    borrowing = asyncio.create_task(borrow())
+    await started.wait()
+    closing = asyncio.create_task(runtime.close())
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(WebSkrapError, match="runtime is closed"):
+        await borrowing
+    await closing
+    assert runtime._entries == runtime._named == runtime.client._sessions == {}
 
 
 async def test_cancelled_named_launch_is_reaped_and_slot_reusable(runtime, monkeypatch) -> None:

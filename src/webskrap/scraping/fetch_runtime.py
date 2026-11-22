@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -30,16 +30,29 @@ _PER_CALL = {
 
 
 @dataclass
-class _Entry:
+class _Pool:
     config: SessionConfig
     profile: BrowserProfile
     active: int = 0
-    session: WebSkrapSession | None = None
     closing: bool = False
 
 
+@dataclass
+class _NamedEntry:
+    config: SessionConfig
+    profile: BrowserProfile
+    opening: asyncio.Task[tuple[WebSkrapSession, AsyncExitStack | None]]
+    active: int = 0
+    used: bool = False
+    closing: asyncio.Task[None] | None = None
+
+
+def _can_pool(config: SessionConfig) -> bool:
+    return config.launch_headless and config.user_data_dir is None and config.storage_state is None
+
+
 class FetchRuntime:
-    """Share Chromium across overlapping fetches with compatible settings.
+    """Share Chromium across compatible fetches, with a separate context per name.
 
     Only named sessions share a browser context and persist after their last
     fetch. At most eight fetches run and eight named sessions stay open.
@@ -50,8 +63,9 @@ class FetchRuntime:
         self.client = WebSkrapClient()
         self._slots = asyncio.Semaphore(MAX_FETCH_CONCURRENCY)
         self._lock = asyncio.Lock()
-        self._entries: dict[str, _Entry] = {}
-        self._transient: dict[str, _Entry] = {}
+        self._entries: dict[str, _NamedEntry] = {}
+        self._named: dict[str, _Pool] = {}
+        self._transient: dict[str, _Pool] = {}
         self._closed = False
 
     @asynccontextmanager
@@ -69,6 +83,8 @@ class FetchRuntime:
                     yield session
                 return
             async with self._lock:
+                if self._closed:
+                    raise WebSkrapError("fetch runtime is closed", code=ErrorCode.USAGE)
                 entry = self._entries.get(name)
                 if entry is None:
                     if len(self._entries) >= MAX_FETCH_SESSIONS:
@@ -76,8 +92,13 @@ class FetchRuntime:
                             "fetch session limit reached; use fetch_session_close first",
                             code=ErrorCode.USAGE,
                         )
-                    # No caller mutation can change the reuse contract.
-                    entry = _Entry(config.model_copy(deep=True), profile.model_copy(deep=True))
+                    saved_config = config.model_copy(deep=True)
+                    saved_profile = profile.model_copy(deep=True)
+                    entry = _NamedEntry(
+                        saved_config,
+                        saved_profile,
+                        asyncio.create_task(self._open_named(name, saved_config, saved_profile)),
+                    )
                     self._entries[name] = entry
                 elif entry.closing:
                     raise WebSkrapError("fetch session is closing", code=ErrorCode.USAGE)
@@ -92,40 +113,55 @@ class FetchRuntime:
                     )
                 entry.active += 1
             try:
-                entry.session = await self.client.session(
-                    f"_mcp_{name}", config=entry.config, profile=entry.profile
-                )
-                yield entry.session
+                session, _ = await asyncio.shield(entry.opening)
+                if self._closed:
+                    raise WebSkrapError("fetch runtime is closed", code=ErrorCode.USAGE)
+                entry.used = True
+                yield session
             finally:
                 with CancelScope(shield=True):
                     async with self._lock:
                         entry.active -= 1
-                        abandoned_launch = entry.session is None and entry.active == 0
-                        if abandoned_launch:
-                            entry.closing = True
-                    if abandoned_launch:
-                        await self._close_entry(name, entry)
+                        closing = None
+                        if not entry.used and entry.active == 0 and not self._closed:
+                            closing = self._start_close(name, entry)
+                    if closing is not None:
+                        await asyncio.shield(closing)
+
+    async def _open_named(
+        self, name: str, config: SessionConfig, profile: BrowserProfile
+    ) -> tuple[WebSkrapSession, AsyncExitStack | None]:
+        if not _can_pool(config):
+            return await self.client.session(f"_mcp_{name}", config=config, profile=profile), None
+        async with AsyncExitStack() as stack:
+            session = await stack.enter_async_context(
+                self._use_pooled(config, profile, self._named)
+            )
+            return session, stack.pop_all()
 
     @asynccontextmanager
     async def _use_unnamed(
         self, config: SessionConfig, profile: BrowserProfile
     ) -> AsyncIterator[WebSkrapSession]:
-        if (
-            not config.launch_headless
-            or config.user_data_dir is not None
-            or config.storage_state is not None
-        ):
+        if not _can_pool(config):
             async with self.client._temporary_session(
                 "fetch", config=config, profile=profile
             ) as session:
                 yield session
             return
 
+        async with self._use_pooled(config, profile, self._transient) as session:
+            yield session
+
+    @asynccontextmanager
+    async def _use_pooled(
+        self, config: SessionConfig, profile: BrowserProfile, pools: dict[str, _Pool]
+    ) -> AsyncIterator[WebSkrapSession]:
         options = config.model_dump(exclude=_PER_CALL)
         async with self._lock:
             if self._closed:
                 raise WebSkrapError("fetch runtime is closed", code=ErrorCode.USAGE)
-            for candidate, entry in self._transient.items():
+            for candidate, entry in pools.items():
                 if (
                     not entry.closing
                     and entry.profile == profile
@@ -135,8 +171,8 @@ class FetchRuntime:
                     break
             else:
                 name = f"_fetch_{uuid4().hex}"
-                entry = _Entry(config.model_copy(deep=True), profile.model_copy(deep=True))
-                self._transient[name] = entry
+                entry = _Pool(config.model_copy(deep=True), profile.model_copy(deep=True))
+                pools[name] = entry
             entry.active += 1
 
         try:
@@ -154,7 +190,7 @@ class FetchRuntime:
                             await asyncio.wait((creation,))
                         except asyncio.CancelledError as exc:
                             cancelled = exc
-                context = creation.result()
+                context_id = creation.result()["browserContextId"]
             except BaseException:
                 entry.closing = True
                 if cancelled is not None:
@@ -165,7 +201,7 @@ class FetchRuntime:
                 browser=owner.browser,
                 config=config,
                 profile=profile,
-                context_id=context["browserContextId"],
+                context_id=context_id,
             )
             try:
                 if cancelled is not None:
@@ -185,7 +221,7 @@ class FetchRuntime:
                     entry.active -= 1
                     idle = entry.active == 0
                     if idle:
-                        self._transient.pop(name)
+                        pools.pop(name)
                 if idle:
                     await self.client.close_session(name)
 
@@ -199,20 +235,27 @@ class FetchRuntime:
                 raise WebSkrapError("fetch session is busy", code=ErrorCode.USAGE)
             if entry.closing:
                 raise WebSkrapError("fetch session is closing", code=ErrorCode.USAGE)
-            entry.closing = True
-        await self._close_entry(name, entry)
+            closing = self._start_close(name, entry)
+        with CancelScope(shield=True):
+            await asyncio.shield(closing)
         return True
 
-    async def _close_entry(self, name: str, entry: _Entry) -> None:
+    def _start_close(self, name: str, entry: _NamedEntry) -> asyncio.Task[None]:
+        if entry.closing is None:
+            entry.closing = asyncio.create_task(self._close_entry(name, entry))
+        return entry.closing
+
+    async def _close_entry(self, name: str, entry: _NamedEntry) -> None:
         # Keep the name reserved, without blocking unrelated session operations.
         with CancelScope(shield=True):
             try:
-                await self.client.close_session(f"_mcp_{name}")
-            except BaseException:
-                async with self._lock:
-                    entry.closing = False
-                raise
-            else:
+                results = await asyncio.gather(entry.opening, return_exceptions=True)
+                opened = results[0]
+                if not _can_pool(entry.config):
+                    await self.client.close_session(f"_mcp_{name}")
+                elif not isinstance(opened, BaseException) and opened[1] is not None:
+                    await opened[1].aclose()
+            finally:
                 async with self._lock:
                     self._entries.pop(name, None)
 
@@ -221,6 +264,17 @@ class FetchRuntime:
         self._closed = True
         with CancelScope(shield=True):
             try:
-                await self.client.close()
+                async with self._lock:
+                    closing = [
+                        self._start_close(name, entry) for name, entry in self._entries.items()
+                    ]
+                results = await asyncio.gather(*closing, return_exceptions=True)
+                if error := next(
+                    (result for result in results if isinstance(result, BaseException)), None
+                ):
+                    raise error
             finally:
-                self._entries.clear()
+                try:
+                    await self.client.close()
+                finally:
+                    self._entries.clear()
