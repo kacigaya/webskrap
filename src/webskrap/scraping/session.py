@@ -82,11 +82,11 @@ _EXTRACT_SCRIPT = """({ text_only, max_links }) => {
 
 
 class WebSkrapSession:
-    """One Chromium and the helpers that drive pages in it.
+    """One browser context and the helpers that drive pages in it.
 
     Created by :meth:`WebSkrapClient.session`, not directly. Every page of a
-    session shares its cookies and storage. The session owns its browser, so
-    :meth:`close` is what releases it; ``async with`` does it for you. Every
+    session shares its cookies and storage. :meth:`close` releases the session
+    and its resources; ``async with`` does it for you. Every
     method raises :class:`WebSkrapError` once the session is closed.
 
     Attributes:
@@ -104,17 +104,19 @@ class WebSkrapSession:
         config: SessionConfig,
         profile: BrowserProfile,
         display: VirtualDisplay | None = None,
+        context_id: str | None = None,
     ) -> None:
         """Adopt a launched browser; :meth:`WebSkrapClient.session` calls this.
 
-        The session takes ownership: closing it closes the browser (and its
-        temporary profile) and the virtual display it runs on.
+        Closing the session releases its context, or the entire browser and
+        display when the session owns them.
         """
         self.name = name
         self.browser = browser
         self.config = config
         self.profile = profile
         self._display = display
+        self._context_id = context_id
         self._closed = False
 
     async def __aenter__(self) -> WebSkrapSession:
@@ -138,7 +140,7 @@ class WebSkrapSession:
         left open when the session closes.
         """
         self._ensure_open()
-        page = await self.browser.new_page()
+        page = await self.browser.new_page(context_id=self._context_id)
         try:
             config = self.config
             if config.resource_policy is ResourcePolicy.AUTO:
@@ -393,7 +395,8 @@ class WebSkrapSession:
     async def cookies(self) -> list[dict[str, Any]]:
         """Return every cookie in the session, in Playwright's cookie shape."""
         self._ensure_open()
-        result = await self.browser.connection.send("Storage.getCookies")
+        params = {"browserContextId": self._context_id} if self._context_id is not None else None
+        result = await self.browser.connection.send("Storage.getCookies", params)
         return [
             {
                 "name": cookie["name"],
@@ -492,7 +495,7 @@ class WebSkrapSession:
             await cdp_dom.element_action(page, "type", selector, [text])
 
     async def close(self) -> None:
-        """Close the browser, its temporary profile, and the virtual display.
+        """Release the owned browser context or the entire browser and display.
 
         Idempotent; safe to call after a failed fetch.
         """
@@ -502,7 +505,14 @@ class WebSkrapSession:
         # MCP cancellation is level-triggered; cleanup must survive every checkpoint.
         with CancelScope(shield=True):
             try:
-                await self.browser.close()
+                if self._context_id is None:
+                    await self.browser.close()
+                else:
+                    await self.browser.connection.send(
+                        "Target.disposeBrowserContext",
+                        {"browserContextId": self._context_id},
+                        timeout_s=5,
+                    )
             finally:
                 if self._display is not None:
                     await self._display.stop()

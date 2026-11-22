@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from itertools import count
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,10 +18,19 @@ from webskrap.scraping.fetch_runtime import FetchRuntime
 @pytest.fixture
 def runtime(monkeypatch: pytest.MonkeyPatch) -> FetchRuntime:
     runtime = FetchRuntime()
+    contexts = count()
 
     async def create(name, config, profile):
         browser = MagicMock(spec=CDPBrowser)
         browser.close = AsyncMock()
+        browser.connection = MagicMock()
+        browser.connection.send = AsyncMock(
+            side_effect=lambda method, *_args, **_kwargs: (
+                {"browserContextId": str(next(contexts))}
+                if method == "Target.createBrowserContext"
+                else {}
+            )
+        )
         return WebSkrapSession(name=name, config=config, profile=profile, browser=browser)
 
     monkeypatch.setattr(runtime.client, "_create_session", create)
@@ -39,6 +49,102 @@ async def test_named_session_reuses_browser_and_close_releases_it(runtime: Fetch
         assert third is not first
     await runtime.close()
     assert third._closed
+
+
+async def test_overlapping_unnamed_fetches_share_browser_until_last_release(runtime) -> None:
+    config = SessionConfig()
+    profile = get_profile(None)
+    async with runtime.use(None, config, profile) as first:
+        async with runtime.use(
+            None, SessionConfig(navigation_timeout_ms=120_000), profile
+        ) as second:
+            assert first.browser is second.browser
+            assert first._context_id != second._context_id
+            assert second.config.navigation_timeout_ms == 120_000
+        first.browser.connection.send.assert_awaited_with(
+            "Target.disposeBrowserContext", {"browserContextId": second._context_id}, timeout_s=5
+        )
+        first.browser.close.assert_not_awaited()
+    first.browser.close.assert_awaited_once()
+    assert runtime.client._sessions == {}
+    await runtime.close()
+
+
+async def test_unnamed_pool_keeps_incompatible_settings_separate(runtime, tmp_path) -> None:
+    profile = get_profile(None)
+    persistent = SessionConfig(user_data_dir=tmp_path)
+    async with runtime.use(None, SessionConfig(), profile) as first:
+        async with runtime.use(None, SessionConfig(channel="chrome"), profile) as second:
+            assert first.browser is not second.browser
+        async with runtime.use(None, persistent, profile) as third:
+            assert first.browser is not third.browser
+            assert third._context_id is None
+    await runtime.close()
+
+
+async def test_unnamed_pool_retires_browser_when_context_creation_fails(runtime) -> None:
+    config = SessionConfig()
+    profile = get_profile(None)
+    async with runtime.use(None, config, profile) as first:
+        send = first.browser.connection.send
+        create_context = send.side_effect
+        send.side_effect = WebSkrapError("connection lost")
+        with pytest.raises(WebSkrapError, match="connection lost"):
+            async with runtime.use(None, config, profile):
+                pytest.fail("failed context was used")
+        async with runtime.use(None, config, profile) as second:
+            assert first.browser is not second.browser
+        send.side_effect = create_context
+    first.browser.close.assert_awaited_once()
+    await runtime.close()
+
+
+@pytest.mark.parametrize("cancel_scope", [False, True])
+async def test_cancelled_context_creation_disposes_context_while_browser_is_shared(
+    runtime, cancel_scope
+) -> None:
+    config = SessionConfig()
+    profile = get_profile(None)
+    started, release = asyncio.Event(), asyncio.Event()
+    scope = CancelScope()
+    async with runtime.use(None, config, profile) as first:
+        send = first.browser.connection.send
+        create_context = send.side_effect
+
+        async def delayed_context(method, *args, **kwargs):
+            result = create_context(method, *args, **kwargs)
+            if method == "Target.createBrowserContext":
+                started.set()
+                await release.wait()
+            return result
+
+        send.side_effect = delayed_context
+
+        async def borrow():
+            with scope:
+                async with runtime.use(None, config, profile):
+                    pytest.fail("cancelled fetch ran")
+
+        task = asyncio.create_task(borrow())
+        await started.wait()
+        if cancel_scope:
+            scope.cancel()
+        else:
+            task.cancel()
+        await sleep(0)
+        release.set()
+        if cancel_scope:
+            await task
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        send.assert_awaited_with(
+            "Target.disposeBrowserContext", {"browserContextId": "1"}, timeout_s=5
+        )
+        first.browser.close.assert_not_awaited()
+        async with runtime.use(None, config, profile) as second:
+            assert first.browser is second.browser
+    await runtime.close()
 
 
 async def test_unnamed_calls_are_isolated_and_cleaned_on_failure(runtime: FetchRuntime) -> None:
@@ -69,7 +175,10 @@ async def test_changed_options_are_rejected_and_busy_close_refused(runtime: Fetc
     await runtime.close()
 
 
-async def test_concurrent_session_launch_is_shared(runtime: FetchRuntime, monkeypatch) -> None:
+@pytest.mark.parametrize("name", ["crawl", None])
+async def test_concurrent_session_launch_is_shared(
+    runtime: FetchRuntime, monkeypatch, name
+) -> None:
     create = runtime.client._create_session
     started, release = asyncio.Event(), asyncio.Event()
     launches = 0
@@ -84,7 +193,7 @@ async def test_concurrent_session_launch_is_shared(runtime: FetchRuntime, monkey
     monkeypatch.setattr(runtime.client, "_create_session", blocked_create)
 
     async def borrow():
-        async with runtime.use("crawl", SessionConfig(), get_profile(None)) as session:
+        async with runtime.use(name, SessionConfig(), get_profile(None)) as session:
             return session
 
     first = asyncio.create_task(borrow())

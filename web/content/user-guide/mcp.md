@@ -186,9 +186,10 @@ Call `fetch_session_close(session="crawl")` when done. It returns
 `{"closed": true}`, or `false` for an absent session. Busy sessions are refused.
 The server closes all fetch sessions on shutdown. These sessions are separate
 from `browser_*` sessions and do not survive a server restart. Persistent
-`user_data_dir` files survive closing. Without `session`, each call still uses
-a fresh browser and temporary profile; an explicit `user_data_dir` retains its
-on-disk state.
+`user_data_dir` files survive closing. Unnamed headless fetches with matching
+browser settings can share Chromium while they overlap. Each gets its own
+cookies and storage. Headed and virtual-display fetches use separate browsers.
+An explicit `user_data_dir` uses a separate browser and keeps its on-disk state.
 
 `search` takes `query`, `engine` (`bing` by default, or `ddg`), `max_results`, and the
 channel, profile, fingerprint and `user_data_dir` arguments `stealth_fetch`

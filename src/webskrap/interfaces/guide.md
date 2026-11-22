@@ -15,8 +15,10 @@
 
 `fetch` and `stealth_fetch` use the same stealth browser. `stealth_fetch` adds
 fingerprint, WebRTC, user-agent and persistent-profile control, and is the one
-to reach for by default. Without `session`, each call gets a fresh browser and
-temporary profile. An explicit `user_data_dir` keeps its on-disk state.
+to reach for by default. Unnamed headless fetches with matching browser settings
+can share Chromium while they overlap. Each gets its own cookies and storage.
+Headed and virtual-display fetches use separate browsers. An explicit
+`user_data_dir` uses a separate browser and keeps its on-disk state.
 
 For repeated extraction, pass `session="crawl"` to either fetch tool. The
 browser stays warm and cookies/storage are shared within that name. Use the
