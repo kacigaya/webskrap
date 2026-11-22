@@ -21,9 +21,15 @@ Headed and virtual-display fetches use separate browsers. An explicit
 `user_data_dir` uses a separate browser and keeps its on-disk state.
 
 For repeated extraction, pass `session="crawl"` to either fetch tool. The
-browser stays warm and cookies/storage are shared within that name. Use the
-same profile and config on every call; `timeout_ms`, `decline_cookies`, output
-options and `wait_until` may vary. Other changes are rejected until you call
+browser stays warm and cookies/storage are shared within that name.
+Compatible headless named sessions share Chromium and each name has its own
+cookies and storage. Closing one name releases its context. Closing the last
+name releases Chromium. A browser crash affects every name in that browser.
+If Chromium cannot confirm context cleanup, that pool stops accepting new
+names. Close its remaining names to release the browser.
+Named pools are separate from unnamed fetches. Use the same profile and config
+on every call. `timeout_ms`, `decline_cookies`, output options and `wait_until`
+may vary. Other changes are rejected until you call
 `fetch_session_close(session="crawl")`. At most eight fetches run at once and
 eight named fetch sessions stay open. A busy session cannot be closed. These
 sessions end when the MCP server stops and are separate from `browser_*`

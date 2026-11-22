@@ -14,6 +14,9 @@ history, so they summarize each release rather than list every change.
 - Concurrent unnamed MCP fetches can share a headless Chromium instance when
   their browser settings match. Each fetch uses a separate browser context for
   cookies and storage. Chromium closes when the last fetch finishes.
+- Compatible named MCP fetch sessions share a headless Chromium instance.
+  Each name keeps its own cookies and storage until closed. Chromium closes
+  when the last name in the pool closes.
 
 ## [4.0.0] - 2026-11-20
 

@@ -27,20 +27,21 @@ from webskrap.scraping.fetch_runtime import FetchRuntime
 pytestmark = pytest.mark.browser
 
 
-async def test_unnamed_fetch_contexts_isolate_cookies_and_storage(
-    test_server: str, sandbox_supported: bool
+@pytest.mark.parametrize("names", [(None, None), ("first", "second")])
+async def test_pooled_fetch_contexts_isolate_cookies_and_storage(
+    test_server: str, sandbox_supported: bool, names: tuple[str | None, str | None]
 ) -> None:
     runtime = FetchRuntime()
     config = SessionConfig(channel="chromium", chromium_sandbox=sandbox_supported)
     profile = get_profile(None)
     try:
-        async with runtime.use(None, config, profile) as first:
+        async with runtime.use(names[0], config, profile) as first:
             result = await first.fetch(f"{test_server}/set-cookie")
             assert [cookie["name"] for cookie in result.cookies] == ["webskrap_test"]
             first_page = await first.new_page()
             await first_page.goto(test_server, wait_until="load", timeout_s=30)
             await first_page.evaluate("localStorage.setItem('key', 'first')")
-            async with runtime.use(None, config, profile) as second:
+            async with runtime.use(names[1], config, profile) as second:
                 assert first.browser is second.browser
                 result = await second.fetch(f"{test_server}/echo-cookie")
                 assert "webskrap_test" not in result.text
@@ -48,9 +49,16 @@ async def test_unnamed_fetch_contexts_isolate_cookies_and_storage(
                 second_page = await second.new_page()
                 await second_page.goto(test_server, wait_until="load", timeout_s=30)
                 assert await second_page.evaluate("localStorage.getItem('key')") is None
+            if names[1] is not None:
+                assert await runtime.close_session(names[1])
             assert await first_page.evaluate("localStorage.getItem('key')") == "first"
             contexts = await first.browser.connection.send("Target.getBrowserContexts")
             assert contexts["browserContextIds"] == [first._context_id]
+        if names[0] is not None:
+            async with runtime.use(names[0], config, profile) as reopened:
+                assert reopened is first
+                assert [cookie["name"] for cookie in await reopened.cookies()] == ["webskrap_test"]
+            assert await runtime.close_session(names[0])
         assert runtime.client._sessions == {}
     finally:
         await runtime.close()
