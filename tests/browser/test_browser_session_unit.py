@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 
 from webskrap.browser import actions, browser_session, display
@@ -683,6 +684,82 @@ def _stub_session_launch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> lis
         browser_session, "session_running", lambda _directory, state: state is not None
     )
     return launches
+
+
+def test_open_keeps_the_event_loop_running_during_launch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_session_launch(monkeypatch, tmp_path)
+
+    def slow_launch(_directory: Path, **_kwargs: Any) -> tuple[int, int]:
+        time.sleep(0.5)
+        return (1234, 5678)
+
+    monkeypatch.setattr(browser_session, "launch_browser", slow_launch)
+
+    async def exercise() -> int:
+        ticks = 0
+        opening = asyncio.create_task(browser_session.open_session("slow"))
+        while not opening.done():
+            await asyncio.sleep(0.01)
+            ticks += 1
+        assert (await opening)["pid"] == 1234
+        return ticks
+
+    # A launch on the event loop thread would leave no time for the ticker.
+    assert asyncio.run(exercise()) >= 10
+
+
+@pytest.mark.parametrize("virtual_display", [False, True])
+def test_cancelled_open_kills_the_browser_its_launch_started(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, virtual_display: bool
+) -> None:
+    _stub_session_launch(monkeypatch, tmp_path)
+    displays: list[_FakeDisplay] = []
+
+    class _YieldingDisplay(_FakeDisplay):
+        async def stop(self) -> None:
+            await asyncio.sleep(0)
+            self.stopped = True
+
+    async def fake_start(_width: int, _height: int) -> _FakeDisplay:
+        displays.append(_YieldingDisplay())
+        return displays[-1]
+
+    monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
+    started, finish = threading.Event(), threading.Event()
+    killed: list[tuple[int, bool]] = []
+
+    def blocked_launch(_directory: Path, **_kwargs: Any) -> tuple[int, int]:
+        started.set()
+        finish.wait(5)
+        return (4321, 5678)
+
+    monkeypatch.setattr(browser_session, "launch_browser", blocked_launch)
+    monkeypatch.setattr(
+        browser_session, "kill_browser", lambda pid, *, force: killed.append((pid, force))
+    )
+
+    async def exercise() -> bool:
+        # MCP cancels through anyio scopes, which cancel every later await too.
+        with anyio.CancelScope() as scope:
+
+            async def cancel_once_launching() -> None:
+                await asyncio.to_thread(started.wait, 5)
+                scope.cancel()
+                await asyncio.sleep(0.05)
+                finish.set()
+
+            canceller = asyncio.ensure_future(cancel_once_launching())
+            await browser_session.open_session("cancelled", virtual_display=virtual_display)
+        await canceller
+        return scope.cancelled_caught
+
+    assert asyncio.run(exercise()) is True
+
+    assert killed == [(4321, True)]
+    assert browser_session.read_state(tmp_path / "browser" / "cancelled") is None
+    assert [shown.stopped for shown in displays] == ([True] if virtual_display else [])
 
 
 def test_open_records_the_proxy_and_its_webrtc_default(
