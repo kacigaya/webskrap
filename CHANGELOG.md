@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-23
+
 ### Changed
 
 - Browsers that the MCP server launched with `browser_open` close when the
@@ -1222,7 +1224,9 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/kacigaya/webskrap/compare/v4.0.1...v4.1.0
+[4.0.1]: https://github.com/kacigaya/webskrap/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/kacigaya/webskrap/compare/v3.7.0...v4.0.0
 [3.7.0]: https://github.com/kacigaya/webskrap/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/kacigaya/webskrap/compare/v3.6.0...v3.6.1
