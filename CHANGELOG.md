@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-11-23
+
 ### Fixed
 
 - Fastly's Client Challenge page now returns `blocked` (challenge). Before, it
@@ -1231,7 +1233,8 @@ entries below.
 
 Earlier releases (0.1.0 - 0.4.9) are recorded in the git history and tags only.
 
-[Unreleased]: https://github.com/kacigaya/webskrap/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/kacigaya/webskrap/compare/v4.1.1...HEAD
+[4.1.1]: https://github.com/kacigaya/webskrap/compare/v4.1.0...v4.1.1
 [4.1.0]: https://github.com/kacigaya/webskrap/compare/v4.0.1...v4.1.0
 [4.0.1]: https://github.com/kacigaya/webskrap/compare/v4.0.0...v4.0.1
 [4.0.0]: https://github.com/kacigaya/webskrap/compare/v3.7.0...v4.0.0
