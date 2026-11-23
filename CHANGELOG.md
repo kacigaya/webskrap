@@ -16,6 +16,10 @@ history, so they summarize each release rather than list every change.
   disk, and sessions opened with `webskrap browser open` keep running.
 - `WEBSKRAP_BROWSER_IDLE_TIMEOUT_S` (off by default) closes the MCP server's own
   browsers after that many seconds without a browser tool call.
+- Cookie decline waits the full `decline_cookies_timeout_ms` only when the page
+  shows a consent platform signal: a hidden notice, a TCF locator frame, or a
+  consent platform script or iframe. Other pages stop looking after 500 ms. A
+  default MCP fetch of a page without a notice is about 1.5 s faster.
 
 ### Fixed
 

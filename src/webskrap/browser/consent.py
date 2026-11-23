@@ -87,6 +87,12 @@ CONSENT_IFRAME_CSS = ", ".join(
 
 CONSENT_PRESENT_CSS = f"{CMP_REJECT_CSS}, {CONSENT_CONTAINER_CSS}, {CONSENT_IFRAME_CSS}"
 
+# Hidden frames the IAB TCF, GPP and US Privacy stubs add before their CMP loads.
+CMP_LOCATOR_CSS = ", ".join(
+    f'iframe[name^="{name}"]'
+    for name in ("__tcfapiLocator", "__gppLocator", "__uspapiLocator", "__cmpLocator")
+)
+
 # Frames served by a consent platform. Their whole document *is* the notice, so
 # the text strategy skips the container scoping there (Sourcepoint and friends
 # do not put "cookie" or "consent" in their inner markup).
@@ -108,6 +114,28 @@ CONSENT_FRAME_URL_PATTERN = re.compile(
             "axeptio",
             "iubenda",
             "sp_message",
+        )
+    ),
+    re.IGNORECASE,
+)
+
+# Script or iframe URLs of consent platforms. A match means a notice can still
+# show up, so the full wait applies.
+CMP_RESOURCE_URL_PATTERN = re.compile(
+    "|".join(
+        (
+            CONSENT_FRAME_URL_PATTERN.pattern,
+            "cookie-?script",
+            "osano",
+            "termly",
+            "cookiefirst",
+            "tarteaucitron",
+            "tagcommander",
+            "trustcommander",
+            "complianz",
+            "cookiehub",
+            "klaro",
+            "cmp",
         )
     ),
     re.IGNORECASE,
@@ -182,16 +210,27 @@ POST_DETECT_BUDGET_MS = 5_000
 # A caller that already waited for networkidle gave CMP scripts their chance to
 # inject, so the detection wait on top of that is mostly dead time.
 SETTLED_PAGE_TIMEOUT_MS = 500
+# How long a page with no consent platform signal is watched for a notice.
+# Only pages with a signal wait the caller's full timeout.
+NO_SIGNAL_TIMEOUT_MS = 500
 
 
-# Visible elements matching a CSS list; the notice-presence check.
-_VISIBLE_MATCH_SCRIPT = """(css) => {
+# "visible" when a notice shows, "possible" when a consent platform is on the
+# page but its notice is not shown yet, null when neither is true.
+_NOTICE_STATE_SCRIPT = """(options) => {
+  const { css, locatorCss, resourcePattern } = options;
+  let present = false;
   for (const element of document.querySelectorAll(css)) {
+    present = true;
     const box = element.getBoundingClientRect();
     if (box.width > 0 && box.height > 0 && getComputedStyle(element).visibility !== 'hidden')
-      return true;
+      return 'visible';
   }
-  return false;
+  if (present || document.querySelector(locatorCss)) return 'possible';
+  const resource = new RegExp(resourcePattern, 'i');
+  for (const element of document.querySelectorAll('script[src], iframe[src]'))
+    if (resource.test(element.src)) return 'possible';
+  return null;
 }"""
 
 # Reject-control candidates in one frame, at most ``max`` per strategy. The
@@ -216,7 +255,9 @@ async def decline_cookies(page: CDPPage, *, timeout_ms: float = 2_000) -> str | 
     """Click the reject control of a cookie consent notice, if one shows up.
 
     Waits up to ``timeout_ms`` for a consent notice to appear (CMP scripts
-    usually inject it after DOMContentLoaded), then tries every frame,
+    usually inject it after DOMContentLoaded). A page with no consent platform
+    signal (a hidden notice, a TCF locator frame, or a CMP script or iframe) is
+    watched for at most ``NO_SIGNAL_TIMEOUT_MS``. Then this tries every frame,
     including cross-site iframes. Returns the strategy that clicked
     (``"cmp"`` or ``"text"``), or ``None`` when no notice was found. Never
     raises: a page without a notice, or a notice this cannot handle, is not
@@ -256,13 +297,27 @@ async def decline_cookies(page: CDPPage, *, timeout_ms: float = 2_000) -> str | 
 
 
 async def _notice_appears(page: CDPPage, timeout_ms: float) -> bool:
-    """Poll the main frame until a consent notice is visible or time runs out."""
-    deadline = monotonic() + timeout_ms / 1000
+    """Poll the main frame until a consent notice is visible or time runs out.
+
+    Without a consent platform signal, time runs out after
+    ``NO_SIGNAL_TIMEOUT_MS``.
+    """
+    started = monotonic()
+    deadline = started + timeout_ms / 1000
+    no_signal_deadline = started + min(timeout_ms, NO_SIGNAL_TIMEOUT_MS) / 1000
+    signal = False
+    arg = {
+        "css": CONSENT_PRESENT_CSS,
+        "locatorCss": CMP_LOCATOR_CSS,
+        "resourcePattern": CMP_RESOURCE_URL_PATTERN.pattern,
+    }
     while True:
         with suppress(Exception):  # a navigation can destroy the world mid-poll
-            if await page.evaluate(_VISIBLE_MATCH_SCRIPT, CONSENT_PRESENT_CSS):
+            state = await page.evaluate(_NOTICE_STATE_SCRIPT, arg)
+            if state == "visible":
                 return True
-        if monotonic() >= deadline:
+            signal = signal or state == "possible"
+        if monotonic() >= (deadline if signal else no_signal_deadline):
             return False
         await asyncio.sleep(0.1)
 

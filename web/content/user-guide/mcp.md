@@ -88,8 +88,9 @@ page content in `text` (capped by `max_chars`, with `text_length` and
 text; set `text_only` to `false` to get raw HTML.
 
 Both also auto-decline cookie banners before reading the page, and report which
-strategy fired in `cookie_notice_declined`. Pass `decline_cookies: false` to
-leave the notice in place.
+strategy fired in `cookie_notice_declined`. A page with no consent platform
+signal adds about 500ms; a page that loads one can wait up to 2 seconds for its
+notice. Pass `decline_cookies: false` to leave the notice in place.
 
 ## Tool arguments
 
@@ -259,7 +260,8 @@ each with `context` lines around it (0 to 3) and at most `max_matches` (1 to
 longer than 2 seconds fails with `usage`.
 
 `browser_goto` and `browser_open` accept `decline_cookies: true` to click a
-consent notice's reject control (waiting up to 10 seconds for it) and report the strategy in
+consent notice's reject control (waiting up to 10 seconds for it when the page
+loads a consent platform, 500ms otherwise) and report the strategy in
 `cookie_notice_declined`. They also accept `solve_cloudflare: true` to click
 Cloudflare's Turnstile checkbox, `solve_datadome: true` to drag DataDome's
 slider, `solve_perimeterx: true` to hold HUMAN's Press & Hold button, and
