@@ -68,7 +68,7 @@ webskrap fetch https://example.com --ready-selector '#content' --format json
 
 `--timeout-ms` applies separately to navigation and this readiness wait, which
 starts after consent dismissal. A missing selector exits 3 (`timeout`). Known
-challenge and block pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) exit 11
+challenge and block pages (DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) exit 11
 (`blocked`) without retrying, even when served with HTTP 200. Ordinary HTTP errors still return `ok: false`.
 
 ## Search the web

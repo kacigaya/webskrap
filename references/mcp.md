@@ -96,7 +96,7 @@ page script.
 
 ## Failures
 
-A known challenge (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) or provider block
+A known challenge (DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) or provider block
 page (Cloudflare, Akamai) arrives as a `blocked` tool error, including pages
 served with HTTP 200. Blocks and challenges get different hints.
 `browser_goto` reports the same check in its `blocked` key instead of failing. Ordinary HTTP error pages return

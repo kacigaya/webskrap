@@ -7,9 +7,9 @@ not establish that a provider replaced the requested page.
 Two kinds are told apart, because they need different fixes:
 
 - A *challenge* asks the browser to prove itself (DataDome, Cloudflare's "Just a
-  moment", HUMAN's (PerimeterX) Press & Hold, Akamai's sec-cpt page, AWS WAF's
-  challenge action). A more browser-like run can pass it. With
-  ``solve_cloudflare``, Cloudflare's checkbox is clicked by
+  moment", HUMAN's (PerimeterX) Press & Hold, Akamai's sec-cpt page, Fastly's
+  Client Challenge, AWS WAF's challenge action). A more browser-like run can
+  pass it. With ``solve_cloudflare``, Cloudflare's checkbox is clicked by
   :mod:`webskrap.challenges.turnstile`; with ``solve_datadome``, DataDome's slider is
   dragged by :mod:`webskrap.challenges.datadome`; with ``solve_perimeterx``, HUMAN's
   button is held by :mod:`webskrap.challenges.perimeterx`; with ``solve_recaptcha``, a
@@ -206,6 +206,13 @@ _DETECT_SCRIPT = r"""({status, ray, cloudflare, akamai}) => {
     }
   }
   if (document.getElementById('sec-if-cpt-container')) return found('Akamai', 'challenge', true);
+  for (const script of document.querySelectorAll('script[src]')) {
+    let url;
+    try { url = new URL(script.getAttribute('src'), document.baseURI); }
+    catch { continue; }
+    if (/^\/_fs-ch-[A-Za-z0-9_-]+\/script\.js$/.test(url.pathname))
+      return found('Fastly', 'challenge', true);
+  }
   const text = document.body ? document.body.textContent : '';
   if (cloudflare && (status === 403 || status === 429)) {
     const codes = document.querySelectorAll(
@@ -269,6 +276,7 @@ async def detect(
         "DataDome",
         "Cloudflare",
         "Akamai",
+        "Fastly",
         "PerimeterX",
         "reCAPTCHA",
         "hCaptcha",
@@ -375,8 +383,9 @@ async def settle(
 ) -> dict[str, Any]:
     """Let a self-clearing interstitial reload into the requested page.
 
-    DataDome's device check, Akamai's sec-cpt page and AWS WAF's challenge run
-    their own script and reload the URL; nothing here interacts with them.
+    DataDome's device check, Akamai's sec-cpt page, Fastly's Client Challenge
+    and AWS WAF's challenge run their own script and reload the URL; nothing
+    here interacts with them.
     Waits at most :data:`INTERSTITIAL_TIMEOUT_S` and never past ``deadline``.
     ``events`` comes from :func:`record_documents`.
 

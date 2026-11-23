@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Fastly's Client Challenge page now returns `blocked` (challenge). Before, it
+  returned HTTP 200 with `ok: true`, and only its title showed the challenge.
+  WebSkrap waits up to 15 seconds for it to reload, as for other self-clearing
+  interstitials.
+
 ## [4.1.0] - 2026-11-23
 
 ### Changed

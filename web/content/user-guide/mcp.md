@@ -145,7 +145,7 @@ plus stealth options:
 ```
 
 Both fetch tools and `search` check for known challenge pages (DataDome,
-Cloudflare, Akamai, AWS WAF) and provider block pages (Cloudflare, Akamai), and
+Cloudflare, Akamai, Fastly, AWS WAF) and provider block pages (Cloudflare, Akamai), and
 return a `blocked` tool error, including pages served with HTTP 200. The hint
 differs for a block (change the exit IP or try `virtual_display=True`) and a
 challenge (try `virtual_display=True`, headed mode, or a persistent
