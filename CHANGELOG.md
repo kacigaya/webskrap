@@ -9,6 +9,8 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-11-23
+
 ### Changed
 
 - Concurrent unnamed MCP fetches can share a headless Chromium instance when
