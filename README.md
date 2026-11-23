@@ -52,7 +52,7 @@ asyncio.run(main())
 For deferred content, pass `ready_selector="#content"` to a Python fetch or
 `--ready-selector '#content'` to CLI `fetch`. Both MCP fetch tools accept
 `ready_selector` too. The selector must become visible after consent dismissal.
-Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block
+Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block
 pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
 checks that reload the page. It does not retry refusals. With
 `solve_cloudflare=True` (CLI `--solve-cloudflare`), it clicks Cloudflare's

@@ -36,15 +36,16 @@ automatically.
 
 Known challenge and block pages raise `blocked`, including HTTP 200 pages:
 
-- Challenges: DataDome, Cloudflare "Just a moment", Akamai's sec-cpt page, and
-  AWS WAF's challenge or CAPTCHA action (`x-amzn-waf-action`).
+- Challenges: DataDome, Cloudflare "Just a moment", Akamai's sec-cpt page,
+  Fastly's Client Challenge (a `/_fs-ch-*/script.js` loader), and AWS WAF's
+  challenge or CAPTCHA action (`x-amzn-waf-action`).
 - Blocks: Cloudflare's own error pages for codes 1005-1010, 1012, 1015 and
   1020, a site-styled Cloudflare 403 page that shows the response's Ray ID,
   and an Akamai edge page (`server: AkamaiGHost`, HTTP 400 or 403) with an
   Akamai reference number.
 
-The Akamai sec-cpt page and the AWS WAF challenge action reload the page from
-their own script. WebSkrap waits up to 15 seconds for that reload and then
+The Akamai sec-cpt page, Fastly's Client Challenge and the AWS WAF challenge
+action reload the page from their own script. WebSkrap waits up to 15 seconds for that reload and then
 reads the real page; it reports `blocked` only if the interstitial stays. A
 plain 403, 404 or 202 without these provider markers is not a block: it
 returns `ok: false` or `ok: true` as usual. The localized title of a block

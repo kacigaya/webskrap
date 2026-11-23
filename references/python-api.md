@@ -108,7 +108,7 @@ CSS selector or snapshot ref that must become visible after consent dismissal an
 extraction. Its wait uses `timeout_ms` or `navigation_timeout_ms` separately from
 navigation. A missing selector raises a timeout. A blank selector is a usage error.
 
-Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block pages (Cloudflare, Akamai) raise `WebSkrapError` with
+Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block pages (Cloudflare, Akamai) raise `WebSkrapError` with
 `code=ErrorCode.BLOCKED`, even when served with HTTP 200. `error.hint`
 holds a kind-specific hint. Ordinary HTTP errors
 still return `FetchResult(ok=False)`. Detection uses active provider markers and
