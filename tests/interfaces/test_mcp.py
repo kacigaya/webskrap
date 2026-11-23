@@ -837,12 +837,167 @@ def test_browser_eval_env_gate_disables_the_tool(monkeypatch: Any) -> None:
     assert caught.value.code is ErrorCode.USAGE
 
 
+@pytest.fixture(autouse=True)
+def _no_owned_sessions(monkeypatch: Any) -> None:
+    monkeypatch.setattr(mcp_browser, "_owned", {})
+
+
+def _fake_sessions(
+    monkeypatch: Any, tmp_path: Path, running: dict[str, int], launched: set[str]
+) -> list[str]:
+    """Fake open/read/close; ``running`` maps names to pids, ``launched`` are not reused."""
+    closed: list[str] = []
+    monkeypatch.delenv(mcp_browser.IDLE_TIMEOUT_ENV, raising=False)
+    monkeypatch.setenv("WEBSKRAP_BROWSER_DIR", str(tmp_path))
+
+    async def fake_open(name: str, **_kwargs: Any) -> dict[str, Any]:
+        return {"session": name, "pid": running[name], "reused": name not in launched}
+
+    def fake_close(name: str, *, delete_data: bool = False) -> dict[str, Any]:
+        if name == "broken":
+            raise OSError("stuck")
+        closed.append(name)
+        running.pop(name, None)
+        return {"session": name, "deleted_data": delete_data}
+
+    monkeypatch.setattr(browser_session, "open_session", fake_open)
+    monkeypatch.setattr(browser_session, "close_session", fake_close)
+    monkeypatch.setattr(
+        browser_session,
+        "read_state",
+        lambda directory: {"pid": running[directory.name]} if directory.name in running else None,
+    )
+    return closed
+
+
+async def test_shutdown_closes_only_sessions_this_server_launched(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    running = {"mine": 11, "cli": 22}
+    closed = _fake_sessions(monkeypatch, tmp_path, running, launched={"mine"})
+
+    async with mcp_server._fetch_lifespan(mcp_server.mcp):
+        await mcp_server.browser_open(session="mine")
+        await mcp_server.browser_open(session="cli")
+        assert closed == []
+
+    assert closed == ["mine"]
+    assert running == {"cli": 22}
+
+
+async def test_shutdown_keeps_a_session_the_cli_relaunched(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    running = {"mine": 11}
+    closed = _fake_sessions(monkeypatch, tmp_path, running, launched={"mine"})
+
+    async with mcp_server._fetch_lifespan(mcp_server.mcp):
+        await mcp_server.browser_open(session="mine")
+        running["mine"] = 33
+
+    assert closed == []
+
+
+async def test_shutdown_closes_the_rest_when_one_close_fails(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    running = {"broken": 11, "mine": 12}
+    closed = _fake_sessions(monkeypatch, tmp_path, running, launched={"broken", "mine"})
+
+    async with mcp_server._fetch_lifespan(mcp_server.mcp):
+        await mcp_server.browser_open(session="broken")
+        await mcp_server.browser_open(session="mine")
+
+    assert closed == ["mine"]
+
+
+async def test_browser_close_releases_ownership(monkeypatch: Any, tmp_path: Path) -> None:
+    running = {"mine": 11}
+    closed = _fake_sessions(monkeypatch, tmp_path, running, launched={"mine"})
+
+    async with mcp_server._fetch_lifespan(mcp_server.mcp):
+        await mcp_server.browser_open(session="mine")
+        await mcp_server.browser_close(session="mine")
+        running["mine"] = 11
+
+    assert closed == ["mine"]
+
+
+async def test_idle_cleanup_skips_busy_and_recent_sessions(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    running = {"idle": 1, "busy": 2, "recent": 3}
+    closed = _fake_sessions(monkeypatch, tmp_path, running, launched=set(running))
+    for name in running:
+        await mcp_server.browser_open(session=name)
+    mcp_browser._owned["idle"].last_used -= 120
+    mcp_browser._owned["busy"].last_used -= 120
+    mcp_browser._owned["busy"].active = 1
+
+    await mcp_browser.close_owned_sessions(idle_s=60)
+
+    assert closed == ["idle"]
+    assert sorted(mcp_browser._owned) == ["busy", "recent"]
+
+
+async def test_idle_cleanup_runs_only_when_opted_in(monkeypatch: Any, tmp_path: Path) -> None:
+    running = {"mine": 11}
+    closed = _fake_sessions(monkeypatch, tmp_path, running, launched={"mine"})
+
+    async with mcp_server._fetch_lifespan(mcp_server.mcp):
+        await mcp_server.browser_open(session="mine")
+        await asyncio.sleep(0.2)
+        assert closed == []
+
+    running["mine"] = 11
+    monkeypatch.setenv(mcp_browser.IDLE_TIMEOUT_ENV, "0.05")
+    async with mcp_server._fetch_lifespan(mcp_server.mcp):
+        await mcp_server.browser_open(session="mine")
+        for _ in range(100):
+            if len(closed) == 2:
+                break
+            await asyncio.sleep(0.02)
+        assert closed == ["mine", "mine"]
+
+
+@pytest.mark.browser
+async def test_shutdown_stops_an_mcp_browser_and_keeps_a_cli_browser(
+    monkeypatch: Any, persistent_session_env: Path
+) -> None:
+    monkeypatch.delenv(mcp_browser.IDLE_TIMEOUT_ENV, raising=False)
+    cli = await browser_session.open_session("cli")
+    try:
+        async with mcp_server._fetch_lifespan(mcp_server.mcp):
+            mine = await mcp_server.browser_open(session="mine")
+            assert (await mcp_server.browser_open(session="cli"))["reused"] is True
+        mine_dir, cli_dir = persistent_session_env / "mine", persistent_session_env / "cli"
+        assert browser_session.read_state(mine_dir) is None
+        assert not browser_session.session_running(mine_dir, {"pid": mine["pid"]})
+        assert browser_session.session_running(cli_dir, browser_session.read_state(cli_dir))
+        assert (await browser_session.open_session("cli"))["pid"] == cli["pid"]
+    finally:
+        browser_session.close_session("cli")
+        browser_session.close_session("mine")
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("", None), ("0", None), ("-1", None), ("90", 90.0)])
+def test_idle_timeout_reads_the_environment(monkeypatch: Any, raw: str, expected: Any) -> None:
+    monkeypatch.setenv(mcp_browser.IDLE_TIMEOUT_ENV, raw)
+    assert mcp_browser.idle_timeout_s() == expected
+
+
+def test_idle_timeout_rejects_a_non_number(monkeypatch: Any) -> None:
+    monkeypatch.setenv(mcp_browser.IDLE_TIMEOUT_ENV, "soon")
+    with pytest.raises(WebSkrapError, match="number of seconds"):
+        mcp_browser.idle_timeout_s()
+
+
 def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
     calls: list[dict[str, Any]] = []
 
     async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
-        return {"session": name, "reused": False, "proxy_server": None}
+        return {"session": name, "pid": 1, "reused": False, "proxy_server": None}
 
     monkeypatch.setattr(browser_session, "open_session", fake_open)
 
@@ -870,7 +1025,7 @@ def test_browser_open_passes_the_stealth_launch_settings(monkeypatch: Any) -> No
 
     async def fake_open(name: str, **kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
-        return {"session": name, "reused": False, "proxy_server": None}
+        return {"session": name, "pid": 1, "reused": False, "proxy_server": None}
 
     monkeypatch.setattr(browser_session, "open_session", fake_open)
 

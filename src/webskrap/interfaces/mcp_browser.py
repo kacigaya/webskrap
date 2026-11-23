@@ -9,6 +9,8 @@ import logging
 import os
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from time import monotonic
 from typing import Any, TypeVar
 
 from webskrap.browser import actions, browser_session
@@ -39,8 +41,68 @@ from webskrap.security.urls import validate_mcp_url
 logger = logging.getLogger("webskrap.mcp_server")
 
 EVAL_ENV = "WEBSKRAP_ALLOW_EVAL"
+IDLE_TIMEOUT_ENV = "WEBSKRAP_BROWSER_IDLE_TIMEOUT_S"
 MAX_EVAL_CHARS = 10_000
 T = TypeVar("T")
+
+
+@dataclass
+class _Owned:
+    """A browser session this server launched."""
+
+    pid: int
+    last_used: float
+    active: int = 0
+
+
+#: Sessions this server process launched, by name. Only these close at server
+#: shutdown or when idle; sessions the CLI opened keep running.
+_owned: dict[str, _Owned] = {}
+
+
+def idle_timeout_s() -> float | None:
+    """Return the opt-in idle timeout from ``IDLE_TIMEOUT_ENV``, or None when off."""
+    raw = os.environ.get(IDLE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        msg = f"{IDLE_TIMEOUT_ENV} must be a number of seconds, got {raw!r}"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE) from None
+    return value if value > 0 else None
+
+
+async def close_owned_sessions(*, idle_s: float | None = None) -> None:
+    """Close the sessions this server launched.
+
+    With ``idle_s``, only sessions with no running action and no browser tool
+    call for that many seconds close. A session is closed only while it still
+    runs the browser this server launched, so one the CLI reopened is kept.
+    Profile data stays on disk.
+    """
+    now = monotonic()
+    for name, owned in list(_owned.items()):
+        if idle_s is not None and (owned.active or now - owned.last_used < idle_s):
+            continue
+        _owned.pop(name, None)
+        try:
+            await asyncio.to_thread(_close_if_launched_by_us, name, owned.pid)
+        except Exception:  # noqa: BLE001 - one stuck session must not keep the others open
+            logger.warning("could not close browser session %r", name, exc_info=True)
+
+
+def _close_if_launched_by_us(name: str, pid: int) -> None:
+    state = browser_session.read_state(browser_session.session_dir(name))
+    if state is not None and state.get("pid") == pid:
+        browser_session.close_session(name)
+
+
+async def reap_idle_sessions(idle_s: float) -> None:
+    """Close owned sessions idle for ``idle_s`` seconds, until cancelled."""
+    while True:
+        await asyncio.sleep(min(idle_s, 30.0))
+        await close_owned_sessions(idle_s=idle_s)
 
 
 async def _browser_action(
@@ -49,8 +111,16 @@ async def _browser_action(
     timeout_ms: float,
 ) -> T:
     """Run a page action, reporting failures as code-tagged one-liners."""
-    with _tool_errors():
-        return await browser_session.run_page_action(session, action, timeout_ms=timeout_ms)
+    owned = _owned.get(session)
+    if owned is not None:
+        owned.active += 1
+    try:
+        with _tool_errors():
+            return await browser_session.run_page_action(session, action, timeout_ms=timeout_ms)
+    finally:
+        if owned is not None:
+            owned.active -= 1
+            owned.last_used = monotonic()
 
 
 async def browser_open(
@@ -70,10 +140,13 @@ async def browser_open(
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session with no visible window.
 
-    The browser is a detached Chromium that keeps running between tool calls
-    (and between MCP server restarts); every browser_* tool reconnects to it
-    over CDP. The session's profile persists on disk (owner-readable only), so
-    cookies and logins survive close/open. Shares sessions with the
+    The browser is a detached Chromium that keeps running between tool calls;
+    every browser_* tool reconnects to it over CDP. A browser this server
+    launched closes when the server shuts down (or after
+    WEBSKRAP_BROWSER_IDLE_TIMEOUT_S seconds without a browser tool call, when
+    the operator sets it); one the CLI opened keeps running. The session's
+    profile persists on disk (owner-readable only), so cookies and logins
+    survive close/open. Shares sessions with the
     `webskrap browser` CLI.
 
     The browser keeps Chromium's OS sandbox. Environments that cannot sandbox
@@ -134,6 +207,13 @@ async def browser_open(
             profile_mode=parse_session_profile_mode(profile_mode),
             profile=profile,
         )
+        owned = _owned.get(session)
+        if not payload["reused"]:
+            _owned[session] = _Owned(pid=payload["pid"], last_used=monotonic())
+        elif owned is not None and owned.pid != payload["pid"]:
+            del _owned[session]
+        elif owned is not None:
+            owned.last_used = monotonic()
     if url:
         payload.update(
             await _browser_action(
@@ -671,10 +751,14 @@ async def browser_close(
     """
     with _tool_errors():
         names = browser_session.list_session_names() if all_sessions else [session]
-        closed = [
-            await asyncio.to_thread(browser_session.close_session, name, delete_data=delete_data)
-            for name in names
-        ]
+        closed = []
+        for name in names:
+            closed.append(
+                await asyncio.to_thread(
+                    browser_session.close_session, name, delete_data=delete_data
+                )
+            )
+            _owned.pop(name, None)
         return {"closed": closed}
 
 

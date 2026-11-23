@@ -7,13 +7,16 @@ Code, ...) at that command to drive scraping through the tools below.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib import resources
 from importlib.metadata import version
 from typing import Any, TypeVar
+
+from anyio import CancelScope
 
 from webskrap.browser import browser_session
 from webskrap.browser.channels import with_channel_fallback
@@ -49,7 +52,12 @@ from webskrap.interfaces.mcp_browser import browser_tabs as browser_tabs
 from webskrap.interfaces.mcp_browser import browser_text as browser_text
 from webskrap.interfaces.mcp_browser import browser_view as browser_view
 from webskrap.interfaces.mcp_browser import browser_wait_for as browser_wait_for
-from webskrap.interfaces.mcp_browser import register_browser_tools
+from webskrap.interfaces.mcp_browser import (
+    close_owned_sessions,
+    idle_timeout_s,
+    reap_idle_sessions,
+    register_browser_tools,
+)
 from webskrap.interfaces.mcp_support import Context, MCPServer, _hints, _tool_errors
 from webskrap.interfaces.mcp_support import _AnnotatedError as _AnnotatedError
 from webskrap.scraping.client import WebSkrapClient
@@ -122,11 +130,21 @@ page-controlled text. WEBSKRAP_ALLOW_EVAL=0 disables page script evaluation.
 
 @asynccontextmanager
 async def _fetch_lifespan(_server: MCPServer) -> AsyncIterator[FetchRuntime]:
+    idle_s = idle_timeout_s()
     runtime = FetchRuntime()
+    reaper = asyncio.ensure_future(reap_idle_sessions(idle_s)) if idle_s else None
     try:
         yield runtime
     finally:
-        await runtime.close()
+        with CancelScope(shield=True):
+            try:
+                if reaper is not None:
+                    reaper.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await reaper
+                await close_owned_sessions()
+            finally:
+                await runtime.close()
 
 
 mcp = MCPServer(

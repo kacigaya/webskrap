@@ -203,11 +203,19 @@ Switch engine or exit IP instead of retrying.
 The `browser_*` tools drive the same persistent sessions as
 [`webskrap browser`](/docs/user-guide/cli/#interactive-browser-sessions) in the
 CLI: `browser_open` launches a detached headless Chromium that keeps running
-between tool calls (and between MCP server restarts), and every other tool
+between tool calls, and every other tool
 reconnects to it over CDP, with the same automation and
 virtual-screen launch flags as `stealth_fetch`. Sessions are named (`session`, default `default`)
 and store their profile under `~/.webskrap/browser/<name>/`
 (root overridable with `WEBSKRAP_BROWSER_DIR`), so cookies and logins persist.
+
+A browser that the MCP server launched closes when the server shuts down
+cleanly, and its profile stays on disk. A session opened with
+`webskrap browser open` keeps running, even when MCP tools use it. To also
+close the server's own browsers after a period without browser tool calls, set
+`WEBSKRAP_BROWSER_IDLE_TIMEOUT_S` (seconds) before starting the server. It is
+off by default. A server killed by a signal cannot close its browsers; use
+`browser_close` or `webskrap browser close` for those.
 
 `browser_open` accepts `webrtc_ip_handling_policy` (for example
 `disable_non_proxied_udp`) to keep the host's addresses out of WebRTC

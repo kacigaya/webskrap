@@ -9,6 +9,14 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Changed
+
+- Browsers that the MCP server launched with `browser_open` close when the
+  server shuts down. Each one held about 400 MB (PSS) locally. Profiles stay on
+  disk, and sessions opened with `webskrap browser open` keep running.
+- `WEBSKRAP_BROWSER_IDLE_TIMEOUT_S` (off by default) closes the MCP server's own
+  browsers after that many seconds without a browser tool call.
+
 ### Fixed
 
 - `browser_open` and `webskrap browser open` start Chromium in a worker
