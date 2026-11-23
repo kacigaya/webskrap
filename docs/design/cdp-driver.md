@@ -153,8 +153,9 @@ The driver uses the following mechanisms.
   all pending commands fail with a launch or sandbox error.
 - **Pages.** `CDPBrowser.new_page` creates a target and attaches to it with a
   flat session.
-- **Scripts.** `CDPPage.evaluate` creates an isolated world and runs
-  `Runtime.evaluate` in it. The driver never sends `Runtime.enable` or
+- **Scripts.** `CDPPage.evaluate` runs `Runtime.evaluate` in an isolated
+  world. It keeps one world per document and makes a new one after a
+  navigation destroys the old one. The driver never sends `Runtime.enable` or
   `Console.enable`. Page code cannot see or patch the objects that the scripts
   use. The page's Content Security Policy does not block these scripts.
 - **Launch flags.** The command line is short: the pipe, the profile, first-run
