@@ -28,6 +28,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
+from anyio import CancelScope
+
 from webskrap.browser import display
 from webskrap.browser.actions import (
     DEFAULT_ACTION_TIMEOUT_MS,
@@ -562,24 +564,28 @@ async def open_session(
             if config.uses_virtual_display():
                 screen = config.virtual_screen()
                 virtual = await display.VirtualDisplay.start(screen.width, screen.height)
+            display_env = virtual.env if virtual is not None else None
             try:
-                pid, port = launch_browser(
-                    directory,
-                    executable=executable,
-                    headless=headless,
-                    chromium_sandbox=sandboxed,
-                    proxy_server=proxy_server,
-                    webrtc_ip_handling_policy=webrtc_ip_handling_policy,
-                    fake_media_devices=fake_media_devices,
-                    virtual_display=virtual_display,
-                    gpu=launch_gpu,
-                    profile_mode=profile_mode,
-                    profile=profile,
-                    display_env=virtual.env if virtual is not None else None,
+                pid, port = await _launch_off_loop(
+                    lambda: launch_browser(
+                        directory,
+                        executable=executable,
+                        headless=headless,
+                        chromium_sandbox=sandboxed,
+                        proxy_server=proxy_server,
+                        webrtc_ip_handling_policy=webrtc_ip_handling_policy,
+                        fake_media_devices=fake_media_devices,
+                        virtual_display=virtual_display,
+                        gpu=launch_gpu,
+                        profile_mode=profile_mode,
+                        profile=profile,
+                        display_env=display_env,
+                    )
                 )
             except BaseException:
                 if virtual is not None:
-                    await virtual.stop()
+                    with CancelScope(shield=True):
+                        await virtual.stop()
                 raise
             display_state = (
                 {"display_pid": virtual.pid, "display_dir": str(virtual.directory)}
@@ -639,6 +645,25 @@ async def open_session(
         }
     finally:
         await asyncio.to_thread(operation_lock.release)
+
+
+async def _launch_off_loop(start: Callable[[], tuple[int, int]]) -> tuple[int, int]:
+    """Run ``start`` (a :func:`launch_browser` call) in a worker thread.
+
+    The launch polls with blocking sleeps for up to ``LAUNCH_TIMEOUT_S``; in
+    the thread, other tasks on the event loop keep running. A cancelled caller
+    cannot stop the thread, so the browser it starts is killed instead of
+    being left running with no state file.
+    """
+    launch = asyncio.ensure_future(asyncio.to_thread(start))
+    try:
+        return await asyncio.shield(launch)
+    except asyncio.CancelledError:
+        # An anyio scope cancels every later await too; shield the wait.
+        with CancelScope(shield=True), suppress(Exception):
+            pid, _port = await launch
+            kill_browser(pid, force=True)
+        raise
 
 
 #: Stealth launch settings a session records, with the value of a session

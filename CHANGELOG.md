@@ -9,6 +9,13 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Fixed
+
+- `browser_open` and `webskrap browser open` start Chromium in a worker
+  thread. Other MCP tool calls no longer stall while it starts; locally the
+  longest event-loop stall fell from about 400 ms to about 10 ms. If the call
+  is cancelled during the launch, the new browser is stopped.
+
 ## [4.0.1] - 2026-11-23
 
 ### Changed
