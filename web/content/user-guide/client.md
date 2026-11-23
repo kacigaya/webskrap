@@ -145,8 +145,10 @@ await page.goto("https://example.com", wait_until="domcontentloaded")
 await session.decline_cookies(page)
 ```
 
-`decline_cookies_timeout_ms` is how long to wait for a notice to appear, and so
-the per-fetch cost on pages that have none. Total time is bounded by that plus a
+`decline_cookies_timeout_ms` is how long to wait for a notice to appear on a
+page that loads a consent platform. A page with no consent platform signal (no
+hidden notice, TCF locator frame, or consent platform script or iframe) is
+checked for 500ms only, so most pages without a notice pay that instead. Total time is bounded by that plus a
 3s internal budget for clicking, including retries while a consent platform's
 iframe renders. Fetches that already waited for `networkidle` shrink the wait to
 500ms, because the CMP script has had its chance to inject by then.

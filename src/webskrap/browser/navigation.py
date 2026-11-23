@@ -13,7 +13,8 @@ from webskrap.security.urls import validate_url
 
 #: How long a browser navigation waits for a consent notice. Longer than the
 #: fetch default (2 s): some CMPs inject their notice 7 s after load. The wait
-#: ends as soon as a notice shows, so only opted-in pages without one pay it.
+#: ends as soon as a notice shows, and pages with no consent platform signal
+#: stop after ``consent.NO_SIGNAL_TIMEOUT_MS``.
 DECLINE_TIMEOUT_MS = 10_000
 
 

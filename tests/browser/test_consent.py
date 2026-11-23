@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +11,7 @@ import pytest
 from conftest import set_page_content
 
 from webskrap import SessionConfig, WebSkrapClient
+from webskrap.browser import consent
 from webskrap.browser.consent import REJECT_TEXT_PATTERN, decline_cookies
 from webskrap.driver.cdp import CDPPage
 
@@ -127,6 +129,30 @@ async def test_waits_for_a_late_notice_unless_the_timeout_is_zero(
 
 
 @pytest.mark.browser
+async def test_waits_the_full_timeout_when_a_cmp_signal_is_present(
+    sandbox_supported: bool,
+) -> None:
+    # The TCF stub's locator frame is up long before its notice renders.
+    html = (
+        '<iframe name="__tcfapiLocator" style="display:none"></iframe>'
+        f'<template id="notice"><button class="cc-deny" id="late" {_RECORD}>No</button></template>'
+        "<script>setTimeout(() => document.body.append("
+        "document.getElementById('notice').content.cloneNode(true)), 1200)</script>"
+    )
+    async with _page(html, sandbox_supported) as page:
+        assert await decline_cookies(page, timeout_ms=4_000) == "cmp"
+        assert await _clicked(page) == ["late"]
+
+
+@pytest.mark.browser
+async def test_stops_waiting_early_without_a_cmp_signal(sandbox_supported: bool) -> None:
+    async with _page("<main>No consent platform here</main>", sandbox_supported) as page:
+        started = time.monotonic()
+        assert await decline_cookies(page, timeout_ms=10_000) is None
+        assert time.monotonic() - started < 3
+
+
+@pytest.mark.browser
 async def test_returns_none_without_a_notice(sandbox_supported: bool) -> None:
     async with _page(f'<button id="reject" {_RECORD}>Reject</button>', sandbox_supported) as page:
         assert await decline_cookies(page, timeout_ms=300) is None
@@ -144,6 +170,70 @@ async def test_stops_clicking_once_the_budget_is_spent(
         monkeypatch.setattr("webskrap.browser.consent.monotonic", lambda: next(calls, 10_000.0))
         assert await decline_cookies(page, timeout_ms=0) is None
         assert await _clicked(page) == []
+
+
+class _StatePage:
+    """Answers each notice-state poll with the next scripted state."""
+
+    def __init__(self, *states: str | None) -> None:
+        self._states = iter(states)
+        self.polls = 0
+
+    async def evaluate(self, _script: str, _arg: object) -> str | None:
+        self.polls += 1
+        state = next(self._states, None)
+        if state == "error":
+            raise RuntimeError("context destroyed")
+        return state
+
+
+async def test_notice_wait_ends_early_without_a_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(consent, "NO_SIGNAL_TIMEOUT_MS", 50)
+    page = _StatePage()
+    started = time.monotonic()
+    assert await consent._notice_appears(page, 5_000) is False  # type: ignore[arg-type]
+    assert time.monotonic() - started < 2
+
+
+async def test_notice_wait_keeps_the_full_timeout_after_a_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(consent, "NO_SIGNAL_TIMEOUT_MS", 50)
+    page = _StatePage("error", "possible")
+    started = time.monotonic()
+    assert await consent._notice_appears(page, 400) is False  # type: ignore[arg-type]
+    assert time.monotonic() - started >= 0.4
+    assert page.polls > 2
+
+
+async def test_notice_wait_returns_once_a_signalled_notice_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(consent, "NO_SIGNAL_TIMEOUT_MS", 0)
+    page = _StatePage("possible", None, "visible")
+    assert await consent._notice_appears(page, 5_000) is True  # type: ignore[arg-type]
+    assert page.polls == 3
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://cdn.cookielaw.org/scripttemplates/otSDKStub.js",
+        "https://consent.cookiebot.com/uc.js",
+        "https://cmp.osano.com/x/osano.js",
+        "https://cdn.privacy-mgmt.com/wrapperMessagingWithoutDetection.js",
+    ],
+)
+def test_cmp_resource_pattern_matches_consent_platforms(url: str) -> None:
+    assert consent.CMP_RESOURCE_URL_PATTERN.search(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://www.googletagmanager.com/gtm.js?id=GTM-1", "https://example.com/app.js"],
+)
+def test_cmp_resource_pattern_ignores_other_scripts(url: str) -> None:
+    assert not consent.CMP_RESOURCE_URL_PATTERN.search(url)
 
 
 @pytest.mark.parametrize(

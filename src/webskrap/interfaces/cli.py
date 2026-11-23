@@ -84,7 +84,7 @@ DeclineCookiesTimeoutMsOption = Annotated[
     typer.Option(
         "--decline-cookies-timeout-ms",
         min=0,
-        help="How long to wait for a cookie consent notice to appear.",
+        help="How long to wait for a cookie consent notice on a page with a consent platform.",
     ),
 ]
 ProfileModeOption = Annotated[

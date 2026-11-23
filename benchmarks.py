@@ -6,6 +6,7 @@ its own CDP client, so these benchmarks measure what WebSkrap actually does:
 1. Resource routing  - ResourcePolicy.ALL vs LITE vs DOCUMENTS
 2. Session reuse      - cold launch per fetch vs warm persistent session
 3. Concurrency        - throughput when fetching many pages at once
+4. Cookie decline     - cost of decline_cookies on a page without a notice
 
 All benchmarks run against a local HTTP server that serves a synthetic page
 referencing many sub-resources (images, stylesheets, media). Each sub-resource
@@ -185,6 +186,11 @@ async def bench_warm_session(session) -> None:
 
 
 @benchmark
+async def bench_decline_cookies(session) -> None:
+    await session.fetch(URL, wait_until="load", decline_cookies=True)
+
+
+@benchmark
 async def bench_concurrent(session) -> None:
     await asyncio.gather(*(session.fetch(URL, wait_until="load") for _ in range(CONCURRENCY)))
 
@@ -241,6 +247,14 @@ async def main() -> None:
                 "warm session reuse": await bench_warm_session(warm),
             }
             display("Session reuse", reuse_results, "warm session reuse")
+            display(
+                "Cookie decline on a page without a notice",
+                {
+                    "decline off": reuse_results["warm session reuse"],
+                    "decline on": await bench_decline_cookies(warm),
+                },
+                "decline off",
+            )
             await warm.close()
 
             conc = await client.session("conc", config=_config(ResourcePolicy.LITE))
