@@ -199,6 +199,60 @@ async def test_evaluate_raises_on_page_exceptions() -> None:
         await page.evaluate("() => null.x")
 
 
+class _WorldConnection:
+    """Numbers each new isolated world and fails evaluates as scripted."""
+
+    def __init__(self, *errors: str) -> None:
+        self.errors = list(errors)
+        self.worlds = 0
+        self.contexts: list[int] = []
+
+    async def send(self, method: str, params: Any = None, **_kwargs: Any) -> dict[str, Any]:
+        if method == "Page.createIsolatedWorld":
+            self.worlds += 1
+            return {"executionContextId": self.worlds}
+        self.contexts.append(params["contextId"])
+        if self.errors:
+            raise CDPError(self.errors.pop(0))
+        return {"result": {"value": "ok"}}
+
+
+async def test_evaluate_reuses_one_world_across_calls() -> None:
+    connection = _WorldConnection()
+    page = CDPPage(connection, "S1", "T1")  # type: ignore[arg-type]
+
+    for _ in range(3):
+        assert await page.evaluate("1") == "ok"
+    assert connection.worlds == 1
+    assert connection.contexts == [1, 1, 1]
+
+
+async def test_evaluate_replaces_a_world_a_navigation_destroyed() -> None:
+    connection = _WorldConnection("CDP error -32000: Cannot find context with specified id")
+    page = CDPPage(connection, "S1", "T1")  # type: ignore[arg-type]
+
+    assert await page.evaluate("1") == "ok"
+    assert connection.worlds == 2
+    assert connection.contexts == [1, 2]
+    assert await page.evaluate("1") == "ok"
+    assert connection.worlds == 2
+
+
+async def test_evaluate_retries_a_stale_world_only_once() -> None:
+    stale = "CDP error -32000: Cannot find context with specified id"
+    page = CDPPage(_WorldConnection(stale, stale), "S1", "T1")  # type: ignore[arg-type]
+    with pytest.raises(CDPError, match="Cannot find context"):
+        await page.evaluate("1")
+
+
+async def test_evaluate_does_not_rerun_a_script_on_other_errors() -> None:
+    connection = _WorldConnection("CDP error -32000: Execution context was destroyed.")
+    page = CDPPage(connection, "S1", "T1")  # type: ignore[arg-type]
+    with pytest.raises(CDPError, match="Execution context was destroyed"):
+        await page.evaluate("1")
+    assert connection.contexts == [1]
+
+
 def _fake_chromium(root: Path, revision: int) -> Path:
     binary = root / f"chromium-{revision}" / "chrome-linux" / "chrome"
     binary.parent.mkdir(parents=True)

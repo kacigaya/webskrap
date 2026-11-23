@@ -37,6 +37,10 @@ _EVALUATE_SCRIPT = """async (source, arg) => {
 }"""
 
 
+# Chromium's reply when a context id names a world a navigation destroyed.
+_STALE_CONTEXT = "Cannot find context with specified id"
+
+
 class CDPError(WebSkrapError):
     """A CDP command returned an error object instead of a result."""
 
@@ -433,8 +437,8 @@ class CDPPage:
         """Create a fresh isolated world in the main frame and return its context id.
 
         It shares the DOM with the page but not its JavaScript globals, and
-        needs no ``Runtime.enable``. A navigation destroys it, so callers
-        create one per operation.
+        needs no ``Runtime.enable``. A navigation destroys it. Repeated
+        lookups should use :meth:`shared_world` instead.
         """
         world = await self.send(
             "Page.createIsolatedWorld",
@@ -458,13 +462,15 @@ class CDPPage:
         self._shared_world = None
 
     async def evaluate(self, expression: str, arg: Any = None, /) -> Any:
-        """Run ``expression`` in a fresh isolated world and return its JSON value.
+        """Run ``expression`` in the :meth:`shared_world` and return its JSON value.
 
         Matches Playwright's ``page.evaluate``: when ``expression`` evaluates
         to a function, that function is called with ``arg`` and its result
         (awaited) is returned; otherwise the expression's own value is. See
-        :data:`_EVALUATE_SCRIPT`. The world is created per call because a
-        navigation destroys it.
+        :data:`_EVALUATE_SCRIPT`. Calls reuse one world, so polling does not
+        add a V8 context per call. After a navigation destroys the world, the
+        call that finds it gone makes a new one and runs there. The script had
+        not started, so it never runs twice.
         ``Runtime.evaluate`` with an explicit context id works without
         ``Runtime.enable``; the isolated world shares the DOM with the page but
         not its JavaScript globals.
@@ -472,16 +478,27 @@ class CDPPage:
         Raises:
             CDPError: If the script threw or its value is not serializable.
         """
-        world = await self.isolated_world()
-        result = await self.send(
-            "Runtime.evaluate",
-            {
-                "expression": f"({_EVALUATE_SCRIPT})({json.dumps(expression)}, {json.dumps(arg)})",
-                "contextId": world,
-                "returnByValue": True,
-                "awaitPromise": True,
-            },
-        )
+        source = f"({_EVALUATE_SCRIPT})({json.dumps(expression)}, {json.dumps(arg)})"
+        for attempt in range(2):
+            world = await self.shared_world()
+            try:
+                result = await self.send(
+                    "Runtime.evaluate",
+                    {
+                        "expression": source,
+                        "contextId": world,
+                        "returnByValue": True,
+                        "awaitPromise": True,
+                    },
+                )
+            except CDPError as exc:
+                if attempt == 0 and _STALE_CONTEXT in str(exc):
+                    self.forget_world()
+                    continue
+                raise
+            break
+        else:
+            raise AssertionError("unreachable")
         if "exceptionDetails" in result:
             details = result["exceptionDetails"]
             description = details.get("exception", {}).get("description") or details.get("text")

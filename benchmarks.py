@@ -7,6 +7,7 @@ its own CDP client, so these benchmarks measure what WebSkrap actually does:
 2. Session reuse      - cold launch per fetch vs warm persistent session
 3. Concurrency        - throughput when fetching many pages at once
 4. Cookie decline     - cost of decline_cookies on a page without a notice
+5. Page polling       - page.evaluate called the way wait loops poll
 
 All benchmarks run against a local HTTP server that serves a synthetic page
 referencing many sub-resources (images, stylesheets, media). Each sub-resource
@@ -59,6 +60,7 @@ N_STYLES = 8
 N_MEDIA = 6
 WARMUP = 2
 REPEAT = 20  # navigations averaged per benchmark
+EVALUATE_POLLS = 100  # evaluates per polling batch, 10 s of 100 ms polls
 CONCURRENCY = 8  # pages for the concurrency benchmark
 
 # Synthetic target page
@@ -191,6 +193,12 @@ async def bench_decline_cookies(session) -> None:
 
 
 @benchmark
+async def bench_evaluate_poll(page) -> None:
+    for _ in range(EVALUATE_POLLS):
+        await page.evaluate("() => document.readyState")
+
+
+@benchmark
 async def bench_concurrent(session) -> None:
     await asyncio.gather(*(session.fetch(URL, wait_until="load") for _ in range(CONCURRENCY)))
 
@@ -255,6 +263,10 @@ async def main() -> None:
                 },
                 "decline off",
             )
+            page = await warm.new_page()
+            await page.goto(URL, wait_until="load", timeout_s=30)
+            poll_ms = await bench_evaluate_poll(page)
+            print(f"Page polling: {poll_ms / EVALUATE_POLLS:.2f} ms per evaluate\n")
             await warm.close()
 
             conc = await client.session("conc", config=_config(ResourcePolicy.LITE))

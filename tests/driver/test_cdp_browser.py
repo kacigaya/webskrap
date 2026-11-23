@@ -166,6 +166,35 @@ async def test_evaluate_accepts_playwright_forms_under_a_strict_csp(
         await browser.close()
 
 
+async def test_evaluate_keeps_one_world_per_document(server: str, sandbox_supported: bool) -> None:
+    browser = await launch(
+        find_executable("chromium"), args=[] if sandbox_supported else ["--no-sandbox"]
+    )
+    try:
+        page = await browser.new_page()
+        await page.send("Page.enable")
+        created = 0
+        create_world = page.isolated_world
+
+        async def counted_world() -> int:
+            nonlocal created
+            created += 1
+            return await create_world()
+
+        page.isolated_world = counted_world  # type: ignore[method-assign]
+        for path in ("/csp", "/image-page"):
+            events = page.record("Page.loadEventFired")
+            await page.send("Page.navigate", {"url": f"{server}{path}"})
+            await events.wait(lambda *_: True, timeout_s=10, what="load")
+            for _ in range(5):
+                assert await page.evaluate("location.pathname") == path
+        # The second document's first call finds the old world gone and
+        # replaces it; every other call reuses the world.
+        assert created == 2
+    finally:
+        await browser.close()
+
+
 async def test_port_transport_attaches_over_websocket(server: str, sandbox_supported: bool) -> None:
     # Windows always launches this way; forcing it here tests that path on
     # every platform.

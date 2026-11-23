@@ -20,6 +20,11 @@ history, so they summarize each release rather than list every change.
   shows a consent platform signal: a hidden notice, a TCF locator frame, or a
   consent platform script or iframe. Other pages stop looking after 500 ms. A
   default MCP fetch of a page without a notice is about 1.5 s faster.
+- `CDPPage.evaluate` reuses one isolated world per document instead of making
+  a new V8 context on every call. Fetches, waits, and consent checks call it
+  in loops. In a local 600-call polling test, renderer memory growth fell from
+  158 MB to 9 MB, and each call took 0.5 ms instead of 2.5 ms. Globals a script
+  defines now persist across `evaluate` calls on the same document.
 
 ### Fixed
 
