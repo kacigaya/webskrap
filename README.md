@@ -27,8 +27,8 @@ pip install webskrap
 webskrap install
 ```
 
-`webskrap install` downloads Chrome for Testing. WebSkrap drives it through its
-own CDP client, with no Playwright. Upgrading from 2.x? Read the
+`webskrap install` downloads Chrome for Testing, which WebSkrap drives through
+its own CDP client, with no Playwright. To upgrade from 2.x, read the
 [migration guide](docs/migration-3.0.md).
 
 ## Quickstart
@@ -49,39 +49,75 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-For deferred content, pass `ready_selector="#content"` to a Python fetch or
-`--ready-selector '#content'` to CLI `fetch`. Both MCP fetch tools accept
-`ready_selector` too. The selector must become visible after consent dismissal.
-Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block
-pages (DataDome, Cloudflare, Akamai) raise `blocked`. WebSkrap waits for device
-checks that reload the page. It does not retry refusals. With
-`solve_cloudflare=True` (CLI `--solve-cloudflare`), it clicks Cloudflare's
-Turnstile checkbox; see [Cloudflare Turnstile](#cloudflare-turnstile). With
-`solve_datadome=True` (CLI `--solve-datadome`), it drags DataDome's slider; see
-[DataDome slider](#datadome-slider). With `solve_perimeterx=True` (CLI
-`--solve-perimeterx`), it holds HUMAN's Press & Hold button; see
-[HUMAN Press & Hold](#human-press--hold). With `solve_recaptcha=True` (CLI
-`--solve-recaptcha`), it clicks a reCAPTCHA v2 or hCaptcha checkbox on a
-blocking page; see [reCAPTCHA and hCaptcha checkbox](#recaptcha-and-hcaptcha-checkbox).
-Ordinary HTTP errors still return `ok=False`.
-For an empty HTTP error body, Chromium can show its own error page. The returned
-text or HTML is that rendered page. The status, headers, and `final_url` still
-come from the HTTP response.
+Wait for deferred content with `ready_selector="#content"` in Python, CLI
+`--ready-selector '#content'`, or the MCP fetch tools' `ready_selector`. The
+element must become visible after the cookie notice is dismissed.
 
-For any other CAPTCHA, complete it by hand: open a persistent browser with
-`webskrap browser open --headed --session manual --proxy http://localhost:8888 URL`.
-Complete the check in that browser. Keep the same session, profile, and proxy
-for later commands. On a remote host, use a desktop connection to its display.
-`virtual_display=True` alone does not provide a remote desktop.
+Ordinary HTTP errors return `ok=False`. For an empty error body, Chromium may
+render its own error page: the text and HTML come from that page, while status,
+headers and `final_url` come from the HTTP response.
 
-Keep `profile_mode="native"` for the browser's own identity. On Linux with Xvfb,
-`virtual_display=True` runs a headed browser without a visible desktop window.
-Full profile emulation is useful for device tests, but cannot replace every
-worker or iframe value. See the [identity limits](src/webskrap/interfaces/guide.md).
+## Challenge pages
+
+Known challenge pages raise `blocked`: DataDome, Cloudflare, HUMAN, Akamai,
+Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page. So do
+DataDome, Cloudflare and Akamai block pages. WebSkrap waits for device checks
+that reload the page, but never retries a refusal.
+
+Four opt-in options answer one widget each. All are off by default:
+
+| Python | CLI | Action |
+| --- | --- | --- |
+| `solve_cloudflare=True` | `--solve-cloudflare` | Clicks Cloudflare's Turnstile checkbox. |
+| `solve_datadome=True` | `--solve-datadome` | Drags DataDome's slider onto its slot. |
+| `solve_perimeterx=True` | `--solve-perimeterx` | Holds HUMAN's (PerimeterX) Press & Hold button. |
+| `solve_recaptcha=True` | `--solve-recaptcha` | Clicks a reCAPTCHA v2 or hCaptcha checkbox on a 403, 429 or 503 page. |
+
+WebSkrap reads the widget's position from its DOM and moves the cursor like a
+person. It retries a few times, within 60 seconds of the widget appearing, on
+top of `timeout_ms`. The call succeeds only when the real page loads with no
+challenge on it. Otherwise it fails with `blocked`.
+
+The provider still scores the browser and the exit IP, so a headless browser or
+a flagged IP can still be refused. DataDome hard blocks, image and audio
+puzzles, and reCAPTCHA v3 or invisible widgets stay `blocked`. WebSkrap reads,
+copies and injects no token or cookie, and uses no outside solving service. The
+[Stealth guide](https://kacigaya.github.io/webskrap/docs/user-guide/stealth/)
+gives timings, retry counts and live-run results for each provider.
+
+For a checkbox inside a form, fill the form, then call `browser_solve_captcha`
+(CLI `webskrap browser solve-captcha`) before you submit. Its `captcha.state` is
+`checked`, `challenge`, `gone`, `timeout` or `not_found`.
+
+```bash
+webskrap fetch https://example.com --virtual-display --solve-cloudflare
+webskrap browser solve-captcha
+```
+
+Use these options only on sites whose terms and applicable law allow automated
+access, and at a polite rate. Passing a challenge does not give permission to
+collect data you may not collect.
+
+For any other CAPTCHA, complete it by hand in a persistent headed browser:
+
+```bash
+webskrap browser open --headed --session manual --proxy http://localhost:8888 URL
+```
+
+Keep the same session, profile and proxy for later commands. On a remote host,
+connect to its display with a remote desktop. `virtual_display=True` does not
+give you one.
+
+## Browser identity
+
+Keep `profile_mode="native"` to show the browser's own identity. On Linux with
+Xvfb, `virtual_display=True` runs a headed browser with no visible window. Full
+profile emulation helps with device tests, but cannot replace every worker or
+iframe value. See the [identity limits](src/webskrap/interfaces/guide.md).
 
 ## Python batches
 
-Use `client.fetch_many(urls)` to fetch a finite batch in order with one browser:
+`client.fetch_many(urls)` fetches a finite batch in order with one browser:
 
 ```python
 async with WebSkrapClient() as client:
@@ -90,22 +126,22 @@ async with WebSkrapClient() as client:
     )
 ```
 
-Each batch shares cookies and storage, then closes its browser. Separate batches
-and `client.fetch()` calls use fresh sessions. An explicit `user_data_dir` can
-still share state on disk. Empty batches do not launch a browser. The first page
-error stops the batch and raises; no partial list is returned. Ordinary HTTP
-errors remain results with `ok=False`. `screenshot=True` uses a separate generated
-PNG filename for each page.
+Pages in a batch share cookies and storage. The browser closes after the batch.
+Each batch and each `client.fetch()` call starts a fresh session, unless an
+explicit `user_data_dir` shares state on disk. An empty batch launches no
+browser. The first page error stops the batch and raises, with no partial list.
+HTTP errors stay results with `ok=False`. With `screenshot=True`, each page gets
+its own PNG filename.
 
-For large inputs, per-page options, or state across batches, create a session
-with `session = await client.session("crawl")`. Call `await session.fetch(url)`
-for each URL. Close it with `await client.close_session("crawl")`, or let the
-client context close it. Session names belong to one client. Use separate
-sessions for unrelated callers.
+For large inputs, per-page options, or state across batches, open a named
+session with `session = await client.session("crawl")` and call
+`await session.fetch(url)` per URL. Close it with
+`await client.close_session("crawl")`, or let the client context close it.
+Session names belong to one client, so give unrelated callers separate sessions.
 
 ## Select elements
 
-Query fetched HTML with CSS selectors. Use `parse_html(html)` for HTML from
+Query fetched HTML with CSS selectors, or call `parse_html(html)` on HTML from
 other sources.
 
 ```python
@@ -117,10 +153,10 @@ async with WebSkrapClient() as client:
 
 ## Search
 
-A search loads the engine's results page in the same stealth browser and
-returns the organic hits. Click-tracking redirects are unwrapped, so each
-`url` is the destination itself. Bing is the default; use `engine="ddg"` for
-DuckDuckGo's HTML endpoint. Google is not offered.
+Search loads the engine's results page in the same stealth browser and returns
+the organic hits. WebSkrap unwraps click-tracking redirects, so each `url` is
+the destination. Bing is the default. `engine="ddg"` uses DuckDuckGo's HTML
+endpoint. Google is not offered.
 
 ```python
 async with WebSkrapClient() as client:
@@ -133,109 +169,16 @@ async with WebSkrapClient() as client:
 webskrap search "example domain" --engine ddg --max-results 10 --format json
 ```
 
-When an engine distrusts the exit address it serves a bot challenge. That
-comes back as a `blocked` error, not as zero hits. Switch engine, reuse a
-persistent profile, or change the exit IP. WebSkrap does not retry.
-
-## Cloudflare Turnstile
-
-`solve_cloudflare=True` (CLI `--solve-cloudflare`) handles Cloudflare's "Just
-a moment" page, like Scrapling's option of the same name. It is off by default;
-without it a Cloudflare challenge fails fast with `blocked`. With it, WebSkrap
-waits on the challenge page. When Cloudflare draws its Turnstile checkbox, the
-cursor wanders for 1.5 to 3 seconds, follows a curved path to the checkbox and
-clicks with a mouse-like button hold. The checkbox position is read from the
-widget's own DOM before each click. If the page has not cleared 20 seconds
-later, WebSkrap clicks again, at most three times. The checkbox gets up to 60
-seconds from when it first appears, on top of `timeout_ms`. Success is reported
-only after the real page loads and no challenge is detected on it; otherwise
-the call fails with `blocked`.
-
-It works in headless, headed and `virtual_display` modes. A click only answers
-the widget: Cloudflare still scores the browser and the exit IP, so a headless
-browser or a flagged IP can still be refused. No token is read, copied or
-injected, and no outside solving service is used. Other CAPTCHAs, such as
-image and audio puzzles, are reported as `blocked` and never touched.
-
-## DataDome slider
-
-`solve_datadome=True` (CLI `--solve-datadome`) handles DataDome's slider
-CAPTCHA. It is off by default; without it a DataDome CAPTCHA fails fast with
-`blocked`. With it, WebSkrap waits on the CAPTCHA page. When DataDome draws
-its slider, the cursor wanders for 3 to 5 seconds, moves to the handle, grabs
-it and drags it onto the slot in 35 small moves: slow, then faster, then slow
-again, with a little jitter. The handle and slot positions are read from the
-CAPTCHA frame's DOM before each drag. If the page has not cleared 10 seconds
-later, WebSkrap drags again, at most three times. The slider gets up to 60
-seconds from when it first appears, on top of `timeout_ms`. Success is reported
-only after the real page loads and no challenge is detected on it; otherwise
-the call fails with `blocked`.
-
-A drag only answers the slider: DataDome still scores the browser, the exit IP
-and the gesture. A hard block has no slider and stays `blocked`. Headed and
-`virtual_display` browsers passed in live runs; a headless browser can get the
-hard block instead. No cookie or token is read, copied or injected, no outside
-solving service is used, and DataDome's audio and image puzzles are never
-touched.
-
-## HUMAN Press & Hold
-
-`solve_perimeterx=True` (CLI `--solve-perimeterx`) handles the Press & Hold
-challenge of HUMAN Security (formerly PerimeterX). It is off by default;
-without it the challenge page fails fast with `blocked`. With it, WebSkrap
-waits on the challenge page. When HUMAN draws its button, the cursor follows a
-curved path to it, presses, and holds with a small hand tremor until the
-button's progress fill is complete, then lets go. The button is read from the
-challenge frame's DOM before each hold. If the page has not cleared 8 seconds
-later, WebSkrap holds again, at most three times. The button gets up to 60
-seconds from when it first appears, on top of `timeout_ms`. Success is
-reported only after the real page loads and no challenge is detected on it;
-otherwise the call fails with `blocked`.
-
-A hold only answers the widget: HUMAN still scores the browser and the exit
-IP. In live runs it refused every completed hold from a flagged IP, in every
-browser mode, and accepted the first hold from a cleaner exit. No cookie or
-token is read, copied or injected, and no outside solving service is used.
-
-## reCAPTCHA and hCaptcha checkbox
-
-`solve_recaptcha=True` (CLI `--solve-recaptcha`) clicks the "I'm not a robot"
-checkbox of reCAPTCHA v2 or hCaptcha on a page that blocks the site: a 403,
-429 or 503 response that carries the widget. It is off by default; without it
-such a page fails fast with `blocked`. With it, WebSkrap waits for the widget,
-moves the cursor like a person and clicks the checkbox. When the provider
-trusts the browser, the box ticks and the page's own callback continues to the
-real page. If the page has not cleared 15 seconds later, WebSkrap clicks again,
-at most twice within 60 seconds. When the provider opens an image challenge
-instead, WebSkrap leaves it alone and the call fails with `blocked` at once.
-
-For a checkbox inside a form, fill the form, then call `browser_solve_captcha`
-(CLI `webskrap browser solve-captcha`) before you submit it. Its
-`captcha.state` is `checked`, `challenge`, `gone`, `timeout` or `not_found`.
-
-The click only answers the checkbox: the provider still scores the browser and
-the exit IP, and a datacenter IP usually gets the image challenge. reCAPTCHA
-v3 and invisible widgets have no checkbox and are not handled. No token is
-read, copied or injected, and no outside solving service is used.
-
-Use them responsibly: only on sites whose terms and applicable law allow
-automated access, and at a polite rate. Passing a challenge does not grant
-permission to collect data you may not collect.
-
-```bash
-webskrap fetch https://example.com --virtual-display --solve-cloudflare
-webskrap fetch https://example.com --virtual-display --solve-datadome
-webskrap fetch https://example.com --virtual-display --solve-perimeterx
-webskrap fetch https://example.com --virtual-display --solve-recaptcha
-webskrap browser solve-captcha
-```
+An engine that distrusts the exit address serves a bot challenge, which returns
+a `blocked` error, not zero hits. Switch engine, reuse a persistent profile, or
+change the exit IP.
 
 ## Visual browser interaction
 
-Agents can see the rendered viewport and interact by coordinates, including
+Agents can see the rendered viewport and act by coordinates, which reaches
 canvas and controls missing from the accessibility tree. MCP `browser_view`
-returns a PNG image directly; `browser_mouse` clicks, moves, scrolls, or drags.
-`browser_insert_text` inserts literal text into the focused control.
+returns a PNG directly. `browser_mouse` clicks, moves, scrolls or drags.
+`browser_insert_text` types literal text into the focused control.
 
 ```bash
 webskrap browser open https://example.com
@@ -248,22 +191,27 @@ webskrap browser view viewport.png --format json
 webskrap browser close
 ```
 
-Coordinates are CSS pixels from the original image's top-left. Take a fresh
-view after scrolling or page changes. Headless Chromium needs no Xvfb for
-this; the agent's client and model must support image input.
+Coordinates are CSS pixels from the original image's top-left corner. Take a
+fresh view after a scroll or page change. Headless Chromium needs no Xvfb for
+this, but the agent's client and model must accept image input.
 
 ## Load only what the task needs
-The default resource policy is `auto`. Text-only fetches skip images, fonts
-and media. HTML fetches, screenshots and interactive pages load all resources.
-Set `resource_policy="all"`, `"lite"`, or `"documents"` to override this choice.
-Use `documents` only when removing CSS preserves the required result.
-Fetches use `domcontentloaded`; set `ready_selector` for deferred content.
-Use `browser_find(text="Save")` to locate a known control with ancestor context.
-Use `browser_snapshot(target="e15", depth=2)` for one subtree; add `boxes=true`
-only when geometry matters. Reuse returned refs with `browser_interact`.
-Use `networkidle`, screenshots and full snapshots only when the task needs them.
-CLI and MCP reject cookies by default. Disable this only for known pages where
-it is unnecessary. In Python, enable rejection with `SessionConfig(decline_cookies=True)`.
+
+The default resource policy is `auto`: text-only fetches skip images, fonts and
+media, while HTML fetches, screenshots and interactive pages load everything.
+Override it with `resource_policy="all"`, `"lite"` or `"documents"`. Pick
+`documents` only when the result survives without CSS.
+
+Fetches wait for `domcontentloaded`. Add `ready_selector` for deferred content,
+and use `networkidle`, screenshots and full snapshots only when the task needs
+them. In a browser session, `browser_find(text="Save")` finds a known control
+with its ancestors, and `browser_snapshot(target="e15", depth=2)` returns one
+subtree. Add `boxes=true` only when geometry matters. Pass the returned refs to
+`browser_interact`.
+
+The CLI and MCP server reject cookies by default. Turn this off only for known
+pages that do not need it. In Python, turn it on with
+`SessionConfig(decline_cookies=True)`.
 
 ## Documentation
 
@@ -276,12 +224,10 @@ it is unnecessary. In Python, enable rejection with `SessionConfig(decline_cooki
 - [Benchmarks](https://kacigaya.github.io/webskrap/docs/benchmarks/)
 - [Development](https://kacigaya.github.io/webskrap/docs/development/)
 
-The agent skill is available at `.agents/skills/webskrap/SKILL.md`,
-`.claude/skills/webskrap/SKILL.md`, and `.codex/skills/webskrap/SKILL.md`.
-The file lives in `.agents/skills/webskrap/`. The `.claude` and `.codex`
-folders link to it, and every folder links to the root `references/`.
-The checkout must support symbolic links. On Windows, enable Developer Mode
-and Git's `core.symlinks` before cloning.
+The skill lives in `.agents/skills/webskrap/`. The `.claude/skills/webskrap/`
+and `.codex/skills/webskrap/` folders are symbolic links to it, and each links
+to the root `references/`. On Windows, enable Developer Mode and Git's
+`core.symlinks` before you clone.
 
 ## Security
 
