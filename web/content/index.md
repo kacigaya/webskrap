@@ -5,7 +5,16 @@ description: Docs for WebSkrap, Python web scraping on real Chromium with its ow
 
 # WebSkrap documentation
 
-Async-first Python scraping on its own Chrome DevTools Protocol client that also works as a web tool for LLMs and agents. You get coherent browser profiles, persistent sessions, resource routing, and stealth defaults, with no Playwright or Node.js. The MCP server runs that same stealth path, so agents get live pages back as plain text instead of raw HTML. The CLI and the MCP server also drive persistent interactive sessions with Playwright CLI-style commands. Take an aria snapshot, click an element by its ref, fill a form, screenshot the result, all against a browser that keeps running between calls.
+WebSkrap is async-first Python scraping on its own Chrome DevTools Protocol
+client, with no Playwright or Node.js. It has coherent browser profiles,
+persistent sessions, resource routing and stealth defaults. Its MCP server runs
+the same stealth path and returns live pages to agents as plain text instead of
+raw HTML.
+
+The CLI and the MCP server also drive persistent browser sessions with
+Playwright CLI-style commands: take an aria snapshot, click an element by its
+ref, fill a form and screenshot the result, in a browser that keeps running
+between calls.
 
 ## Install
 

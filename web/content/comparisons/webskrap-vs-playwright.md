@@ -5,11 +5,15 @@ description: Compare WebSkrap and Playwright for Python web scraping, browser au
 
 # WebSkrap vs Playwright for Python Web Scraping
 
-Playwright is a browser automation library that drives several browsers through a Node.js driver process. WebSkrap is a Python scraping package that drives Chromium through its own Chrome DevTools Protocol client, with no Playwright and no Node.js.
+Playwright is a browser automation library that drives several browsers
+through a Node.js driver process. WebSkrap is a Python scraping package that
+drives Chromium through its own Chrome DevTools Protocol client, with no
+Playwright and no Node.js.
 
 ## When Playwright is enough
 
-Use Playwright directly when you need full low-level browser control and want to write the whole scraping workflow yourself.
+Use Playwright directly when you want full low-level browser control and will
+write the whole scraping workflow yourself.
 
 ```python
 from playwright.async_api import async_playwright
@@ -19,7 +23,7 @@ That fits custom browser automation, testing flows, and scraping logic with unus
 
 ## What WebSkrap adds
 
-WebSkrap packages common scraping needs into a smaller API:
+WebSkrap puts common scraping needs in a smaller API:
 
 | Capability | Playwright | WebSkrap |
 | --- | --- | --- |
@@ -52,7 +56,9 @@ asyncio.run(main())
 
 ## Recommendation
 
-Use Playwright directly when you need Firefox or WebKit, or its full testing API. Use WebSkrap when you want a Python web scraping package with sensible defaults, reusable sessions, profiles, resource policy, CLI output, and MCP tools.
+Use Playwright directly when you need Firefox, WebKit or its full testing API.
+Use WebSkrap for Python scraping with ready defaults, reusable sessions,
+profiles, resource policies, CLI JSON output and MCP tools.
 
 ## Related docs
 

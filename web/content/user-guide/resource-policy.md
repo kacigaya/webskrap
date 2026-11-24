@@ -5,7 +5,7 @@ description: Use WebSkrap resource policies to block heavy assets, trackers, ima
 
 # Resource policy
 
-Resource policies control which request types are allowed.
+A resource policy sets which request types load.
 
 ```python
 from webskrap import ResourcePolicy, SessionConfig
@@ -22,11 +22,12 @@ config = SessionConfig(resource_policy=ResourcePolicy.LITE)
 | `ResourcePolicy.LITE` | Blocks images, fonts, and media. |
 | `ResourcePolicy.DOCUMENTS` | Blocks images, fonts, media, and stylesheets. |
 
-Explicit policies take priority over `AUTO`. Use `ALL` for maximum page fidelity. Use `LITE` when you want a faster page load while keeping stylesheets and scripts.
+An explicit policy wins over `AUTO`. Use `ALL` for full page fidelity, and
+`LITE` for a faster load that keeps stylesheets and scripts.
 
 ## Examples
 
-Use `LITE` for most extraction jobs that still need styled or script-rendered
+`LITE` suits most extraction jobs that still need styled or script-rendered
 HTML:
 
 ```python
@@ -38,16 +39,16 @@ async with WebSkrapClient() as client:
     result = await client.fetch("https://example.com", config=config)
 ```
 
-Use `DOCUMENTS` when you only need document-oriented HTML and can tolerate
-unstyled pages without losing required content:
+Use `DOCUMENTS` only when an unstyled page still holds the content you need:
 
 ```python
 config = SessionConfig(resource_policy=ResourcePolicy.DOCUMENTS)
 ```
 
-Resource policies use the CDP `Fetch` domain. Auto selects a policy for each
-page and its cross-site iframes. Auto does not block resources in shared or
-service workers. Explicit policies also apply to shared and service workers. Scripts and XHR/fetch requests are not blocked by these presets.
+Resource policies use the CDP `Fetch` domain. `AUTO` picks a policy for each
+page and its cross-site iframes, but blocks nothing in shared or service
+workers. Explicit policies also apply to shared and service workers. No preset
+blocks scripts or XHR and fetch requests.
 
 ## CLI
 
@@ -56,6 +57,6 @@ webskrap fetch https://example.com --resource-policy lite
 webskrap fetch https://example.com --resource-policy documents --output page.html
 ```
 
-If a page renders incorrectly, switch back to `all` first. Many pages require
-images, fonts, media, or stylesheets for layout-dependent interactions even when
-the final extraction target is text.
+If a page renders wrong, switch back to `all` first. Many pages need images,
+fonts, media or stylesheets for layout-dependent interactions, even when you
+only extract text.

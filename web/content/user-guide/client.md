@@ -25,8 +25,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-You can also manage the lifecycle manually when embedding WebSkrap in a larger
-async application:
+To embed WebSkrap in a larger async application, manage the lifecycle yourself:
 
 ```python
 client = WebSkrapClient()
@@ -39,7 +38,8 @@ finally:
 
 ## One-shot fetch
 
-`client.fetch()` creates a temporary browser session, opens the page, collects the response data, then closes that temporary session.
+`client.fetch()` opens a temporary browser session, loads the page, collects
+the response, then closes the session.
 
 ```python
 result = await client.fetch(
@@ -49,7 +49,7 @@ result = await client.fetch(
 )
 ```
 
-Use `client.session()` when you want to keep browser state or keep a headed browser open.
+To keep browser state or a headed browser open, use `client.session()`.
 
 ### Wait states
 
@@ -62,10 +62,10 @@ Use `client.session()` when you want to keep browser state or keep a headed brow
 | `load` | You need regular page assets to finish loading. |
 | `networkidle` | You need a quiet network, usually for JS-heavy pages. |
 
-For pages with long-polling or analytics requests, `networkidle` can be slower
-or less reliable than `domcontentloaded` plus an explicit page wait in a session.
+On pages with long-polling or analytics requests, `networkidle` can be slower
+and less reliable than `domcontentloaded` plus an explicit wait in a session.
 
-For deferred content, fetches can wait for a visible CSS selector or snapshot ref:
+For deferred content, wait for a visible CSS selector or snapshot ref:
 
 ```python
 result = await client.fetch(
@@ -75,21 +75,24 @@ result = await client.fetch(
 )
 ```
 
-The readiness wait starts after consent dismissal and gets its own `timeout_ms`
-budget, or the configured navigation timeout. A missing selector raises a
-timeout; a blank selector is a usage error. `session.fetch()` accepts it too.
+The wait starts after the cookie notice is dismissed. It gets its own
+`timeout_ms` budget, or the configured navigation timeout. A missing selector
+raises a timeout, and a blank selector is a usage error. `session.fetch()` takes
+it too.
 
-Known challenge pages (DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) and provider block pages (Cloudflare, Akamai) raise `WebSkrapError` with code
-`blocked`, including pages served with HTTP 200. `error.hint`
-says what to try for that kind. They are checked before
-consent and extraction, and after a readiness timeout. Ordinary HTTP error pages
-still return `ok=False`. Detection uses known provider markers and headers and
-does not identify every challenge or solve verification widgets.
+Known challenge pages raise `WebSkrapError` with code `blocked`, even with HTTP
+200: DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or
+hCaptcha on a 403, 429 or 503 page. So do Cloudflare and Akamai block pages.
+`error.hint` says what to try for that kind of page. WebSkrap checks before
+consent and extraction, and after a readiness timeout. Ordinary HTTP error
+pages return `ok=False`. Detection uses known provider markers and headers, and
+cannot find every challenge. Widgets are answered only with a `solve_*` option
+(see [Stealth](stealth.md#challenge-solvers)).
 
 ### Screenshots and output
 
-The Python API returns page HTML in `result.text` by default. Pass
-`text_only=True` when you want readable body text instead:
+`result.text` holds the page HTML by default. Pass `text_only=True` for
+readable body text:
 
 ```python
 from pathlib import Path
@@ -102,9 +105,8 @@ text_result = await client.fetch("https://example.com", text_only=True)
 print(text_result.text)
 ```
 
-Pass `screenshot=True` to let WebSkrap choose a UUID-based file name in the
-form `webskrap-<32 hexadecimal characters>.png` in the current working
-directory.
+With `screenshot=True`, WebSkrap names the file
+`webskrap-<32 hexadecimal characters>.png` in the current working directory.
 
 ### Per-call config
 
@@ -123,10 +125,9 @@ result = await client.fetch("https://example.com", config=config)
 
 ### Cookie banners
 
-Cookie rejection is opt-in in the Python API. When enabled, `fetch()` clicks the
-reject control before reading the page, so banners do not bury the text and no
-optional cookies are accepted. The CLI and MCP server enable this behavior by
-default.
+Cookie rejection is opt-in in Python and on by default in the CLI and MCP
+server. When it is on, `fetch()` clicks the reject control before it reads the
+page, so banners do not bury the text and no optional cookies are accepted.
 
 ```python
 config = SessionConfig(
@@ -137,26 +138,26 @@ result = await client.fetch("https://example.com", config=config)
 print(result.cookie_notice_declined)  # "cmp", "text", or None
 ```
 
-For pages you drive yourself, call it on demand:
+On pages you drive yourself, call it when you need it:
 
 ```python
-page = await session.context.new_page()
-await page.goto("https://example.com", wait_until="domcontentloaded")
+page = await session.new_page()
+await page.goto("https://example.com", wait_until="domcontentloaded", timeout_s=30)
 await session.decline_cookies(page)
 ```
 
-`decline_cookies_timeout_ms` is how long to wait for a notice to appear on a
-page that loads a consent platform. A page with no consent platform signal (no
-hidden notice, TCF locator frame, or consent platform script or iframe) is
-checked for 500ms only, so most pages without a notice pay that instead. Total time is bounded by that plus a
-3s internal budget for clicking, including retries while a consent platform's
-iframe renders. Fetches that already waited for `networkidle` shrink the wait to
-500ms, because the CMP script has had its chance to inject by then.
+`decline_cookies_timeout_ms` is how long to wait for a notice on a page that
+loads a consent platform. A page with no consent platform signal (no hidden
+notice, TCF locator frame, or consent platform script or iframe) gets a 500 ms
+check only, so most pages without a notice pay just that. Clicking adds at most
+a 3 s internal budget, which covers retries while a consent platform's iframe
+renders. After a `networkidle` wait, the notice wait drops to 500 ms, because
+the consent script has had its chance to inject.
 
-Detection is inspired by Brave's
+Detection draws on Brave's
 [cookiecrumbler](https://github.com/brave/cookiecrumbler), which finds consent
-notices; WebSkrap dismisses them. Consent walls with no reject control on the
-first layer (pay-or-consent) are left alone.
+notices. WebSkrap also dismisses them. Consent walls with no reject control on
+the first layer (pay-or-consent) are left alone.
 
 ## FetchResult
 
@@ -176,7 +177,7 @@ first layer (pay-or-consent) are left alone.
 | `screenshot_path` | Screenshot path when screenshot capture was requested. |
 | `cookie_notice_declined` | Strategy that dismissed a cookie consent notice (`cmp`, `text`), or `None`. |
 
-Check `status` before assuming `headers` or HTTP semantics exist:
+Check `status` before you rely on `headers` or HTTP semantics:
 
 ```python
 if result.status is None:
@@ -213,6 +214,6 @@ combinators, raises `ValueError`.
 The parser runs offline on `result.text`. A `text_only` fetch returns plain
 text, not HTML, so fetch without `text_only` before you query. The parser
 handles void elements and common implied end tags. It does not run the full
-HTML5 tree-construction algorithm, so badly broken markup can nest
-differently than in the browser. It also does not insert implied elements
-such as `tbody`. To query the browser's live tree, use a page from a session.
+HTML5 tree-construction algorithm, so badly broken markup can nest differently
+than in the browser, and it does not insert implied elements such as `tbody`.
+To query the browser's live tree, use a page from a session.

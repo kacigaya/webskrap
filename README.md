@@ -82,7 +82,7 @@ The provider still scores the browser and the exit IP, so a headless browser or
 a flagged IP can still be refused. DataDome hard blocks, image and audio
 puzzles, and reCAPTCHA v3 or invisible widgets stay `blocked`. WebSkrap reads,
 copies and injects no token or cookie, and uses no outside solving service. The
-[Stealth guide](https://kacigaya.github.io/webskrap/docs/user-guide/stealth/)
+[Stealth guide](https://kacigaya.github.io/webskrap/docs/user-guide/stealth/#challenge-solvers)
 gives timings, retry counts and live-run results for each provider.
 
 For a checkbox inside a form, fill the form, then call `browser_solve_captcha`

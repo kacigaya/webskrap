@@ -5,12 +5,12 @@ description: Use the WebSkrap humanizer for curved mouse paths, wheel scrolling,
 
 # Humanizer
 
-WebSkrap's humanizer drives the real mouse and keyboard with human timing
-instead of mechanical input. `human_click` waits for a visible target,
-scrolls it into view with the mouse wheel, moves the mouse along a curved eased
-path, and clicks near the target center with a human button hold;
-`human_type` clicks into a field the same way and types one key at a time.
-Both send trusted input through the CDP `Input` domain.
+The humanizer drives the mouse and keyboard with human timing instead of
+mechanical input. `human_click` waits for a visible target, scrolls it into view
+with the mouse wheel, moves the mouse along a curved, eased path, and clicks
+near the target center with a human button hold. `human_type` clicks into a
+field the same way and types one key at a time. Both send trusted input through
+the CDP `Input` domain.
 
 ```python
 async with WebSkrapClient() as client:
@@ -20,23 +20,20 @@ async with WebSkrapClient() as client:
     await session.human_click(page, "button[type='submit']")
 ```
 
-Use it when a normal page interaction should look closer to a manual browser
-click. It is useful for flows with hover-sensitive controls, scroll-dependent
-layouts, or simple behavioral checks that treat instant coordinate jumps as
-synthetic.
+Use it for hover-sensitive controls, scroll-dependent layouts, and simple
+behavioral checks that treat instant coordinate jumps as synthetic.
 
-The cursor follows a Bezier curve with randomized control points and eased
-spacing, so it accelerates and slows near the target instead of tracing a
+The cursor follows a Bezier curve with random control points and eased
+spacing, so it speeds up and slows near the target instead of tracing a
 straight, evenly spaced line. The algorithm is adapted from
-[HumanCursor](https://github.com/riflosnake/HumanCursor) and reimplemented
-without adding a dependency.
+[HumanCursor](https://github.com/riflosnake/HumanCursor), reimplemented with no
+added dependency.
 
-Each path starts where the previous mouse event left the cursor, so the
-cursor never jumps between actions. Only a page with no earlier mouse event
-starts at a random point near the target. The wheel turns at the cursor's
-position. Persistent browser sessions save the position per tab between
-commands, and `browser mouse` coordinates are reached along the same kind of
-path.
+Each path starts where the last mouse event left the cursor, so the cursor
+never jumps between actions. Only a page with no earlier mouse event starts at
+a random point near the target. The wheel turns at the cursor's position.
+Persistent browser sessions save the position per tab between commands, and
+`browser mouse` reaches its coordinates along the same kind of path.
 
 What a page's scripts see, compared with mechanical input (`human=False`):
 
@@ -52,17 +49,16 @@ nothing covers the exact click point, in the element's own frame and shadow
 root, and raises a `usage` error if something does. The check runs in an
 isolated world, so the page sees no event from it.
 
-If the mouse wheel cannot move the target into view, for example inside an
-inner scroll container the cursor is not over, a direct scroll finishes the
-job.
+If the wheel cannot bring the target into view, for example inside an inner
+scroll container the cursor is not over, a direct scroll finishes the job.
 
-If the target loses its bounding box, the humanizer scrolls it into view,
-waits 300–600 ms, and measures it once more. An empty box after that attempt
-raises a `usage` error.
+If the target loses its bounding box, the humanizer scrolls it into view, waits
+300-600 ms, and measures it once more. A box that is still empty raises a
+`usage` error.
 
 The cursor ends at the click point. The random offset stays within the target,
-up to 12 CSS pixels horizontally and 10 vertically. Before pressing, the
-humanizer pauses for 200–500 ms and checks the target again. It refuses the
+up to 12 CSS pixels horizontally and 10 vertically. Before it presses, the
+humanizer pauses for 200-500 ms and checks the target again. It refuses the
 click if the target becomes hidden, disabled, or no longer receives input at
 that point. This also catches changes caused by hover handlers.
 
@@ -81,14 +77,14 @@ cannot type are inserted as text. `timeout` is honored.
 ## Where it applies automatically
 
 - Cookie consent dismissal (`decline_cookies`) clicks the reject control with
-  the humanized click, including notices inside CMP iframes. The banner is
-  usually the first thing clicked on a page, and the page's bot script sees
-  that click too.
+  the humanized click, also inside consent platform iframes. The banner is
+  often the first thing clicked on a page, and the page's bot script sees that
+  click too.
 - Persistent sessions: `webskrap browser click` / `dblclick` and MCP
   `browser_interact` with `click` or `dblclick` use the humanized click, and
   `type` uses human typing. `fill` still sets the value at once, for speed.
 
-Humanized input is slower by design: a click takes roughly half a second to a
+Humanized input is slow on purpose: a click takes about half a second to a
 second, and typing about a tenth of a second per character.
 
 ## Direct click fallback

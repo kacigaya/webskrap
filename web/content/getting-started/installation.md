@@ -11,8 +11,8 @@ Install WebSkrap from PyPI:
 pip install webskrap
 ```
 
-Download Chrome for Testing, the Chromium build that Google publishes for
-automation. It goes in your user cache folder; set `WEBSKRAP_BROWSERS_PATH` to
+Download Chrome for Testing, the Chromium build Google publishes for
+automation. It goes in your user cache folder. Set `WEBSKRAP_BROWSERS_PATH` to
 use another folder:
 
 ```bash
@@ -28,15 +28,13 @@ webskrap profiles
 
 ## Included by default
 
-`pip install webskrap` includes the Python dependencies for:
+The base install needs no extras. It includes:
 
-- WebSkrap's own Chrome DevTools Protocol client. It needs no Playwright,
+- WebSkrap's own Chrome DevTools Protocol client, with no Playwright,
   Patchright or Node.js.
 - The MCP server, started with `webskrap-mcp` or `webskrap mcp`.
 
-No extras are needed; everything above ships with the base install.
-
-Use machine-readable setup output in automation:
+In automation, use JSON output:
 
 ```bash
 webskrap install --format json
@@ -44,8 +42,6 @@ webskrap doctor --format json
 ```
 
 ## Development install
-
-For local development:
 
 ```bash
 git clone https://github.com/kacigaya/webskrap.git
@@ -62,7 +58,7 @@ ruff check .
 (cd web && bun run build)
 ```
 
-If you use `uv`, the same checks can run through the project environment:
+With `uv`, run the same checks in the project environment:
 
 ```bash
 uv run pytest -q

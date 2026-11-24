@@ -6,28 +6,27 @@ description: Run WebSkrap as an MCP server so LLM agents can fetch live browser-
 # MCP server
 
 WebSkrap ships a [Model Context Protocol](https://modelcontextprotocol.io)
-server. MCP clients such as Claude Desktop, Claude Code, and Codex can call it to
-drive a real browser directly. It runs over stdio and exposes fetch tools for
-one-shot scraping plus `browser_*` tools for persistent interactive sessions.
+server. MCP clients such as Claude Desktop, Claude Code and Codex call it to
+drive a real browser. It runs over stdio. Fetch tools handle one-shot scraping,
+and `browser_*` tools drive persistent interactive sessions.
 
-Both `fetch` and `stealth_fetch` run the same stealth path the CLI uses
-(headless Chrome on WebSkrap's own CDP client, which never enables the
-`Runtime` domain), so JS-heavy and
-anti-bot pages that block naive scrapers still load. They return clean visible
-page text by default, with no HTML tags, scripts, or CSS noise, so the model
-spends tokens on content instead of markup (typically 5-10x fewer tokens than
-raw HTML). Use `stealth_fetch` for finer fingerprint/WebRTC/UA control. Pass
-`text_only=false` when you need the HTML.
+`fetch` and `stealth_fetch` run the CLI's stealth path: headless Chrome on
+WebSkrap's own CDP client, which never enables the `Runtime` domain. So
+JavaScript-heavy pages and anti-bot pages that block naive scrapers still load.
+By default they return the visible page text, with no HTML tags, scripts or
+CSS, so the model spends tokens on content instead of markup. Pass
+`text_only=false` for the HTML. `stealth_fetch` adds finer fingerprint, WebRTC
+and user-agent controls.
 
-Both fetch tools default to `domcontentloaded` and `resource_policy="all"`:
-page scripts can see a blocked image or font, which no real browser blocks.
-`auto` skips images, fonts and media for text, which is faster on pages that do
-not check. The two tools share warm sessions, so they share the default.
-Explicit `all`, `lite`, or `documents` policies take priority. Use `documents`
-only when removing CSS preserves the required result. Use `ready_selector` for
-deferred content. Keep cookie rejection on unless the page is known not to need it.
-Earlier load states can read before deferred content arrives. Routing disables
-the HTTP cache and does not intercept service-worker-owned requests.
+Both fetch tools default to `domcontentloaded` and `resource_policy="all"`,
+because page scripts can see a blocked image or font, which no real browser
+blocks. `auto` skips images, fonts and media for text, which is faster on pages
+that do not check. The two tools share warm sessions, so they share the
+default. An explicit `all`, `lite` or `documents` policy wins. Use `documents`
+only when the result survives without CSS. Use `ready_selector` for deferred
+content, because earlier load states can read the page before it arrives. Keep
+cookie rejection on unless you know the page does not need it. Routing disables
+the HTTP cache and does not intercept requests that a service worker owns.
 
 ## Install
 
@@ -42,7 +41,7 @@ Run the server:
 webskrap-mcp
 ```
 
-`webskrap mcp` starts the same server. Use it with `uvx`, which runs a
+`webskrap mcp` starts the same server, which suits `uvx`, since `uvx` runs a
 package's main command:
 
 ```bash
@@ -59,7 +58,7 @@ python -m webskrap.interfaces.mcp_server
 
 | Tool | Purpose |
 | --- | --- |
-| `fetch` | Fetch a URL on the stealth path (waits for `networkidle`). |
+| `fetch` | Fetch a URL on the stealth path. |
 | `stealth_fetch` | Same stealth path with finer fingerprint/WebRTC/UA controls. |
 | `fetch_session_close` | Close an idle warm fetch session; persistent profile files survive. |
 | `search` | Find URLs for a query on Bing (default) or DuckDuckGo, with the `stealth_fetch` stealth controls. |
@@ -83,14 +82,15 @@ python -m webskrap.interfaces.mcp_server
 | `browser_tabs` | List, open, select, or close tabs. Other tools act on the current tab. |
 
 Both fetch tools return `status`, `final_url`, `title`, `ok`, `headers`, and the
-page content in `text` (capped by `max_chars`, with `text_length` and
-`text_truncated` reporting the full size). By default `text` is clean visible
-text; set `text_only` to `false` to get raw HTML.
+page content in `text`. `max_chars` caps `text`, and `text_length` and
+`text_truncated` report the full size. `text` holds visible text by default.
+Set `text_only` to `false` for raw HTML.
 
-Both also auto-decline cookie banners before reading the page, and report which
-strategy fired in `cookie_notice_declined`. A page with no consent platform
-signal adds about 500ms; a page that loads one can wait up to 2 seconds for its
-notice. Pass `decline_cookies: false` to leave the notice in place.
+Both also decline cookie banners before they read the page, and report the
+strategy that worked in `cookie_notice_declined`. A page with no consent
+platform signal adds about 500 ms. A page that loads one can wait up to 2
+seconds for its notice. Pass `decline_cookies: false` to leave the notice in
+place.
 
 ## Tool arguments
 
@@ -104,9 +104,9 @@ notice. Pass `decline_cookies: false` to leave the notice in place.
 | `wait_until` | `domcontentloaded` | `commit`, `domcontentloaded`, `load`, or `networkidle`. |
 | `resource_policy` | `all` | `all`, `auto`, `lite`, or `documents`. |
 | `timeout_ms` | `60000` | Timeout applied separately to navigation and readiness. |
-| `ready_selector` | `null` | CSS selector or snapshot ref that must become visible after consent dismissal. |
+| `ready_selector` | `null` | CSS selector or snapshot ref that must become visible after the cookie notice is dismissed. |
 | `max_chars` | `8000` | Maximum returned text characters. |
-| `text_only` | `true` | Return clean visible text; set `false` for raw HTML. |
+| `text_only` | `true` | Return visible text; set `false` for raw HTML. |
 | `decline_cookies` | `true` | Click a cookie consent notice's reject button after load. |
 | `solve_cloudflare` | `false` | Click Cloudflare's Turnstile checkbox and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
 | `solve_datadome` | `false` | Drag DataDome's slider CAPTCHA and wait up to 60 s beyond `timeout_ms` for the real page. Use responsibly. |
@@ -126,9 +126,9 @@ Example arguments:
 }
 ```
 
-`stealth_fetch` accepts the same URL/profile/timeout/output-size/session controls,
-`resource_policy` (default `all`) and `wait_until` (default `domcontentloaded`),
-plus stealth options:
+`stealth_fetch` takes the same URL, profile, timeout, output-size and session
+arguments, `resource_policy` (default `all`) and `wait_until` (default
+`domcontentloaded`), plus stealth options:
 
 ```json
 {
@@ -144,24 +144,23 @@ plus stealth options:
 }
 ```
 
-Both fetch tools and `search` check for known challenge pages (DataDome,
-Cloudflare, Akamai, Fastly, AWS WAF) and provider block pages (Cloudflare, Akamai), and
-return a `blocked` tool error, including pages served with HTTP 200. The hint
-differs for a block (change the exit IP or try `virtual_display=True`) and a
-challenge (try `virtual_display=True`, headed mode, or a persistent
-`user_data_dir`). See the [stealth guide](/docs/user-guide/stealth/) for the
-exact markers. `browser_goto` and `browser_open` with a `url` run the same
-check but report it in `blocked` instead of failing, so the page stays open. Ordinary
-HTTP error pages still return `ok: false`. With `ready_selector` set, a missing
-element returns `timeout`; if a known challenge replaced the page while waiting,
-the error is `blocked`. Detection does not identify every challenge or guarantee
-that later interactions will succeed.
+Both fetch tools and `search` return a `blocked` tool error for known challenge
+pages (DataDome, Cloudflare, Akamai, Fastly, AWS WAF) and provider block pages
+(Cloudflare, Akamai), even with HTTP 200. For a block, the hint says to change
+the exit IP or try `virtual_display=True`. For a challenge, it says to try
+`virtual_display=True`, headed mode, or a persistent `user_data_dir`. The
+[Stealth guide](/docs/user-guide/stealth/) lists the exact markers.
+`browser_goto`, and `browser_open` with a `url`, run the same check but report
+the match in `blocked` and keep the page open. Ordinary HTTP error pages return
+`ok: false`. With `ready_selector` set, a missing element returns `timeout`, or
+`blocked` if a known challenge replaced the page during the wait. Detection
+cannot find every challenge or promise that later interactions succeed.
 
-When `user_data_dir` is set, it must be relative to
-`~/.webskrap/profiles`. Set `WEBSKRAP_MCP_PROFILE_DIR` in the MCP server
-environment to move that root. Absolute paths, `..` traversal, and symlinks
-resolving outside the root are rejected. This confinement applies only to MCP
-tool input; Python callers can still choose any `SessionConfig.user_data_dir`.
+`user_data_dir` must be relative to `~/.webskrap/profiles`. Set
+`WEBSKRAP_MCP_PROFILE_DIR` in the server environment to move that root. The
+server rejects absolute paths, `..` traversal and symlinks that resolve outside
+the root. This applies only to MCP tool input. Python callers can still choose
+any `SessionConfig.user_data_dir`.
 
 ### Warm fetch sessions
 
@@ -176,170 +175,173 @@ For repeated extraction, pass the same `session` name on each fetch:
 }
 ```
 
-The first call launches the browser; later calls open new pages in its existing
-context. Cookies and storage are shared within that name. Keep profile and
-config options identical; changes are rejected. `timeout_ms`, `decline_cookies`,
-`solve_cloudflare`, `solve_datadome`, `solve_perimeterx`, `solve_recaptcha`, output options and `wait_until` can vary. Concurrent calls can use the same session.
-Up to eight fetches run at once; extra calls wait. Up to eight named sessions
-stay open; close unused ones before creating more.
+The first call launches the browser. Later calls open new pages in its context,
+and cookies and storage are shared within that name. Keep profile and config
+options identical, because the server rejects changes. `timeout_ms`,
+`decline_cookies`, the four `solve_*` options, output options and `wait_until`
+can vary. Concurrent calls can use the same session. Up to eight fetches run at
+once, and extra calls wait. Up to eight named sessions stay open, so close
+unused ones before you create more.
 
 Call `fetch_session_close(session="crawl")` when done. It returns
-`{"closed": true}`, or `false` for an absent session. Busy sessions are refused.
+`{"closed": true}`, or `false` for an absent session, and refuses a busy one.
 The server closes all fetch sessions on shutdown. These sessions are separate
-from `browser_*` sessions and do not survive a server restart. Persistent
-`user_data_dir` files survive closing. Unnamed headless fetches with matching
-browser settings can share Chromium while they overlap. Each gets its own
-cookies and storage. Headed and virtual-display fetches use separate browsers.
-An explicit `user_data_dir` uses a separate browser and keeps its on-disk state.
+from `browser_*` sessions and do not survive a restart, but persistent
+`user_data_dir` files do. Unnamed headless fetches with matching browser
+settings can share Chromium while they overlap, each with its own cookies and
+storage. Headed fetches, virtual-display fetches, and fetches with an explicit
+`user_data_dir` use separate browsers. The last keeps its on-disk state.
 
-`search` takes `query`, `engine` (`bing` by default, or `ddg`), `max_results`, and the
-channel, profile, fingerprint and `user_data_dir` arguments `stealth_fetch`
-takes. It returns `hits` (`title`, `url`, `snippet`) with the engine's
-click-tracking unwrapped, plus `hits_total` and `hits_truncated`. Google is
-not offered. A `blocked` error means the engine served a bot challenge.
-Switch engine or exit IP instead of retrying.
+`search` takes `query`, `engine` (`bing` by default, or `ddg`), `max_results`,
+and the channel, profile, fingerprint and `user_data_dir` arguments of
+`stealth_fetch`. It returns `hits` (`title`, `url`, `snippet`) with the
+engine's click-tracking unwrapped, plus `hits_total` and `hits_truncated`.
+Google is not offered. A `blocked` error means the engine served a bot
+challenge. Switch engine or exit IP instead of retrying.
 
 ## Interactive browser tools
 
 The `browser_*` tools drive the same persistent sessions as
-[`webskrap browser`](/docs/user-guide/cli/#interactive-browser-sessions) in the
-CLI: `browser_open` launches a detached headless Chromium that keeps running
-between tool calls, and every other tool
-reconnects to it over CDP, with the same automation and
-virtual-screen launch flags as `stealth_fetch`. Sessions are named (`session`, default `default`)
-and store their profile under `~/.webskrap/browser/<name>/`
-(root overridable with `WEBSKRAP_BROWSER_DIR`), so cookies and logins persist.
+[`webskrap browser`](/docs/user-guide/cli/#interactive-browser-sessions).
+`browser_open` launches a detached browser that keeps running between tool
+calls. Every other tool reconnects to it over CDP. The launch uses the same
+automation and virtual-screen flags as `stealth_fetch`. Sessions are named
+(`session`, default `default`) and keep their profile under
+`~/.webskrap/browser/<name>/`, so cookies and logins persist. Set
+`WEBSKRAP_BROWSER_DIR` to move the root.
 
-A browser that the MCP server launched closes when the server shuts down
-cleanly, and its profile stays on disk. A session opened with
-`webskrap browser open` keeps running, even when MCP tools use it. To also
-close the server's own browsers after a period without browser tool calls, set
-`WEBSKRAP_BROWSER_IDLE_TIMEOUT_S` (seconds) before starting the server. It is
-off by default. A server killed by a signal cannot close its browsers; use
+A browser the MCP server launched closes when the server shuts down cleanly,
+and its profile stays on disk. A session opened with `webskrap browser open`
+keeps running, even when MCP tools use it. To also close the server's own
+browsers after a period with no browser tool calls, set
+`WEBSKRAP_BROWSER_IDLE_TIMEOUT_S` (seconds) before you start the server. It is
+off by default. A server killed by a signal cannot close its browsers. Use
 `browser_close` or `webskrap browser close` for those.
 
-`browser_open` accepts `webrtc_ip_handling_policy` (for example
-`disable_non_proxied_udp`) to keep the host's addresses out of WebRTC
-candidates. A proxy is deliberately not a tool argument, like the sandbox
-switch: page text can steer a model, and a model-chosen proxy could reroute all
-of a session's traffic. Open a proxied session from the CLI with
-`webskrap browser open --proxy URL`; the browser tools then reuse it, and
+`browser_open` accepts `webrtc_ip_handling_policy`, for example
+`disable_non_proxied_udp`, to keep the host's addresses out of WebRTC
+candidates. A proxy is not a tool argument, and neither is the sandbox switch:
+page text can steer a model, and a proxy the model picks could reroute all of a
+session's traffic. Open a proxied session with
+`webskrap browser open --proxy URL`. The browser tools then reuse it, and
 `browser_open` reports its `proxy_server`.
 
 `browser_open` also takes the native stealth settings of `stealth_fetch`:
-`virtual_display` (headed Chromium on a private Xvfb display that lives as long
-as the session, Linux), `gpu` (`mesa` renders WebGL through Mesa's lavapipe; `auto` picks it under
-`virtual_display` on a host without a GPU when lavapipe is installed),
-and `profile_mode` `locale` with a `profile` (timezone and languages set at
-launch, Linux). Session commands reconnect for every call, and CDP emulation
-ends with its connection, so `full` mode is not offered. These settings are
-fixed at launch: reopening a running session with a different requested value
-is refused.
+
+- `virtual_display`: headed Chromium on a private Xvfb display that lives as
+  long as the session (Linux).
+- `gpu`: `mesa` renders WebGL through Mesa's lavapipe. `auto` picks it under
+  `virtual_display` on a host without a GPU when lavapipe is installed.
+- `profile_mode` `locale` with a `profile`: timezone and languages set at
+  launch (Linux).
+
+Each tool call reconnects, and CDP emulation ends with its connection, so
+`full` mode is not offered. These settings are fixed at launch, so reopening a
+running session with a different value is refused.
 
 A typical flow:
 
-1. `browser_open` with an optional `url`.
-2. `browser_snapshot`, where each element carries a ref like `[ref=e15]`.
+1. Call `browser_open` with an optional `url`.
+2. Call `browser_snapshot`. Each element carries a ref like `[ref=e15]`.
    Iframe content is listed under its `iframe` line, with refs like
    `f12345e15`.
-3. `browser_interact` with `action: "click"` and `target: "e15"` (or any
-   CSS selector). `fill` and `type` take one entry in `values`;
-   `select` takes one or more. `click`, `dblclick` and `type` use human mouse
-   and keystroke timing, so they take noticeably longer than `fill`; see
+3. Call `browser_interact` with `action: "click"` and `target: "e15"` (or any
+   CSS selector). `fill` and `type` take one entry in `values`. `select` takes
+   one or more. `click`, `dblclick` and `type` use human mouse and keystroke
+   timing, so they take longer than `fill`. See
    [Humanizer](/docs/user-guide/humanizer/).
-4. `browser_eval` or `browser_screenshot` to read results.
-5. `browser_close` when done (`delete_data: true` to drop the profile).
+4. Read results with `browser_eval` or `browser_screenshot`.
+5. Call `browser_close` when done. Pass `delete_data: true` to drop the
+   profile.
 
-Snapshots default to `depth=6`; pass `depth: null` for the full tree.
-Use `browser_text` for reading without element refs. It accepts `max_chars` and
-`offset`, and returns `next_text_offset` for paging through the current text.
-Offsets remain valid only while the text stays unchanged. Pass `pattern` (a
-Python regex of up to 200 characters) to get only the matching non-blank lines,
-each with `context` lines around it (0 to 3) and at most `max_matches` (1 to
-50). The regex runs in Python, never in the page, and a pattern that takes
-longer than 2 seconds fails with `usage`.
+Snapshots default to `depth=6`. Pass `depth: null` for the full tree. Use
+`browser_text` to read without element refs. It takes `max_chars` and `offset`,
+and returns `next_text_offset` to page through the current text. Offsets stay
+valid only while the text is unchanged. Pass `pattern` (a Python regex of up to
+200 characters) to get only matching non-blank lines, each with 0 to 3
+`context` lines and at most `max_matches` (1 to 50) results. The regex runs in
+Python, never in the page. A pattern that runs longer than 2 seconds fails with
+`usage`.
 
 `browser_goto` and `browser_open` accept `decline_cookies: true` to click a
-consent notice's reject control (waiting up to 10 seconds for it when the page
-loads a consent platform, 500ms otherwise) and report the strategy in
-`cookie_notice_declined`. They also accept `solve_cloudflare: true` to click
-Cloudflare's Turnstile checkbox, `solve_datadome: true` to drag DataDome's
-slider, `solve_perimeterx: true` to hold HUMAN's Press & Hold button, and
-`solve_recaptcha: true` to click a reCAPTCHA v2 or hCaptcha checkbox, before
-the page is reported. For a checkbox inside a form, `browser_solve_captcha`
-clicks it and reports `captcha.state`. `browser_screenshot` accepts `target`, a snapshot ref
-(iframe refs such as `f12345e15` included) or CSS selector, to capture only
-that element's bounding box; the result reports it as `clip`.
+consent notice's reject control and report the strategy in
+`cookie_notice_declined`. They wait up to 10 seconds when the page loads a
+consent platform, and 500 ms otherwise. They also accept the four `solve_*`
+options, which act before the page is reported. For a checkbox inside a form,
+`browser_solve_captcha` clicks it and reports `captcha.state`.
 
-Snapshots are truncated to `max_chars` (default 8000) and report
-`snapshot_truncated`; refs describe the current DOM, so take a fresh snapshot
+`browser_screenshot` accepts `target`, a snapshot ref (iframe refs such as
+`f12345e15` too) or CSS selector, to capture only that element's bounding box.
+The result reports it as `clip`.
+
+Snapshots are cut at `max_chars` (default 8000) and report
+`snapshot_truncated`. Refs describe the current DOM, so take a fresh snapshot
 after the page changes. Failed actions return a one-line error.
 
 ### Vision and coordinate input
 
-`browser_view(session="visual")` returns an inline `image/png` image block,
-a text block with metadata, and the same metadata in `structuredContent`:
-`url`, `title`, `width`, `height`, `scroll_x`, `scroll_y`, `mime_type`, and
-`coordinate_system: "viewport-css-pixels"`. It writes no file. Use it with an
-image-capable model and client; `browser_screenshot` remains the file/export tool.
+`browser_view(session="visual")` returns an inline `image/png` image block, a
+text block with metadata, and the same metadata in `structuredContent`: `url`,
+`title`, `width`, `height`, `scroll_x`, `scroll_y`, `mime_type` and
+`coordinate_system: "viewport-css-pixels"`. It writes no file and needs an
+image-capable model and client. `browser_screenshot` stays the tool for files
+and exports.
 
 Open with `browser_open(session="visual", url=...)`, inspect
-`browser_view(session="visual")`, then call:
+`browser_view(session="visual")`, then pick coordinates from the target you see
+and call `browser_mouse`:
 
 ```json
 {"action": "click", "x": 120, "y": 80, "session": "visual"}
 ```
 
-with `browser_mouse`. Choose coordinates from the observed target. For a focused
-input, `browser_insert_text(text="hello 世界", session="visual")` inserts literal
-text; `browser_press(key="Enter", session="visual")` sends a key. Insertion emits
-an input event, not individual keydown/keyup events. Use `browser_interact` with
-`action="type"` when a control requires individual keystrokes.
+For a focused input, `browser_insert_text(text="hello 世界", session="visual")`
+inserts literal text, and `browser_press(key="Enter", session="visual")` sends a
+key. Insertion sends one input event, not per-key keydown and keyup events. Use
+`browser_interact` with `action="type"` when a control needs real keystrokes.
 
-Mouse actions are `click`, `dblclick`, `move`, `scroll`, and `drag`. All require
-`x` and `y`. `button` is `left` (default), `middle`, or `right`, for click,
-double-click, or drag only. Drag also requires `end_x` and `end_y`. Scroll accepts
-`delta_x` and `delta_y` in CSS pixels, targeting the element under the pointer;
-positive `delta_y` scrolls down. Invalid, non-finite, unused, or out-of-viewport
-arguments return a `usage` error before mouse input is sent.
+Mouse actions are `click`, `dblclick`, `move`, `scroll` and `drag`. All require
+`x` and `y`. `button` is `left` (default), `middle` or `right`, for click,
+double-click and drag only. Drag also requires `end_x` and `end_y`. Scroll takes
+`delta_x` and `delta_y` in CSS pixels and targets the element under the
+pointer. Positive `delta_y` scrolls down. Invalid, non-finite, unused or
+out-of-viewport arguments return a `usage` error before any input is sent.
 
-Use the original PNG dimensions: each image pixel is one CSS pixel, independent
-of device scale. `(0,0)` is the viewport's top-left. Map any resized preview back
-to `width`/`height`, and do not add scroll offsets. Full-page screenshots do not
-share this mouse coordinate mapping.
+Use the original PNG size: each image pixel is one CSS pixel, whatever the
+device scale. `(0,0)` is the viewport's top-left corner. Map a resized preview
+back to `width` and `height`, and do not add scroll offsets. Full-page
+screenshots use a different mapping.
 
-Prefer refs/selectors for identifiable controls. Coordinate clicks hit whatever
-is visible at the point. After an action, wait for the expected change, then take
-a fresh view before choosing more coordinates. Wheel input can finish after the
-call returns. Run dependent actions sequentially in each session. The image
-shows the page, including canvas and frames, not browser chrome, OS dialogs,
-or a live desktop stream. Headless rendering needs no Xvfb.
+Prefer refs and selectors for controls you can identify. A coordinate click hits
+whatever is visible at that point. After an action, wait for the expected
+change, then take a fresh view before you pick more coordinates. Wheel input can
+finish after the call returns. Run dependent actions in sequence in each
+session. The image shows the page, including canvas and frames, but not browser
+chrome, OS dialogs or a live desktop stream. Headless rendering needs no Xvfb.
 
 ### Screenshot output is confined
 
 `browser_screenshot` writes only under `./webskrap-output`, relative to the
-directory the server runs in. Set `WEBSKRAP_OUTPUT_DIR` to move that root, and
-point it somewhere you are willing to have written to, not a source tree or
-`$HOME`.
+server's working directory. Set `WEBSKRAP_OUTPUT_DIR` to move that root. Point
+it at a place you accept writes to, not a source tree or `$HOME`.
 
 `path` is a relative destination inside that root. Nested paths work
-(`runs/today/page.png`, directories created as needed); absolute paths, `..`
-traversal, and symlinks leaving the root are rejected before the browser is
-touched. The model driving these tools reads untrusted pages, so its file
-destinations are treated as untrusted input.
+(`runs/today/page.png`), and missing directories are created. The server
+rejects absolute paths, `..` traversal and symlinks that leave the root before
+it touches the browser. The model reads untrusted pages, so its file
+destinations count as untrusted input.
 
 ### Chromium sandbox
 
 MCP sessions keep Chromium's OS sandbox. Hosts that cannot sandbox must set
-`WEBSKRAP_CHROMIUM_SANDBOX=0` in the server's environment; it is deliberately
-not a tool argument, so a page cannot talk the model into weakening renderer
-isolation. Session profiles under `~/.webskrap/browser/<name>/` are created
-`0700` on POSIX.
+`WEBSKRAP_CHROMIUM_SANDBOX=0` in the server's environment. It is not a tool
+argument, so a page cannot talk the model into weakening renderer isolation.
+Session profiles under `~/.webskrap/browser/<name>/` are created `0700` on
+POSIX.
 
-Limitations, the same as the CLI: bundled Chromium only, and no tools for
-network mocking, tracing, or video. MCP sessions are
-always headless. The CLI additionally offers `back`, `forward`, `reload`, and
-headed mode.
+The CLI's limits apply: Chromium-based browsers only, and no tools for network
+mocking, tracing or video. MCP sessions have no visible window. The CLI also
+offers `back`, `forward`, `reload` and `--headed`.
 
 ## Register with a client
 
@@ -373,16 +375,16 @@ args = []
 
 ## Stealth
 
-`stealth_fetch` accepts the same controls as the
-[Stealth](/docs/user-guide/stealth/) guide, including
-`channel`, `headless`, `user_data_dir`, `profile_mode`,
+`stealth_fetch` takes the controls from the [Stealth](/docs/user-guide/stealth/)
+guide, including `channel`, `headless`, `user_data_dir`, `profile_mode`,
 `reduce_fingerprint_surface`, `mask_headless_user_agent`, `virtual_display`,
-`gpu`, and `webrtc_ip_handling_policy`. On Linux with Xvfb, prefer `virtual_display`
-over `mask_headless_user_agent`: it runs Chrome headed on a private display
-instead of rewriting the user agent, which empties the high-entropy client hints.
+`gpu` and `webrtc_ip_handling_policy`. On Linux with Xvfb, prefer
+`virtual_display` over `mask_headless_user_agent`. It runs Chrome headed on a
+private display instead of rewriting the user agent, which empties the
+high-entropy client hints.
 
-For headless best-effort stealth from MCP, use real Chrome and opt in only to the
-native browser controls you need:
+For best-effort headless stealth from MCP, use real Chrome and turn on only the
+native controls you need:
 
 ```json
 {
@@ -398,20 +400,21 @@ native browser controls you need:
 
 ## Targeted snapshots
 
-Use `browser_find(text="Save changes")` to find known controls. Supply exactly
-one of `text` (case-insensitive substring) or `regex` (Python regex, with inline
+Use `browser_find(text="Save changes")` to find known controls. Pass exactly one
+of `text` (case-insensitive substring) or `regex` (Python regex, with inline
 flags such as `(?i)`). Results include matching lines, ancestor paths and refs
-for `browser_interact`. `max_matches` accepts 1..50, default 20. Match counts
-precede character truncation. Caller regex runs in a worker with a two-second
-limit per frame.
+for `browser_interact`. `max_matches` takes 1 to 50, default 20. Matches are
+counted before character truncation. Your regex runs in a worker with a
+two-second limit per frame.
 
 Use `browser_snapshot(target="e15", depth=2)` for one subtree. Unique main-frame
-CSS selectors also work. Set `boxes=true` only when viewport geometry is needed.
-The existing character limit and continuation fields remain unchanged for both
-tools. Repeat the same query with `next_snapshot_offset` while the DOM is stable.
+CSS selectors also work. Set `boxes=true` only when you need viewport geometry.
+Both tools keep the usual character limit and continuation fields. Repeat the
+same query with `next_snapshot_offset` while the DOM is stable.
 
 Snapshots omit password values, hidden and inert content, and background content
-behind a native modal dialog. Visible page text and other input values can still
-contain sensitive data. Open shadow roots and available iframe content use the
-existing native CDP driver. Closed roots and nested out-of-process frames keep
-its existing limits. Interactions do not append snapshots. No diff cache is kept.
+behind a native modal dialog. Visible text and other input values can still
+hold sensitive data. Open shadow roots and available iframe content come from
+the native CDP driver. Closed shadow roots and nested out-of-process frames
+keep that driver's limits. Actions do not append snapshots, and no diff cache
+is kept.

@@ -5,9 +5,9 @@ description: Use WebSkrap as an MCP web scraping server for LLM agents that need
 
 # LLM Web Scraping and MCP Server for AI Agents
 
-WebSkrap includes an MCP server so AI agents can fetch live web pages with a browser-backed scraper and receive clean page text instead of raw HTML.
-
-Use it when an agent needs current page content without the scripts, styles, and markup noise that would otherwise fill the model's context.
+WebSkrap's MCP server lets AI agents fetch live pages in a real browser and get
+back the visible text instead of raw HTML. The agent gets current content
+without scripts, styles and markup filling the model's context.
 
 ## Start the MCP server
 
@@ -17,22 +17,25 @@ webskrap install
 webskrap-mcp
 ```
 
-The server exposes `fetch`, `stealth_fetch`, and `doctor`, plus `browser_*` tools for
-persistent interactive sessions.
+The server exposes `fetch`, `stealth_fetch`, `search` and `doctor`, plus
+`browser_*` tools for persistent interactive sessions.
 
 ## CLI output for agents
 
-The CLI also returns bounded JSON that is easy for agents to parse:
+The CLI returns size-capped JSON that agents can parse:
 
 ```bash
 webskrap fetch https://example.com --format json --max-chars 12000
 ```
 
-The JSON includes `url`, `final_url`, `status`, `ok`, `title`, `headers`, `text`, `text_length`, `text_truncated`, and `elapsed_ms`.
+The JSON includes `url`, `final_url`, `status`, `ok`, `title`, `headers`,
+`text`, `text_length`, `text_truncated` and `elapsed_ms`.
 
 ## Why clean text matters
 
-Raw HTML spends thousands of tokens on tags, inline scripts, and styles the model never reads. Both fetch tools return visible page text by default, typically 5-10x smaller than the HTML they came from. Pass `text_only=false` when the markup itself is the point.
+Raw HTML spends tokens on tags, inline scripts and styles the model never
+reads. Both fetch tools return visible page text by default. Pass
+`text_only=false` when you need the markup.
 
 ## Related docs
 

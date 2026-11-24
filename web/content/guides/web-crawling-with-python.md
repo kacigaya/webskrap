@@ -5,9 +5,16 @@ description: Build browser-aware Python web crawlers with WebSkrap, async concur
 
 # Web Crawling with Python and WebSkrap
 
-WebSkrap is useful for browser-aware web crawling when each URL may need JavaScript rendering, cookies, redirects, or a realistic browser profile.
+WebSkrap suits crawls where each URL may need JavaScript rendering, cookies,
+redirects or a realistic browser profile.
 
-A crawler should still be polite and bounded. Respect robots policies where applicable, rate limits, terms of service, and access controls. WebSkrap's only CAPTCHA handling is the opt-in Cloudflare Turnstile click (`solve_cloudflare`) DataDome slider drag (`solve_datadome`) HUMAN Press & Hold (`solve_perimeterx`) and reCAPTCHA/hCaptcha checkbox click (`solve_recaptcha`, `browser_solve_captcha`), and it does not bypass access controls. Use it responsibly.
+Keep a crawler polite and bounded. Respect robots policies where they apply,
+rate limits, terms of service and access controls. WebSkrap does not bypass
+access controls. Its only CAPTCHA handling is four opt-in options: the
+Cloudflare Turnstile click (`solve_cloudflare`), the DataDome slider drag
+(`solve_datadome`), the HUMAN Press & Hold (`solve_perimeterx`), and the
+reCAPTCHA or hCaptcha checkbox click (`solve_recaptcha`,
+`browser_solve_captcha`). Use them responsibly.
 
 ## Simple async crawl pattern
 
@@ -35,7 +42,7 @@ asyncio.run(main())
 
 ## Crawl with sessions
 
-Use sessions when multiple pages belong to the same site and should share browser state.
+Use a session when pages on one site should share browser state.
 
 ```python
 from pathlib import Path
@@ -44,14 +51,15 @@ from webskrap import SessionConfig, WebSkrapClient
 config = SessionConfig(user_data_dir=Path(".webskrap/crawl-profile"))
 ```
 
-Persistent sessions can keep cookies and local storage between fetches for sites you are authorized to access.
+On sites you may access, persistent sessions keep cookies and local storage
+between fetches.
 
 ## Practical crawler tips
 
 - Keep concurrency low until you understand a site.
 - Use resource policies to avoid downloading heavy assets.
 - Store `final_url` to detect redirects and canonical pages.
-- Capture screenshots only for debugging because they add cost.
+- Capture screenshots only to debug, because they add cost.
 - Log status codes, titles, timings, and failures.
 
 ## Related docs

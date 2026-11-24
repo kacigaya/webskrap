@@ -7,7 +7,7 @@ description: Reference for WebSkrapClient, WebSkrapSession, FetchResult, Session
 
 > Full typed signatures and docstrings live in the source. Browse them on [GitHub](https://github.com/kacigaya/webskrap/tree/main/src/webskrap).
 
-WebSkrap's public surface is re-exported from the top-level `webskrap` package.
+The top-level `webskrap` package re-exports the public API.
 
 ## Client and sessions
 
@@ -27,16 +27,15 @@ WebSkrap's public surface is re-exported from the top-level `webskrap` package.
 | --- | --- |
 | `SessionConfig` | Per-session or per-call settings: channel, headless, `profile_mode`, timeouts, `user_data_dir`, `storage_state`, `resource_policy`, `decline_cookies`, `decline_cookies_timeout_ms`, `solve_cloudflare`, `solve_datadome`, `solve_perimeterx`, `solve_recaptcha`, proxy, and stealth options. |
 | `ProxyConfig` | Proxy `server` with optional `username` and `password`. |
-| `ResourcePolicy` | Request-blocking preset: `ALL`, `LITE`, or `DOCUMENTS`. |
+| `ResourcePolicy` | Request-blocking preset: `AUTO` (default), `ALL`, `LITE`, or `DOCUMENTS`. |
 | `SearchEngine` | Results page a search loads: `BING` (default) or `DDG` (DuckDuckGo HTML). Google is not offered. |
 | `WebRtcIPHandlingPolicy` | Allowed WebRTC ICE policy values: `default`, `default_public_and_private_interfaces`, `default_public_interface_only`, `disable_non_proxied_udp`. |
 
 ## Internal modules
 
-The implementation is organized under `webskrap.browser`, `webskrap.driver`,
-`webskrap.interfaces`, and other package directories. These modules are
-internal, not part of the stable Python API. Import public symbols from
-`webskrap`; use the [`webskrap browser` CLI](/docs/user-guide/cli/#interactive-browser-sessions)
+`webskrap.browser`, `webskrap.driver`, `webskrap.interfaces` and the other
+subpackages are internal, not part of the stable Python API. Import public
+symbols from `webskrap`. Use the [`webskrap browser` CLI](/docs/user-guide/cli/#interactive-browser-sessions)
 or the [MCP browser tools](/docs/user-guide/mcp/#interactive-browser-tools)
 for interactive sessions.
 

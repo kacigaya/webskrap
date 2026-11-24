@@ -5,7 +5,8 @@ description: Configure coherent desktop and mobile browser profiles for Python w
 
 # Profiles
 
-Profiles describe browser-visible settings such as viewport, locale, timezone, language headers, and device characteristics.
+A profile describes browser-visible settings such as viewport, locale,
+timezone, language headers and device traits.
 
 Sessions use the browser's native identity by default. `profile_mode` sets how
 much of the selected profile pages see:
@@ -32,8 +33,7 @@ Built-in profile names:
 - `desktop-edge`
 - `mobile-chrome`
 
-`get_profile()` returns a copy, so you can adjust it without mutating the
-bundled profile:
+`get_profile()` returns a copy, so changes leave the bundled profile alone:
 
 ```python
 profile = get_profile("desktop-chrome")
@@ -70,9 +70,9 @@ result = await client.fetch("https://example.com", profile=profile)
 
 ## Language headers
 
-`BrowserProfile` keeps `locale`, `navigator_languages`, and the generated
-`Accept-Language` header coherent. The first language gets full weight and later
-languages get descending quality weights:
+`BrowserProfile` keeps `locale`, `navigator_languages` and the generated
+`Accept-Language` header coherent. The first language gets full weight, and
+later ones get falling quality weights:
 
 ```python
 profile = BrowserProfile(
@@ -99,12 +99,12 @@ an explicit override.
 
 ## Mobile profile
 
-Use the built-in mobile profile when viewport, touch, and mobile user-agent
-settings should move together:
+The built-in mobile profile moves viewport, touch and mobile user-agent
+settings together:
 
 ```python
 result = await client.fetch("https://example.com", profile="mobile-chrome")
 ```
 
-For custom mobile profiles, keep `viewport`, `screen`, `device_scale_factor`,
-`is_mobile`, `has_touch`, and `user_agent` coherent.
+In a custom mobile profile, keep `viewport`, `screen`, `device_scale_factor`,
+`is_mobile`, `has_touch` and `user_agent` coherent.

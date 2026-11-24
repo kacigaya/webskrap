@@ -24,17 +24,17 @@ webskrap doctor
 webskrap doctor --format json
 ```
 
-The CLI `fetch` command runs headless Chrome, so `doctor` checks that headless
-Chrome can launch. It also reports the host
-timezone and warns when it is UTC, which pages read as a server.
+CLI `fetch` runs headless Chrome, so `doctor` checks that headless Chrome can
+launch. It also reports the host timezone and warns when it is UTC, which pages
+read as a server.
 
-The launch uses a default `fetch`'s flags, and `fingerprint` reports what pages
-read from it: `webdriver`, the user agent and platform, the client-hint
-architecture, the WebGL renderer, and the media device count. The values are
-read from a blank https page that WebSkrap serves itself, so no request leaves
-the browser. Each gap gets a warning that names a native fix, such as
-`virtual_display=True`, `gpu='mesa'`, `fake_media_devices=True`, or a host
-change. No warning suggests a JavaScript patch.
+The check launches with a default `fetch`'s flags. `fingerprint` reports what
+pages read from that browser: `webdriver`, the user agent and platform, the
+client-hint architecture, the WebGL renderer and the media device count.
+WebSkrap reads these values from a blank https page it serves itself, so no
+request leaves the browser. Each gap gets a warning that names a native fix,
+such as `virtual_display=True`, `gpu='mesa'`, `fake_media_devices=True`, or a
+host change. No warning suggests a JavaScript patch.
 
 ## List profiles
 
@@ -49,16 +49,15 @@ webskrap profiles --format json
 webskrap fetch https://example.com
 ```
 
-The default human output prints status, final URL, title, and artifact paths.
-
-For LLMs and shell automation, use JSON:
+The default output prints status, final URL, title and artifact paths. For LLMs
+and shell scripts, use JSON:
 
 ```bash
 webskrap fetch https://example.com --format json --max-chars 12000
 ```
 
 JSON output includes `url`, `final_url`, `status`, `ok`, `title`, `headers`,
-`text`, `text_length`, `text_truncated`, and `elapsed_ms`.
+`text`, `text_length`, `text_truncated` and `elapsed_ms`.
 
 Wait for deferred content with a visible CSS selector or snapshot ref:
 
@@ -66,10 +65,11 @@ Wait for deferred content with a visible CSS selector or snapshot ref:
 webskrap fetch https://example.com --ready-selector '#content' --format json
 ```
 
-`--timeout-ms` applies separately to navigation and this readiness wait, which
-starts after consent dismissal. A missing selector exits 3 (`timeout`). Known
-challenge and block pages (DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA or hCaptcha on a 403, 429 or 503 page) exit 11
-(`blocked`) without retrying, even when served with HTTP 200. Ordinary HTTP errors still return `ok: false`.
+`--timeout-ms` applies separately to navigation and to this wait, which starts
+after the cookie notice is dismissed. A missing selector exits 3 (`timeout`).
+Known challenge and block pages exit 11 (`blocked`) without a retry, even with
+HTTP 200: DataDome, Cloudflare, HUMAN, Akamai, Fastly, AWS WAF, and reCAPTCHA
+or hCaptcha on a 403, 429 or 503 page. Ordinary HTTP errors return `ok: false`.
 
 ## Search the web
 
@@ -78,19 +78,19 @@ webskrap search "example domain"
 webskrap search "example domain" --engine bing --max-results 5 --format json
 ```
 
-`search` loads Bing's results page (`--engine bing`, the default)
-or DuckDuckGo's HTML page (`--engine ddg`) in the same stealth browser and
-prints each hit's title, URL and snippet. The engine's click-tracking redirect is unwrapped, so the URL is the
-destination. Google is not offered. JSON output carries `query`, `engine`,
-`hits`, `hits_total` and `hits_truncated`.
+`search` loads Bing's results page (`--engine bing`, the default) or
+DuckDuckGo's HTML page (`--engine ddg`) in the same stealth browser. It prints
+each hit's title, URL and snippet. WebSkrap unwraps the engine's click-tracking
+redirect, so the URL is the destination. Google is not offered. JSON output
+carries `query`, `engine`, `hits`, `hits_total` and `hits_truncated`.
 
-A `blocked` failure (exit 11) means the engine served a bot challenge instead
-of results. Switch engine, reuse `--user-data-dir`, or change the exit IP.
-Nothing is retried.
+A `blocked` failure (exit 11) means the engine served a bot challenge instead of
+results. Switch engine, reuse `--user-data-dir`, or change the exit IP. Nothing
+is retried.
 
 ## Text and stdout
 
-Print raw fetched content to stdout:
+Print the fetched content to stdout:
 
 ```bash
 webskrap fetch https://example.com --stdout
@@ -103,7 +103,7 @@ webskrap fetch https://example.com --stdout --text-only
 webskrap fetch https://example.com --format json --text-only
 ```
 
-Suppress the human summary when writing artifacts:
+Hide the summary when you write artifacts:
 
 ```bash
 webskrap fetch https://example.com --quiet --output example.html
@@ -117,7 +117,7 @@ webskrap fetch https://example.com --output example.html
 webskrap fetch https://example.com -o example.html --screenshot example.png
 ```
 
-Parent directories are created automatically for `--output` and `--screenshot`.
+`--output` and `--screenshot` create missing parent directories.
 
 ## Wait and timeout
 
@@ -125,10 +125,9 @@ Parent directories are created automatically for `--output` and `--screenshot`.
 webskrap fetch https://example.com --wait-until load --timeout-ms 60000
 ```
 
-Supported wait states are `commit`, `domcontentloaded`, `load`, and
-`networkidle`. Prefer `domcontentloaded` for fast HTML collection, `load` for
-regular page assets, and `networkidle` only when a page actually needs a quiet
-network.
+The wait states are `commit`, `domcontentloaded`, `load` and `networkidle`. Use
+`domcontentloaded` for fast HTML, `load` for regular page assets, and
+`networkidle` only when a page needs a quiet network.
 
 ## Resource policy
 
@@ -137,62 +136,60 @@ webskrap fetch https://example.com --resource-policy lite
 webskrap fetch https://example.com --resource-policy documents -o page.html
 ```
 
-The fetch default is `auto`. With `--text-only`, it skips images, fonts and
-media unless a screenshot is requested. HTML and screenshots load all resources.
-Explicit policies take priority. `lite` blocks images, fonts and media.
-`documents` also blocks stylesheets; use it only when removing CSS preserves
-the required result.
+The fetch default is `auto`. With `--text-only` and no screenshot, it skips
+images, fonts and media. HTML and screenshots load all resources. An explicit
+policy wins. `lite` blocks images, fonts and media. `documents` also blocks
+stylesheets. Use it only when the result survives without CSS.
 
 ## Cookie banners
 
-`webskrap fetch` clicks the reject control of a cookie consent notice before
-reading the page, so banners do not bury the text and no optional cookies are
-accepted. The human output prints `Cookie notice: declined (...)` when it fired,
-and the JSON output carries `cookie_notice_declined`.
+`webskrap fetch` clicks the reject control of a cookie consent notice before it
+reads the page, so banners do not bury the text and no optional cookies are
+accepted. When this happens, the output prints `Cookie notice: declined (...)`
+and JSON carries `cookie_notice_declined`.
 
 ```bash
 webskrap fetch https://example.com --no-decline-cookies
 webskrap fetch https://example.com --decline-cookies-timeout-ms 4000
 ```
 
-`--solve-cloudflare` clicks Cloudflare's Turnstile checkbox on its "Just a
-moment" page and waits up to 60 seconds for the real page. It is off by
-default. See [Stealth](stealth.md#cloudflare-turnstile) and use it responsibly.
-`--solve-datadome` drags DataDome's slider CAPTCHA the same way; see
-[Stealth](stealth.md#datadome-slider). `--solve-perimeterx` holds HUMAN's
-Press & Hold button; see [Stealth](stealth.md#human-press--hold).
-`--solve-recaptcha` clicks a reCAPTCHA v2 or hCaptcha checkbox on a blocking
-page; see [Stealth](stealth.md#recaptcha-and-hcaptcha-checkbox).
+The timeout is how long to wait for a late notice, and what each fetch costs on
+pages with none. Use `0` for one immediate check.
+
+## Challenge solvers
+
+Four opt-in flags answer one widget each and wait up to 60 seconds for the real
+page. All are off by default. Use them responsibly.
+
+| Flag | Action | Details |
+| --- | --- | --- |
+| `--solve-cloudflare` | Clicks Cloudflare's Turnstile checkbox. | [Stealth](stealth.md#cloudflare-turnstile) |
+| `--solve-datadome` | Drags DataDome's slider. | [Stealth](stealth.md#datadome-slider) |
+| `--solve-perimeterx` | Holds HUMAN's Press & Hold button. | [Stealth](stealth.md#human-press--hold) |
+| `--solve-recaptcha` | Clicks a reCAPTCHA v2 or hCaptcha checkbox on a blocking page. | [Stealth](stealth.md#recaptcha-and-hcaptcha-checkbox) |
 
 ```bash
 webskrap fetch https://example.com --virtual-display --solve-cloudflare
-webskrap fetch https://example.com --virtual-display --solve-datadome
-webskrap fetch https://example.com --virtual-display --solve-perimeterx
-webskrap fetch https://example.com --virtual-display --solve-recaptcha
 ```
-
-The timeout is how long to wait for a late-injected notice, and the per-fetch
-cost on pages that have none. Use `0` for a single immediate check.
 
 ## Browser channels
 
-`--channel` defaults to `chrome`, which does not exist on every platform (Linux
-ARM64 has no Chrome build). When the channel cannot launch, `fetch` and
-`search` print a notice on stderr and try installed Edge, then Chrome for
-Testing (the full browser in new headless mode), so piped stdout stays clean. Sandbox failures stop without trying another channel.
-If nothing launches you get a one-line error and `Run: webskrap install`, not a
-traceback.
+`--channel` defaults to `chrome`, which some platforms lack (Linux ARM64 has no
+Chrome build). When the channel cannot launch, `fetch` and `search` print a
+notice on stderr, so piped stdout stays clean. Then they try installed Edge,
+then Chrome for Testing (the full browser in new headless mode). A sandbox
+failure stops without trying another channel. If nothing launches, you get a
+one-line error and `Run: webskrap install`, not a traceback.
 
-`webskrap doctor` follows the same Chrome, Edge, Chromium order. JSON output
+`webskrap doctor` follows the same Chrome, Edge, Chromium order. Its output
 names the working `channel` and `browser_identity`, the host
 `cpu_architecture`, and `font_count`, the number of distinct Fontconfig
-families. `font_count` is `null` where `fc-list` is unavailable. Human output
-shows these values too.
+families. `font_count` is `null` where `fc-list` is missing.
 
 ## Headless stealth controls
 
-`webskrap fetch` always runs headless. Use real Chrome and a stable
-profile directory when browser continuity matters:
+`webskrap fetch` always runs headless. When browser continuity matters, use
+real Chrome and a stable profile directory:
 
 ```bash
 webskrap fetch https://example.com \
@@ -201,18 +198,18 @@ webskrap fetch https://example.com \
   --virtual-display
 ```
 
-`--virtual-display` runs Chrome headed on a private Xvfb display (Linux, `Xvfb`
-installed), so no `HeadlessChrome` token or empty client hints reach the site.
-`--mask-headless-user-agent` rewrites the token under headless mode instead,
+`--virtual-display` runs Chrome headed on a private Xvfb display (Linux, with
+`Xvfb` installed), so no `HeadlessChrome` token or empty client hints reach the
+site. `--mask-headless-user-agent` rewrites the token in headless mode instead,
 but Chromium then empties the high-entropy client hints. `--gpu mesa` renders
 WebGL with Mesa's lavapipe instead of SwiftShader (Linux,
 `mesa-vulkan-drivers`). With `--virtual-display` on a host without a GPU, the
-default `--gpu auto` already uses Mesa when lavapipe is installed; see the
-Stealth guide's WebGL renderer section.
+default `--gpu auto` already uses Mesa when lavapipe is installed. See
+[WebGL renderer](stealth.md#webgl-renderer).
 
-For fingerprint-statistics or WebRTC leak-test pages, apply profile
-locale/timezone/media metadata and block non-proxied WebRTC UDP candidates
-without viewport, user-agent, or JavaScript patches:
+For fingerprint-statistics or WebRTC leak-test pages, apply the profile's
+locale, timezone and media metadata and block non-proxied WebRTC UDP
+candidates, with no viewport, user-agent or JavaScript patches:
 
 ```bash
 webskrap fetch https://amiunique.org/fr/fingerprint \
@@ -223,8 +220,8 @@ webskrap fetch https://amiunique.org/fr/fingerprint \
   --webrtc-ip-handling-policy disable_non_proxied_udp
 ```
 
-Pass additional browser flags with repeated `--launch-arg=...` options. Use the
-equals form when the browser flag itself starts with `--`.
+Pass more browser flags with repeated `--launch-arg=...` options. Use the
+equals form when the flag itself starts with `--`.
 
 ```bash
 webskrap fetch https://example.com \
@@ -234,26 +231,26 @@ webskrap fetch https://example.com \
 
 ## Interactive browser sessions
 
-`webskrap browser` drives a persistent browser with commands modeled on the
-official [Playwright CLI](https://playwright.dev/agent-cli/introduction),
-implemented natively on WebSkrap's own CDP client. `open` launches a detached
-browser that keeps running between commands; every other command reconnects
-to it over CDP, acts on the current page, and exits. It uses installed Chrome,
-then Edge, then Chrome for Testing. Installed Chrome and Edge include the
-platform's sandbox support, such as the AppArmor profile Ubuntu 23.10+ needs.
+`webskrap browser` drives a persistent browser. Its commands follow the
+official [Playwright CLI](https://playwright.dev/agent-cli/introduction), built
+on WebSkrap's own CDP client. `open` launches a detached browser that keeps
+running between commands. Every other command reconnects to it over CDP, acts
+on the current page and exits. It uses installed Chrome, then Edge, then Chrome
+for Testing. Installed Chrome and Edge include the platform's sandbox support,
+such as the AppArmor profile Ubuntu 23.10+ needs.
 
-The session uses the same stealth path as `webskrap fetch`: commands never
-enable the CDP `Runtime` domain, so no `Runtime.enable` leak reaches the page or
-its workers, and the browser launches with
+Sessions use the same stealth path as `webskrap fetch`. Commands never enable
+the CDP `Runtime` domain, so no `Runtime.enable` leak reaches the page or its
+workers. The browser launches with
 `--disable-blink-features=AutomationControlled` (`navigator.webdriver` stays
-false) plus the 1920x1080 virtual screen used by headless fetches. Headless
-sessions still report `HeadlessChrome` in the user agent. When a site checks
-it, pass `--virtual-display` (headed on a private Xvfb display that lives as
-long as the session, Linux) or `--headed`. `--gpu mesa` and
-`--profile-mode locale --profile NAME` work as for `fetch`. Session commands
-reconnect for every call and CDP emulation ends with its connection, so
-`--profile-mode full` is not offered. `browser eval` runs in the page's own
-JavaScript world, so page globals are visible.
+false) and the 1920x1080 virtual screen of headless fetches. Headless sessions
+still report `HeadlessChrome` in the user agent. When a site checks it, pass
+`--virtual-display` (headed on a private Xvfb display that lives as long as the
+session, Linux) or `--headed`. `--gpu mesa` and `--profile-mode locale
+--profile NAME` work as for `fetch`. Each command reconnects, and CDP emulation
+ends with its connection, so `--profile-mode full` is not offered.
+`browser eval` runs in the page's own JavaScript world, so page globals are
+visible.
 
 ```bash
 webskrap browser open https://example.com
@@ -266,24 +263,23 @@ webskrap browser screenshot button.png --target e15   # one element
 webskrap browser close
 ```
 
-`snapshot` prints an aria snapshot of the page where each element carries a
-ref like `[ref=e15]`. Interaction commands (`click`, `dblclick`, `hover`,
-`fill`, `type`, `select`, `check`, `uncheck`) accept either a ref or a CSS
-selector. Refs describe the current page, so take a fresh
-`snapshot` after the page changes. Iframe content is listed under its `iframe` line. Refs in a frame look
-like `f12345e15`. CSS selectors match in the main frame only.
+`snapshot` prints an aria snapshot where each element carries a ref like
+`[ref=e15]`. Interaction commands (`click`, `dblclick`, `hover`, `fill`, `type`,
+`select`, `check`, `uncheck`) take a ref or a CSS selector. Refs describe the
+current page, so take a fresh `snapshot` after the page changes. Iframe content
+is listed under its `iframe` line, and refs in a frame look like `f12345e15`.
+CSS selectors match in the main frame only.
 
 `click` and `dblclick` scroll with the mouse wheel, move the cursor along a
-curved path and hold the button for a human 60-140 ms; `type` clicks into the
-field and types with human keystroke timing. Both refuse a target covered by
-another element. They are slower than mechanical input on purpose (see
-[Humanizer](/docs/user-guide/humanizer/)); `fill` still sets a value at once.
+curved path, and hold the button for 60-140 ms. `type` clicks into the field and
+types with human keystroke timing. Both refuse a target covered by another
+element. They are slower than mechanical input on purpose (see
+[Humanizer](/docs/user-guide/humanizer/)). `fill` still sets a value at once.
 
-Navigation uses `goto`, `back`, `forward`, and `reload`; `press` sends a key
-to the page, and `eval` runs JavaScript and prints the JSON result. All
-commands support `--format json` for scripting and agents, and fail with a
-one-line error instead of a traceback. The exit status tells the kind of
-failure; JSON output carries the same name in `code`:
+Navigate with `goto`, `back`, `forward` and `reload`. `press` sends a key to the
+page, and `eval` runs JavaScript and prints the JSON result. All commands take
+`--format json` and fail with a one-line error instead of a traceback. The exit
+status names the kind of failure, and JSON carries the same name in `code`:
 
 | Exit | Code                  |
 | ---- | --------------------- |
@@ -299,28 +295,24 @@ failure; JSON output carries the same name in `code`:
 | 10   | `path_rejected`       |
 | 11   | `blocked`             |
 
-`open URL` and `goto` take `--decline-cookies` to click a consent notice's
-reject control, `--solve-cloudflare` to click Cloudflare's Turnstile
-checkbox, `--solve-datadome` to drag DataDome's slider, and
-`--solve-perimeterx` to hold HUMAN's Press & Hold button, and
-`--solve-recaptcha` to click a reCAPTCHA v2 or hCaptcha checkbox. For a
-checkbox inside a form, `webskrap browser solve-captcha` clicks it and prints
-its state. They also run the fetch tools' challenge and block check, but
-report a match instead of failing: the human output prints a `blocked:` line,
-and JSON output carries it in `blocked`. The page stays open.
+`open URL` and `goto` take `--decline-cookies` and the four `--solve-*` flags.
+For a checkbox inside a form, `webskrap browser solve-captcha` clicks it and
+prints its state. Both commands also run the fetch challenge and block check,
+but report a match instead of failing: the output prints a `blocked:` line and
+JSON carries it in `blocked`. The page stays open.
 
-Sessions are named with `-s/--session` (default `default`) and listed with
-`webskrap browser list`. Each session stores its browser profile under
-`~/.webskrap/browser/<name>/` (override the root with `WEBSKRAP_BROWSER_DIR`),
-so cookies and logins persist across `open`/`close`. Those directories are
-created `0700` on POSIX, because they hold cookies and logged-in state; they
-are not encrypted, so use `webskrap browser close --delete-data` to remove a
-session's profile, or `close --all` to stop every session. A root you set up
-yourself via `WEBSKRAP_BROWSER_DIR` keeps whatever permissions you gave it.
+Name sessions with `-s/--session` (default `default`) and list them with
+`webskrap browser list`. Each session keeps its browser profile under
+`~/.webskrap/browser/<name>/`, so cookies and logins persist across `open` and
+`close`. Set `WEBSKRAP_BROWSER_DIR` to change the root. On POSIX the
+directories are created `0700` because they hold cookies and logged-in state.
+They are not encrypted. Remove a session's profile with
+`webskrap browser close --delete-data`, or stop every session with
+`close --all`. A root you create yourself through `WEBSKRAP_BROWSER_DIR` keeps
+its own permissions.
 
-Open and close operations for the same session are serialized across
-processes. Concurrent commands cannot launch two browsers against one profile
-or leave a stale state file behind.
+Open and close for one session are serialized across processes, so concurrent
+commands cannot launch two browsers on one profile or leave a stale state file.
 
 ### Vision and coordinate input
 
@@ -340,55 +332,56 @@ webskrap browser close -s visual
 ```
 
 `view` writes a viewport PNG and returns `path` (absolute), `url`, `title`,
-`width`, `height`, `scroll_x`, `scroll_y`, `mime_type`, and `coordinate_system`
-(`viewport-css-pixels`). Omitting the path generates a unique PNG in the current
-directory. JSON contains metadata, not base64 image data: the agent must open
-the file with an image-viewing tool.
+`width`, `height`, `scroll_x`, `scroll_y`, `mime_type` and `coordinate_system`
+(`viewport-css-pixels`). Without a path, it writes a uniquely named PNG in the
+current directory. JSON holds metadata, not base64 image data, so the agent
+must open the file with an image-viewing tool.
 
 One image pixel equals one CSS pixel, even on high-DPI pages. `(0, 0)` is the
-viewport's top-left. Map resized previews back to the original dimensions;
-do not add document scroll offsets. `screenshot --full-page` remains available
-for export, but its coordinates cannot be used directly with `mouse`.
+viewport's top-left corner. Map resized previews back to the original size, and
+do not add document scroll offsets. `screenshot --full-page` still exports the
+whole page, but `mouse` cannot use its coordinates directly.
 
-`mouse` accepts `click`, `dblclick`, `move`, `scroll`, or `drag`, with required
-`x y`. `--button` is `left` (default), `middle`, or `right` for click/double-click/
-drag. Drag requires both `--end-x` and `--end-y`. Scroll uses `--delta-x` and
-`--delta-y` over the element under `x y`; positive vertical deltas scroll down,
-including in nested scroll areas. Non-finite, out-of-viewport, and unused
-arguments fail with `usage`. Coordinate input uses direct browser events;
-selector-based `click` and `type` retain their human timing and covered-target
-checks.
+`mouse` takes `click`, `dblclick`, `move`, `scroll` or `drag`, and requires
+`x y`. `--button` is `left` (default), `middle` or `right` for click,
+double-click and drag. Drag requires both `--end-x` and `--end-y`. Scroll uses
+`--delta-x` and `--delta-y` over the element under `x y`. Positive vertical
+deltas scroll down, also in nested scroll areas. Non-finite, out-of-viewport
+and unused arguments fail with `usage`. Coordinate input sends direct browser
+events. Selector-based `click` and `type` keep their human timing and
+covered-target checks.
 
 `insert-text` inserts literal Unicode into the focused control with an input
-event. It does not interpret `Enter` as a key or emit per-character keydown/
-keyup events. Focus with a click or Tab; use `press` for shortcuts and keys,
-or selector-based `type` for controls that require individual keystrokes.
+event. It does not treat `Enter` as a key or send per-character keydown and
+keyup events. Focus the control with a click or Tab. Use `press` for keys and
+shortcuts, or selector-based `type` for controls that need real keystrokes.
 
-Take a fresh view after navigation, scrolling, or layout changes. Wheel input
-may return before scrolling finishes; wait for the expected page condition.
-Prefer refs/selectors for known controls, and run dependent session actions
-sequentially. This shows the page viewport, not browser chrome or OS dialogs.
+Take a fresh view after navigation, scrolling or layout changes. Wheel input can
+return before scrolling ends, so wait for the expected page state. Prefer refs
+and selectors for known controls, and run dependent actions in sequence. The
+view shows the page viewport, not browser chrome or OS dialogs.
 
 ### Chromium sandbox
 
-`open` keeps Chromium's OS sandbox, which is what contains a renderer
-compromised by a hostile page. Some environments cannot start it, such as
-containers without unprivileged user namespaces or images that disable them.
-There the browser exits during startup with a message saying so.
+`open` keeps Chromium's OS sandbox, which contains the renderer if a hostile
+page compromises it. Some environments cannot start it, such as containers without
+unprivileged user namespaces. There the browser exits at startup with a message
+that says so.
 
 ```bash
 webskrap browser open --no-sandbox            # this session only
 WEBSKRAP_CHROMIUM_SANDBOX=0 webskrap browser open   # every session on this host
 ```
 
-`--no-sandbox` wins over the environment variable, and a session started
-without the sandbox prints a warning. `webskrap browser list` shows a
-`Sandbox` column for running sessions. Prefer fixing the host: sandboxing is
-the difference between a compromised renderer and a compromised machine.
-WebSkrap never drops the sandbox on its own, and never retries a failed launch
-without it.
+`--no-sandbox` wins over the environment variable, and a session without the
+sandbox prints a warning. `webskrap browser list` shows a `Sandbox` column for
+running sessions. Fix the host if you can: the sandbox is the difference
+between a compromised renderer and a compromised machine. WebSkrap never drops
+the sandbox on its own, and never retries a failed launch without it.
 
-To route a session through a proxy, pass it when the browser starts:
+### Proxy
+
+Pass the proxy when the browser starts:
 
 ```bash
 webskrap browser open --proxy socks5://proxy.example:1080
@@ -396,13 +389,13 @@ webskrap browser open --proxy http://proxy.example:8080 \
   --webrtc-ip-handling-policy default_public_interface_only
 ```
 
-With `--proxy`, WebRTC defaults to `disable_non_proxied_udp`, so pages see
-neither the host's LAN address nor its direct public address in ICE candidates;
+With `--proxy`, WebRTC defaults to `disable_non_proxied_udp`, so ICE candidates
+show neither the host's LAN address nor its direct public address.
 `--webrtc-ip-handling-policy` overrides it, with or without a proxy. Both
 settings are fixed at launch.
 
-For an http or https proxy that asks for a password, put the credentials in
-the environment, not in the URL:
+For an http or https proxy that asks for a password, put the credentials in the
+environment, not in the URL:
 
 ```bash
 export WEBSKRAP_PROXY_USERNAME=user
@@ -410,21 +403,21 @@ read -rs WEBSKRAP_PROXY_PASSWORD && export WEBSKRAP_PROXY_PASSWORD
 webskrap browser open --proxy http://proxy.example:8080
 ```
 
-WebSkrap starts a helper process that keeps the credentials in memory. It
-answers the proxy for every page, frame and worker, and stops when the browser
-closes. The credentials are not written to disk, not put on a command line,
-and not passed on to the browser's environment. SOCKS proxies cannot use
-credentials, because Chromium does not answer their challenge. If the helper
-stops, later commands fail with `session_unreachable`: close the session and
-open it again.
-
+WebSkrap starts a helper process that keeps the credentials in memory, answers
+the proxy for every page, frame and worker, and stops when the browser closes.
+The credentials never go to disk, to a command line, or to the browser's
+environment. SOCKS proxies cannot use credentials, because Chromium does not
+answer their challenge. If the helper stops, later commands fail with
+`session_unreachable`. Close the session and open it again.
 
 Reopening a running session with a different proxy or policy fails with a
-`usage` error instead of reusing a browser that bypasses the proxy; reopening
-it without `--proxy` reuses it as it is. `webskrap browser list` shows each
-running session's proxy, with `(auth)` when the helper answers it.
+`usage` error instead of reusing a browser that bypasses the proxy. Reopening it
+without `--proxy` reuses it as it is. `webskrap browser list` shows each running
+session's proxy, with `(auth)` when the helper answers it.
 
-Commands act on the session's current tab. Manage tabs with these commands:
+### Tabs
+
+Commands act on the session's current tab:
 
 ```bash
 webskrap browser tab-list              # * marks the current tab
@@ -433,14 +426,16 @@ webskrap browser tab-select 0          # index from tab-list, in opening order
 webskrap browser tab-close             # the current tab, or pass an index
 ```
 
-A popup or a new tab becomes current. When it closes, the tab selected before
-it is current again. When the current tab closes, the newest tab left is
+A popup or new tab becomes current. When it closes, the tab selected before it
+is current again. When the current tab closes, the newest remaining tab is
 current.
 
-Deliberate limitations versus the official Playwright CLI: Chromium-based
-browsers only, and no commands for network mocking, tracing, or video. `back` and `forward` always reload the page,
-because the back/forward cache is disabled to keep history navigation
-deterministic.
+### Limits
+
+Unlike the official Playwright CLI, `webskrap browser` supports only
+Chromium-based browsers and has no commands for network mocking, tracing or
+video. `back` and `forward` always reload the page, because the back/forward
+cache is off to keep history navigation deterministic.
 
 The [MCP server](/docs/user-guide/mcp/#interactive-browser-tools) exposes the
 same sessions to agents as `browser_*` tools.

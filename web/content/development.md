@@ -27,16 +27,16 @@ ruff check .
 ruff format --check .
 ```
 
-Before opening a pull request, add the browser tests and the coverage gate CI
-enforces:
+Before you open a pull request, also run the browser tests and the coverage
+gate that CI enforces:
 
 ```bash
 pytest -q -m "not live" --cov=webskrap --cov-report=term-missing --cov-fail-under=85
 ```
 
-CI runs the suite on Python 3.11, 3.12, 3.13, 3.14 and 3.15, type-checks `src/webskrap`
-with Pyright in `standard` mode, audits dependencies with `pip-audit`, and
-validates package metadata with `twine check` before any release upload.
+CI runs the suite on Python 3.11 to 3.15, type-checks `src/webskrap` with
+Pyright in `standard` mode, audits dependencies with `pip-audit`, and validates
+package metadata with `twine check` before any release upload.
 [CONTRIBUTING.md](https://github.com/kacigaya/webskrap/blob/main/CONTRIBUTING.md)
 has the full list.
 
@@ -54,15 +54,14 @@ bun run lint
 NEXT_PUBLIC_BASE_PATH=/webskrap bun run build
 ```
 
-Use the opt-in live tests only when you need to verify third-party bot-detection
-behavior:
+Run the opt-in live tests only to check third-party bot-detection behavior:
 
 ```bash
 WEBSKRAP_LIVE=1 pytest -q -m live
 ```
 
-They require network access, an installed Google Chrome, and public demo
-sites that can change independently from WebSkrap.
+They need network access, an installed Google Chrome, and public demo sites
+that can change without notice.
 
 Generate the headed and headless stealth report:
 
@@ -82,8 +81,8 @@ Open `.webskrap/reports/live-stealth-results.html`. For proxy DNS checks, set
 
 ## With uv
 
-The repository includes `uv.lock`, so you can run the same commands through
-`uv` without activating a shell environment:
+The repository includes `uv.lock`, so `uv` runs the same commands without an
+activated environment:
 
 ```bash
 uv run pytest -q
@@ -92,10 +91,5 @@ uv run ruff check .
 
 ## Publishing docs
 
-Docs are deployed by GitHub Actions from `main`.
-
-Repository settings must use:
-
-- Settings
-- Pages
-- Source: GitHub Actions
+GitHub Actions deploys the docs from `main`. In the repository, set
+Settings > Pages > Source to GitHub Actions.

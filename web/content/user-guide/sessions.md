@@ -5,7 +5,7 @@ description: Reuse cookies, local storage, and browser profiles across Python we
 
 # Sessions
 
-Sessions keep a browser context open across multiple requests.
+A session keeps one browser context open across requests.
 
 ```python
 import asyncio
@@ -30,8 +30,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Calling `client.session()` again with the same name returns the existing open
-session:
+`client.session()` with the same name returns the open session:
 
 ```python
 session = await client.session("default")
@@ -39,53 +38,51 @@ same_session = await client.session("default")
 assert session is same_session
 ```
 
-Close individual sessions when you are done with them, or let
-`WebSkrapClient.close()` close all sessions:
+Close a session when you are done, or let `WebSkrapClient.close()` close them
+all:
 
 ```python
 await session.close()
 await client.close_session("default")  # also forgets the named session
 ```
 
-Wait for active fetches before closing. Cancelling a caller waiting for a
-shared launch does not cancel other callers; the client retains ownership and
+Wait for active fetches before you close. Cancelling one caller that waits for
+a shared launch does not cancel the others. The client keeps ownership and
 closes the browser on shutdown.
 
 `session.fetch(..., decline_cookies=False)` overrides consent dismissal for one
-call without changing shared config. Omit it to use `SessionConfig.decline_cookies`.
-`solve_cloudflare=True`, `solve_datadome=True`, `solve_perimeterx=True` and
-`solve_recaptcha=True` work the same way for Cloudflare's Turnstile checkbox,
-DataDome's slider, HUMAN's Press & Hold button and a reCAPTCHA v2 or hCaptcha
-checkbox on a blocking page.
+call and leaves the shared config alone. Omit it to use
+`SessionConfig.decline_cookies`. The four `solve_*` options work the same way
+per call (see [Stealth](stealth.md#challenge-solvers)).
 
 ## Persistent storage
 
-Set `user_data_dir` to keep cookies, local storage, and browser profile state between runs.
+Set `user_data_dir` to keep cookies, local storage and profile state between
+runs.
 
 ```python
 config = SessionConfig(user_data_dir=Path(".webskrap/profile"))
 ```
 
-Use `storage_state` for a cookie and local-storage snapshot (Playwright's
-format) when
-you do not need a full persistent browser profile:
+When you do not need a full profile, use `storage_state`, a cookie and
+local-storage snapshot in Playwright's format:
 
 ```python
 config = SessionConfig(storage_state="state.json")
 ```
 
-`storage_state` is applied only for sessions without a persistent profile. If
-`user_data_dir` is set, the persistent profile directory owns browser state.
+`storage_state` applies only to sessions without a persistent profile. With
+`user_data_dir` set, the profile directory owns browser state.
 
-Both hold real credentials: cookies, local storage, and any logged-in session
-you established, unencrypted and surviving process exit. Put them somewhere
-only your user can read, and delete them when the work is done. The persistent
-sessions managed by `webskrap browser` do this for you: their directories
-under `~/.webskrap/browser/` are created `0700` on POSIX.
+Both hold real credentials: cookies, local storage and any logged-in session,
+unencrypted, and they survive process exit. Keep them where only your user can
+read them, and delete them when the work is done. `webskrap browser` does this
+for its sessions: their directories under `~/.webskrap/browser/` are created
+`0700` on POSIX.
 
 ## Headed debugging
 
-Set `headless=False` and keep a page open when you need to inspect behavior:
+To inspect behavior, set `headless=False` and keep a page open:
 
 ```python
 import asyncio
@@ -112,8 +109,7 @@ asyncio.run(main())
 
 ## Human-like clicks
 
-Sessions expose `human_click` for interactions that should behave more like a manual click
-than a mechanical click at the element's center.
+`human_click` clicks like a person instead of at the element's exact center.
 
 ```python
 async with WebSkrapClient() as client:
@@ -142,15 +138,15 @@ await session.human_click(
 )
 ```
 
-For keyboard input, `human_type` clicks into a field and types one key at a
-time with human timing:
+`human_type` clicks into a field and types one key at a time with human
+timing:
 
 ```python
 await session.human_type(page, "input[name='q']", "running shoes")
 ```
 
-See the [Humanizer](/docs/user-guide/humanizer/) guide for the focused behavior
-reference and safety boundaries.
+The [Humanizer](/docs/user-guide/humanizer/) guide covers the behavior and its
+safety limits.
 
 ## Common options
 

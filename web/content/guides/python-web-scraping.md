@@ -5,9 +5,13 @@ description: Learn Python web scraping with WebSkrap, real Chromium, browser pro
 
 # Python Web Scraping with WebSkrap
 
-WebSkrap is a Python web scraping toolkit for pages that need a real browser. It drives Chromium through its own Chrome DevTools Protocol client, with an async API, reusable browser sessions, coherent browser profiles, resource routing, and stealth defaults.
+WebSkrap scrapes pages that need a real browser. It drives Chromium through
+its own Chrome DevTools Protocol client, with an async API, reusable sessions,
+coherent browser profiles, resource routing and stealth defaults.
 
-Use it when a simple `requests` or `BeautifulSoup` script cannot see the content because the site renders data with JavaScript, relies on browser storage, or needs a realistic browser context.
+Use it when a `requests` or `BeautifulSoup` script cannot see the content,
+because the site renders data with JavaScript, relies on browser storage, or
+needs a realistic browser context.
 
 ## Install
 
@@ -37,13 +41,16 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`FetchResult` includes the final URL, status, headers, cookies, title, HTML/text output, timings, and optional screenshot path.
+`FetchResult` holds the final URL, status, headers, cookies, title, HTML or
+text, timings and an optional screenshot path.
 
 ## Why use a browser scraper?
 
-Modern websites often ship a small HTML shell and fill it with JavaScript. WebSkrap launches Chromium and drives it over CDP, so your scraper sees the page after browser navigation, redirects, cookies, and client-side rendering.
+Many sites ship a small HTML shell and fill it with JavaScript. WebSkrap
+launches Chromium and drives it over CDP, so your scraper sees the page after
+navigation, redirects, cookies and client-side rendering.
 
-Common use cases:
+Common uses:
 
 - Scrape JavaScript-heavy pages in Python.
 - Build data collection scripts that need browser state.

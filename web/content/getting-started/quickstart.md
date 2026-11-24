@@ -25,12 +25,12 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`result.text` is the final page HTML. Use `result.ok`, `result.headers`, and
-`result.cookies` when you need response metadata.
+`result.text` is the final page HTML. `result.ok`, `result.headers` and
+`result.cookies` carry response metadata.
 
 ## Save output
 
-Pass a screenshot path to capture the final page after navigation:
+Pass a screenshot path to capture the page after navigation:
 
 ```python
 result = await client.fetch(
@@ -42,7 +42,7 @@ result = await client.fetch(
 print(result.screenshot_path)
 ```
 
-Write HTML yourself when using the Python API:
+The Python API does not write HTML files, so write it yourself:
 
 ```python
 from pathlib import Path
@@ -52,7 +52,7 @@ Path("example.html").write_text(result.text, encoding="utf-8")
 
 ## Keep a headed browser open
 
-Use a session when you want the browser to remain open for inspection.
+A session keeps the browser open for inspection.
 
 ```python
 import asyncio
@@ -69,8 +69,8 @@ async def main() -> None:
 
     async with WebSkrapClient() as client:
         session = await client.session("dev", config=config)
-        page = await session.context.new_page()
-        await page.goto("https://example.com", wait_until="domcontentloaded")
+        page = await session.new_page()
+        await page.goto("https://example.com", wait_until="domcontentloaded", timeout_s=30)
 
         input("Press Enter to close browser...")
 
@@ -80,8 +80,7 @@ asyncio.run(main())
 
 ## Reuse browser state
 
-Use `user_data_dir` when cookies, local storage, or profile state should survive
-between runs:
+`user_data_dir` keeps cookies, local storage and profile state between runs:
 
 ```python
 import asyncio
@@ -105,13 +104,13 @@ asyncio.run(main())
 
 ## Human-like clicks
 
-Use `human_click` for manual interactions that should wait for the element, scroll it into
-view with the mouse wheel, pause briefly, move the mouse, and then click with a human
-button hold. `human_type` types into a field with human keystroke timing.
+`human_click` waits for the element, scrolls it into view with the mouse
+wheel, pauses, moves the mouse, then clicks with a human button hold.
+`human_type` types into a field with human keystroke timing.
 
 ```python
-page = await session.context.new_page()
-await page.goto("https://example.com", wait_until="domcontentloaded")
+page = await session.new_page()
+await page.goto("https://example.com", wait_until="domcontentloaded", timeout_s=30)
 await session.human_click(page, "label[for='radio1']")
 await session.human_type(page, "input[name='q']", "running shoes")
 ```
@@ -136,9 +135,8 @@ config = SessionConfig(resource_policy=ResourcePolicy.LITE)
 result = await client.fetch("https://example.com", profile=profile, config=config)
 ```
 
-`ResourcePolicy.LITE` blocks images, fonts, and media. Use
-`ResourcePolicy.DOCUMENTS` for HTML-focused extraction where stylesheets are not
-needed.
+`ResourcePolicy.LITE` blocks images, fonts and media. `ResourcePolicy.DOCUMENTS`
+also blocks stylesheets, for HTML extraction that does not need CSS.
 
 ## CLI fetch
 

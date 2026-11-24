@@ -5,7 +5,9 @@ description: Use WebSkrap to scrape JavaScript-rendered pages in Python with rea
 
 # Scrape JavaScript Pages with Python and Real Chromium
 
-Many web pages do not expose their main content in the initial HTML. WebSkrap drives Chromium through its own DevTools Protocol client so Python scripts can scrape JavaScript-rendered pages after the browser has loaded them.
+Many pages do not put their main content in the initial HTML. WebSkrap drives
+Chromium through its own DevTools Protocol client, so Python scripts can scrape
+JavaScript-rendered pages after the browser loads them.
 
 ## Browser-backed fetch
 
@@ -34,7 +36,8 @@ asyncio.run(main())
 
 ## Faster scraping with resource routing
 
-Images, fonts, media, and trackers often slow scraping down. WebSkrap supports resource policies so you can load only what the page needs.
+Images, fonts and media slow scraping down. A resource policy loads only what
+the page needs.
 
 ```python
 from webskrap import ResourcePolicy, SessionConfig
@@ -42,11 +45,12 @@ from webskrap import ResourcePolicy, SessionConfig
 config = SessionConfig(resource_policy=ResourcePolicy.LITE)
 ```
 
-Use `DOCUMENTS` when you only need top-level document HTML. Use `LITE` when pages need scripts or styles but not heavy media.
+Use `LITE` when pages need scripts or styles but not heavy media. `DOCUMENTS`
+also drops stylesheets, for when unstyled HTML is enough.
 
 ## Debug JavaScript pages
 
-For tricky pages, keep a headed browser open:
+For hard pages, keep a headed browser open:
 
 ```python
 from pathlib import Path
@@ -58,7 +62,7 @@ config = SessionConfig(
 )
 ```
 
-Then inspect what the browser actually sees before changing the scraper.
+Check what the browser sees before you change the scraper.
 
 ## Related docs
 
