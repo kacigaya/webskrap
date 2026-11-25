@@ -36,6 +36,7 @@ and it does not offer Google.
 | Main CLI commands | `src/webskrap/interfaces/cli.py` | `tests/interfaces/test_cli.py`, `tests/browser/test_diagnostics.py` |
 | Persistent browser state | `src/webskrap/browser/browser_session.py`, `src/webskrap/security/paths.py` | `tests/browser/test_browser_session_unit.py`, `tests/security/test_paths.py` |
 | Interactive browser commands | `src/webskrap/interfaces/browser_cli.py`, `src/webskrap/interfaces/mcp_browser.py` | `tests/interfaces/test_browser_cli.py`, `tests/browser/test_browser_integration.py`, `tests/interfaces/test_mcp.py` |
+| Live view (`browser watch`, `browser_watch`) | `src/webskrap/browser/live_view.py` | `tests/browser/test_live_view.py` |
 | MCP tools, resources, or annotations | `src/webskrap/interfaces/mcp_server.py` | `tests/interfaces/test_mcp.py`, `src/webskrap/interfaces/guide.md` |
 | Profiles or stealth defaults | `src/webskrap/config/profiles.py`, `src/webskrap/config/models.py`, `src/webskrap/scraping/client.py` | `tests/config/test_profiles.py`, opt-in bot-detection tests when needed |
 | Cookie rejection | `src/webskrap/browser/consent.py` | `tests/browser/test_consent.py`; `tests/live/test_consent_live.py` only for selector rot |
@@ -55,6 +56,7 @@ refresh that engine's fixture and fix that one extractor.
 | Find URLs for a query | `client.search()` | `webskrap search` | `search` |
 | Preserve cookies or storage | `client.session()` | `webskrap browser open` | `browser_open` |
 | See a rendered page or interact with canvas | `browser_session.view()` on a session page | `webskrap browser view` and `mouse` | `browser_view` and `browser_mouse` |
+| Let a person watch or drive a session | Not public | `webskrap browser watch` | `browser_watch` |
 | Click, fill, wait, or run a flow | `session.new_page()` and `human_click()` | `webskrap browser` | `browser_interact` and related tools |
 | Diagnose installation | Inspect raised error | `webskrap doctor` | `doctor` |
 
@@ -95,6 +97,20 @@ Run dependent actions sequentially within a session.
 This is the browser's rendered page, available headless without Xvfb. It does
 not show browser chrome, OS dialogs, or a desktop stream. One-shot fetch
 sessions are separate; open a persistent browser to drive a visual flow.
+`device_scale_factor` does not change this mapping: views stay in CSS pixels.
+
+## Live view for people
+
+`browser_watch` (MCP) and `webskrap browser watch` (CLI) serve a private
+loopback link that streams the session's current tab to a person, for example
+in T3 Code Preview. It is not a model input; use `browser_view` to look
+yourself. Hand over the full link: its fragment is the access token. Links
+expire after 15 minutes. `allow_scroll` / `--allow-scroll` adds scrolling, and
+`allow_control` / `--allow-control` adds clicks and typing.
+For a sharper view, open the session with `device_scale_factor=2` /
+`--device-scale-factor 2`. That changes `devicePixelRatio` for every page, so
+it is off by default. Details are in the [CLI](references/cli.md) and
+[MCP](references/mcp.md) references.
 Read the [CLI](references/cli.md) or [MCP](references/mcp.md) reference for examples.
 
 ## Guardrails
@@ -111,6 +127,8 @@ Read the [CLI](references/cli.md) or [MCP](references/mcp.md) reference for exam
   circumvention.
 - Do not commit cookies, storage state, proxy credentials, or persistent browser
   data such as `.webskrap/`.
+- Treat live-view links as credentials: never log, publish, or send them to
+  external services. Enable viewer control only when the user asks for it.
 - Preserve Chromium's sandbox by default. Any opt-out must remain explicit and
   outside page-controlled input.
 - Keep MCP file paths confined to their configured roots. Reject absolute paths,

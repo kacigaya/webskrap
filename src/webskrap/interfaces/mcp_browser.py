@@ -606,7 +606,9 @@ async def browser_watch(
     """Start a local live viewer and return its private link.
 
     Open the link in a browser on this machine. The link grants access to the
-    session viewport for 15 minutes or until the MCP server exits.
+    session viewport for 15 minutes or until the MCP server exits. The view
+    streams page changes and settles to a lossless frame. For a sharper view
+    on a high-density screen, open the session with device_scale_factor=2.
 
     Args:
         session: Browser session name.

@@ -89,8 +89,9 @@ Choose a tool
   browser_wait_for, then browser_close. Do not re-fetch to drive a flow.
 
 In a browser session
-- No visible window; virtual_display=True is not headless.
-  Shared with the browser CLI. browser_tabs picks the tab.
+- No visible window; virtual_display=True is not headless. browser_watch
+  gives the user a live link. Shared with the browser CLI; browser_tabs
+  picks the tab.
 - browser_find(text=...) locates known controls with refs and ancestor context.
   browser_snapshot(target=..., depth=...) scopes a tree; boxes=true adds geometry.
 - browser_text reads text without an accessibility tree; pattern= greps lines.
@@ -116,7 +117,7 @@ Keep results small
 Failures and boundaries
 Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
-browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
+browser_launch: `webskrap install`.
 Known challenge/block pages return blocked: follow its hint; do not retry.
 browser_goto reports it; solve_*=true passes it.
 browser_solve_captcha ticks a checkbox.
