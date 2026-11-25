@@ -14,12 +14,26 @@ from time import monotonic
 from urllib.parse import parse_qs
 
 from webskrap.browser import browser_session
-from webskrap.driver import cdp_session, targets
+from webskrap.driver import cdp_session, keyboard, targets
 from webskrap.driver.cdp import CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
 
 LIFETIME_S = 900
 FRAME_TIMEOUT_S = 5
+_CONTROL_KEYS = {
+    "Enter",
+    "Backspace",
+    "Delete",
+    "Tab",
+    "Home",
+    "End",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "PageUp",
+    "PageDown",
+}
 
 _HTML = b"""<!doctype html>
 <html lang="en">
@@ -33,7 +47,7 @@ img { max-width: 100vw; max-height: 100vh; }
 main:focus-visible { outline: 2px solid #fafafa; outline-offset: -3px; }
 p { position: fixed; bottom: 0; margin: 1rem; padding: .5rem; background: #171717; }
 </style>
-<main aria-label="WebSkrap browser preview" data-scroll="false">
+<main aria-label="WebSkrap browser preview" data-scroll="false" data-control="false">
 <img hidden alt="Live viewport of the WebSkrap browser">
 <p role="status">Connecting to WebSkrap...</p>
 </main>
@@ -43,11 +57,51 @@ const status = document.querySelector('p');
 const image = document.querySelector('img');
 const panel = document.querySelector('main');
 const headers = {Authorization: 'Bearer ' + token};
-let previous;
+let previous, target;
+const control = panel.dataset.control === 'true';
+const keys = new Set([
+  'Enter', 'Backspace', 'Delete', 'Tab', 'Home', 'End',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown',
+]);
+
+if (control) {
+  let queue = Promise.resolve();
+  panel.setAttribute('aria-label', 'Browser preview. Click to focus. Press Escape to exit.');
+  function send(path, body) {
+    const frameTarget = target;
+    if (!frameTarget) return;
+    queue = queue.then(async () => {
+      if (frameTarget !== target) return;
+      await fetch(path, {
+        method: 'POST', headers: {...headers, 'X-WebSkrap-Target': frameTarget}, body,
+        signal: AbortSignal.timeout(7000),
+      });
+    }).catch(() => {});
+  }
+  image.addEventListener('click', event => {
+    const box = image.getBoundingClientRect();
+    const x = (event.clientX - box.left) / box.width;
+    const y = (event.clientY - box.top) / box.height;
+    if (!(x >= 0 && x < 1 && y >= 0 && y < 1)) return;
+    panel.focus({preventScroll: true});
+    send('./click?' + new URLSearchParams({x, y}));
+  });
+  panel.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      panel.blur();
+      return;
+    }
+    if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey ||
+        (event.shiftKey && event.key === 'Tab')) return;
+    if (!keys.has(event.key) && Array.from(event.key).length !== 1) return;
+    event.preventDefault();
+    send('./key', event.key);
+  });
+}
 
 if (panel.dataset.scroll === 'true') {
   panel.tabIndex = 0;
-  panel.setAttribute('aria-label', 'Browser preview. Scroll with the wheel or arrow keys.');
+  if (!control) panel.setAttribute('aria-label', 'Browser preview. Scroll with the wheel or keys.');
   let dx = 0, dy = 0, x = 0.5, y = 0.5, sending = false;
   async function scroll() {
     if (sending) return;
@@ -84,7 +138,7 @@ if (panel.dataset.scroll === 'true') {
     void scroll();
   }, {passive: false});
   panel.addEventListener('keydown', event => {
-    if (image.hidden || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (control || image.hidden || event.ctrlKey || event.metaKey || event.altKey) return;
     const steps = {ArrowUp: -80, ArrowDown: 80, PageUp: -600, PageDown: 600,
                    ' ': event.shiftKey ? -600 : 600};
     if (!Object.hasOwn(steps, event.key)) return;
@@ -113,9 +167,13 @@ async function update() {
     }
     if (!response.ok) throw new Error();
     const next = URL.createObjectURL(await response.blob());
+    const nextTarget = response.headers.get('X-WebSkrap-Target');
+    if (target !== nextTarget) target = null;
     image.src = next;
     if (previous) URL.revokeObjectURL(previous);
     previous = next;
+    await image.decode();
+    target = nextTarget;
     image.hidden = false;
     status.hidden = true;
   } catch {
@@ -137,16 +195,23 @@ async def _capture(page: CDPPage) -> bytes:
     return base64.b64decode(shot["data"])
 
 
-async def _serve(session: str, ready: asyncio.Future[str], *, allow_scroll: bool) -> None:
+async def _serve(
+    session: str, ready: asyncio.Future[str], *, allow_scroll: bool, allow_control: bool
+) -> None:
     """Publish the viewer URL and serve it until expiry or cancellation."""
     directory, state = browser_session._open_state(session)
     loop = asyncio.get_running_loop()
     deadline = monotonic() + LIFETIME_S
     authorization = f"Bearer {secrets.token_urlsafe(32)}"
 
+    allow_scroll = allow_scroll or allow_control
     html = _HTML.replace(b'data-scroll="false"', b'data-scroll="true"') if allow_scroll else _HTML
+    if allow_control:
+        html = html.replace(b'data-control="false"', b'data-control="true"')
 
-    async def run(action: Callable[[CDPPage], Awaitable[bytes]]) -> bytes:
+    async def run(
+        action: Callable[[CDPPage], Awaitable[bytes]], expected_target: str | None
+    ) -> tuple[bytes, str]:
         _, current = browser_session._open_state(session)
         if (current["pid"], current["port"]) != (state["pid"], state["port"]):
             raise WebSkrapError("The watched session was replaced", code=ErrorCode.NO_SESSION)
@@ -157,7 +222,9 @@ async def _serve(session: str, ready: asyncio.Future[str], *, allow_scroll: bool
             timeout_ms=FRAME_TIMEOUT_S * 1000,
             read_only=True,
         ) as page:
-            return await action(page)
+            if expected_target is not None and page.target_id != expected_target:
+                raise WebSkrapError("The watched tab changed", code=ErrorCode.STALE_REF)
+            return await action(page), page.target_id
 
     class Handler(BaseHTTPRequestHandler):
         timeout = FRAME_TIMEOUT_S
@@ -165,9 +232,17 @@ async def _serve(session: str, ready: asyncio.Future[str], *, allow_scroll: bool
         def log_message(self, format: str, *args: object) -> None:
             pass
 
-        def respond(self, status: int, body: bytes = b"", mime: str = "text/plain") -> None:
+        def respond(
+            self,
+            status: int,
+            body: bytes = b"",
+            mime: str = "text/plain",
+            target: str | None = None,
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", mime)
+            if target is not None:
+                self.send_header("X-WebSkrap-Target", target)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -191,6 +266,18 @@ async def _serve(session: str, ready: asyncio.Future[str], *, allow_scroll: bool
 
         def do_POST(self) -> None:
             path, _, query = self.path.partition("?")
+            if allow_control and path in {"/click", "/key"}:
+                if not self.authorized():
+                    return
+                target = self.headers.get("X-WebSkrap-Target", "")
+                if not target:
+                    self.respond(400)
+                    return
+                if path == "/click":
+                    self.click(query, target)
+                else:
+                    self.key(target)
+                return
             if not allow_scroll or path != "/scroll":
                 self.respond(404)
                 return
@@ -219,29 +306,88 @@ async def _serve(session: str, ready: asyncio.Future[str], *, allow_scroll: bool
 
             self.perform(scroll, 204)
 
+        def click(self, query: str, target: str) -> None:
+            try:
+                values = parse_qs(query, strict_parsing=True, max_num_fields=2)
+                x, y = (float(values[key][0]) for key in ("x", "y"))
+                if not (0 <= x < 1 and 0 <= y < 1):
+                    raise ValueError
+            except (KeyError, ValueError):
+                self.respond(400)
+                return
+
+            async def click(page: CDPPage) -> bytes:
+                viewport = await cdp_session.viewport(page)
+                position = {
+                    "x": x * viewport["width"],
+                    "y": y * viewport["height"],
+                    "button": "left",
+                    "clickCount": 1,
+                }
+                await page.send("Input.dispatchMouseEvent", {"type": "mousePressed", **position})
+                await page.send("Input.dispatchMouseEvent", {"type": "mouseReleased", **position})
+                return b""
+
+            self.perform(click, 204, expected_target=target)
+
+        def key(self, target: str) -> None:
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 1 <= length <= 16:
+                    raise ValueError
+                body = self.rfile.read(length)
+                if len(body) != length:
+                    raise ValueError
+                key = body.decode("utf-8")
+                if key not in _CONTROL_KEYS and not (len(key) == 1 and key.isprintable()):
+                    raise ValueError
+            except (ValueError, TimeoutError):
+                self.respond(400)
+                return
+
+            async def press(page: CDPPage) -> bytes:
+                if key in _CONTROL_KEYS:
+                    await keyboard.press(page, key)
+                else:
+                    await page.send("Input.insertText", {"text": key})
+                return b""
+
+            self.perform(press, 204, expected_target=target)
+
+        def authorized(self) -> bool:
+            credential = self.headers.get("Authorization", "").encode("latin-1")
+            if not secrets.compare_digest(credential, authorization.encode("ascii")):
+                self.respond(404)
+                return False
+            if monotonic() >= deadline:
+                self.respond(410)
+                return False
+            return True
+
         def perform(
             self,
             action: Callable[[CDPPage], Awaitable[bytes]],
             status: int,
             mime: str = "text/plain",
+            *,
+            expected_target: str | None = None,
         ) -> None:
-            credential = self.headers.get("Authorization", "").encode("latin-1")
-            if not secrets.compare_digest(credential, authorization.encode("ascii")):
-                self.respond(404)
+            if not self.authorized():
                 return
-            if monotonic() >= deadline:
-                self.respond(410)
-                return
-            pending = asyncio.run_coroutine_threadsafe(run(action), loop)
+            pending = asyncio.run_coroutine_threadsafe(run(action, expected_target), loop)
             try:
-                body = pending.result(timeout=FRAME_TIMEOUT_S)
+                body, target = pending.result(timeout=FRAME_TIMEOUT_S)
             except FutureTimeout:
                 pending.cancel()
                 self.respond(503)
             except WebSkrapError as exc:
-                self.respond(410 if exc.code is ErrorCode.NO_SESSION else 503)
+                statuses: dict[ErrorCode | None, int] = {
+                    ErrorCode.NO_SESSION: 410,
+                    ErrorCode.STALE_REF: 409,
+                }
+                self.respond(statuses.get(exc.code, 503))
             else:
-                self.respond(status, body, mime)
+                self.respond(status, body, mime, target if status == 200 else None)
 
     with HTTPServer(("127.0.0.1", 0), Handler) as server:
         thread = Thread(target=server.serve_forever, daemon=True)
@@ -256,10 +402,14 @@ async def _serve(session: str, ready: asyncio.Future[str], *, allow_scroll: bool
             thread.join()
 
 
-async def start(session: str, *, allow_scroll: bool = False) -> tuple[str, asyncio.Task[None]]:
+async def start(
+    session: str, *, allow_scroll: bool = False, allow_control: bool = False
+) -> tuple[str, asyncio.Task[None]]:
     """Start a viewer and return its URL and lifetime task."""
     ready: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-    task = asyncio.create_task(_serve(session, ready, allow_scroll=allow_scroll))
+    task = asyncio.create_task(
+        _serve(session, ready, allow_scroll=allow_scroll, allow_control=allow_control)
+    )
     try:
         await asyncio.wait((ready, task), return_when=asyncio.FIRST_COMPLETED)
         if task.done():

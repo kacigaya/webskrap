@@ -707,11 +707,17 @@ def watch_command(
     allow_scroll: Annotated[
         bool, typer.Option("--allow-scroll", help="Let anyone with the link scroll the tab.")
     ] = False,
+    allow_control: Annotated[
+        bool,
+        typer.Option("--allow-control", help="Let anyone with the link click, type, and scroll."),
+    ] = False,
 ) -> None:
     """Serve a live view until Ctrl+C or link expiry."""
 
     async def watch() -> None:
-        url, task = await live_view.start(session, allow_scroll=allow_scroll)
+        url, task = await live_view.start(
+            session, allow_scroll=allow_scroll, allow_control=allow_control
+        )
         typer.echo(url)
         await task
 

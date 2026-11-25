@@ -15,15 +15,18 @@ from webskrap.driver.cdp import CDPConnection, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
 
 
-@pytest.mark.parametrize("allow_scroll", [False, True])
+@pytest.mark.parametrize(
+    ("allow_scroll", "allow_control"), [(False, False), (True, False), (False, True)]
+)
 async def test_live_view_requires_token_and_stays_with_original_session(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, allow_scroll: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, allow_scroll: bool, allow_control: bool
 ) -> None:
     state = {"pid": 42, "port": 9222}
     monkeypatch.setattr(
         live_view.browser_session, "_open_state", lambda _: (tmp_path, state.copy())
     )
     connection = AsyncMock(spec=CDPConnection)
+    clicks: list[object] = []
     frames = iter(("Zmlyc3Q=", "c2Vjb25k"))
 
     def send(method: str, params: object = None, **_: object) -> dict[str, object]:
@@ -36,13 +39,10 @@ async def test_live_view_requires_token_and_stays_with_original_session(
                 assert params == {"format": "jpeg", "quality": 90}
                 return {"data": next(frames)}
             case "Input.dispatchMouseEvent":
-                assert params == {
-                    "type": "mouseWheel",
-                    "x": 25,
-                    "y": 100,
-                    "deltaX": 0,
-                    "deltaY": 120,
-                }
+                clicks.append(params)
+                return {}
+            case "Input.insertText":
+                assert params == {"text": "A"}
                 return {}
             case "Target.detachFromTarget":
                 return {}
@@ -65,14 +65,31 @@ async def test_live_view_requires_token_and_stays_with_original_session(
         return {"width": 100, "height": 200}
 
     monkeypatch.setattr(live_view.cdp_session, "viewport", viewport)
-    url, task = await live_view.start("visual", allow_scroll=allow_scroll)
+    url, task = await live_view.start(
+        "visual", allow_scroll=allow_scroll, allow_control=allow_control
+    )
     address = urlsplit(url)
     assert address.hostname == "127.0.0.1"
 
-    def request(path: str, token: str = "", method: str = "GET") -> tuple[int, str | None, bytes]:
+    def request(
+        path: str,
+        token: str = "",
+        method: str = "GET",
+        *,
+        body: bytes | None = None,
+        target: str = "tab",
+    ) -> tuple[int, str | None, bytes]:
         conn = HTTPConnection(address.hostname, address.port, timeout=2)
         try:
-            conn.request(method, path, headers={"Authorization": f"Bearer {token}"})
+            conn.request(
+                method,
+                path,
+                body=body,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-WebSkrap-Target": target,
+                },
+            )
             reply = conn.getresponse()
             return reply.status, reply.getheader("Cache-Control"), reply.read()
         finally:
@@ -94,17 +111,40 @@ async def test_live_view_requires_token_and_stays_with_original_session(
         scroll = "/scroll?x=.25&y=.5&dx=0&dy=120"
         assert (await asyncio.to_thread(request, scroll, "wrong", "POST"))[0] == 404
         assert (await asyncio.to_thread(request, scroll, address.fragment, "POST"))[0] == (
-            204 if allow_scroll else 404
+            204 if allow_scroll or allow_control else 404
         )
-        if allow_scroll:
+        if allow_scroll or allow_control:
             bad = "/scroll?x=.25&y=.5&dx=0&dy=nan"
             assert (await asyncio.to_thread(request, bad, address.fragment, "POST"))[0] == 400
+        click = "/click?x=.25&y=.5"
+        assert (await asyncio.to_thread(request, click, "wrong", "POST"))[0] == 404
+        assert (await asyncio.to_thread(request, click, address.fragment, "POST"))[0] == (
+            204 if allow_control else 404
+        )
+        if allow_control:
+            assert (
+                await asyncio.to_thread(request, click, address.fragment, "POST", target="old")
+            )[0] == 409
+            assert (await asyncio.to_thread(request, "/key", address.fragment, "POST", body=b"A"))[
+                0
+            ] == 204
+            assert (
+                await asyncio.to_thread(
+                    request, "/key", address.fragment, "POST", body=b"Control+a"
+                )
+            )[0] == 400
         state["pid"] += 1
-        if allow_scroll:
+        if allow_scroll or allow_control:
             assert (await asyncio.to_thread(request, scroll, address.fragment, "POST"))[0] == 410
-        assert [call.args[0] for call in connection.send.await_args_list].count(
-            "Input.dispatchMouseEvent"
-        ) == int(allow_scroll)
+        expected: list[object] = []
+        if allow_scroll or allow_control:
+            expected.append({"type": "mouseWheel", "x": 25, "y": 100, "deltaX": 0, "deltaY": 120})
+        if allow_control:
+            for kind in ("mousePressed", "mouseReleased"):
+                expected.append(
+                    {"type": kind, "x": 25, "y": 100, "button": "left", "clickCount": 1}
+                )
+        assert clicks == expected
         assert (await asyncio.to_thread(request, "/frame", address.fragment))[0] == 410
         assert [call.args[0] for call in connection.send.await_args_list].count(
             "Page.captureScreenshot"

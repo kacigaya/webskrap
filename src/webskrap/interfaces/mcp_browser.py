@@ -596,7 +596,7 @@ async def close_viewers() -> None:
 
 
 async def browser_watch(
-    session: str = "default", allow_scroll: bool = False
+    session: str = "default", allow_scroll: bool = False, allow_control: bool = False
 ) -> dict[str, str | int]:
     """Start a local live viewer and return its private link.
 
@@ -606,9 +606,12 @@ async def browser_watch(
     Args:
         session: Browser session name.
         allow_scroll: Let anyone with the link scroll the tab. Off by default.
+        allow_control: Let anyone with the link click, type, and scroll. Off by default.
     """
     with _tool_errors():
-        url, task = await live_view.start(session, allow_scroll=allow_scroll)
+        url, task = await live_view.start(
+            session, allow_scroll=allow_scroll, allow_control=allow_control
+        )
     _viewers.add(task)
     task.add_done_callback(_viewers.discard)
     return {"url": url, "expires_in_s": live_view.LIFETIME_S}

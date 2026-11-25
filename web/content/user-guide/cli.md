@@ -324,7 +324,10 @@ on the same machine, or use a private port forward for a remote session.
 The viewer fits the full browser frame into the panel and saves no frames.
 Add `--allow-scroll` or set MCP `allow_scroll=true` to let the viewer scroll
 with a wheel, trackpad, or keyboard. Focus the preview to use the arrow and
-Page Up or Page Down keys. The agent can still scroll the session.
+Page Up or Page Down keys. Add `--allow-control` or set MCP
+`allow_control=true` to also click and type. Click inside the frame to focus it.
+Press Escape to leave viewer focus. Share control links only with people you
+trust to act in that browser session.
 Anyone with the full link and access to the local port can see the viewport. The link expires after 15 minutes.
 Press Ctrl+C to stop the CLI viewer early. MCP viewers stop when the server exits.
 

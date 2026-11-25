@@ -12,7 +12,7 @@ history, so they summarize each release rather than list every change.
 ### Added
 
 - `webskrap browser watch` and MCP `browser_watch` open a private live view
-  of a running browser session, with optional scroll access. Links expire after
+  of a running browser session, with optional click, typing, and scroll controls. Links expire after
   15 minutes.
 
 ## [4.1.1] - 2026-11-23
