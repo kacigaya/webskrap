@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from time import monotonic
 from typing import Any, TypeVar
 
-from webskrap.browser import actions, browser_session
+from webskrap.browser import actions, browser_session, live_view
 from webskrap.browser.browser_session import SessionPage
 from webskrap.config.models import GpuBackend
 from webskrap.config.parsing import (
@@ -58,6 +58,7 @@ class _Owned:
 #: Sessions this server process launched, by name. Only these close at server
 #: shutdown or when idle; sessions the CLI opened keep running.
 _owned: dict[str, _Owned] = {}
+_viewers: set[asyncio.Task[None]] = set()
 
 
 def idle_timeout_s() -> float | None:
@@ -586,6 +587,30 @@ async def browser_screenshot(
     return await _browser_action(session, run, actions.DEFAULT_ACTION_TIMEOUT_MS)
 
 
+async def close_viewers() -> None:
+    """Stop the HTTP viewers started by this MCP server."""
+    tasks = tuple(_viewers)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def browser_watch(session: str = "default") -> dict[str, str | int]:
+    """Start a local, read-only live viewer and return its private link.
+
+    Open the link in a browser on this machine. The link grants access to the
+    session viewport for 15 minutes or until the MCP server exits.
+
+    Args:
+        session: Browser session name.
+    """
+    with _tool_errors():
+        url, task = await live_view.start(session)
+    _viewers.add(task)
+    task.add_done_callback(_viewers.discard)
+    return {"url": url, "expires_in_s": live_view.LIFETIME_S}
+
+
 async def browser_view(session: str = "default") -> CallToolResult:
     """Return the rendered viewport as inline PNG image content and metadata.
 
@@ -811,6 +836,7 @@ def register_browser_tools(mcp: MCPServer) -> None:
         title="Screenshot the page",
         annotations=_hints(read_only=False, idempotent=True),
     )
+    mcp.add_tool(browser_watch, title="Watch the browser live", annotations=_hints(read_only=False))
     mcp.add_tool(browser_view, title="See the browser viewport", annotations=_hints(read_only=True))
     mcp.add_tool(
         browser_mouse,

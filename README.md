@@ -195,6 +195,18 @@ Coordinates are CSS pixels from the original image's top-left corner. Take a
 fresh view after a scroll or page change. Headless Chromium needs no Xvfb for
 this, but the agent's client and model must accept image input.
 
+### Watch a live session
+
+Run `webskrap browser watch visual` for an open session named `visual`, or call
+`browser_watch(session="visual")` through MCP. Open the full link in T3 Code
+Preview or in a local browser alongside Claude Code or Codex. Open the link
+on the same machine, or use a private port forward for a remote session.
+
+The viewer refreshes the current tab about twice per second while open.
+It accepts no browser input and saves no frames. Anyone with the full link and
+access to the local port can see the viewport. The link expires after 15 minutes.
+Press Ctrl+C to stop the CLI viewer early. MCP viewers stop when the server exits.
+
 ## Load only what the task needs
 
 The default resource policy is `auto`: text-only fetches skip images, fonts and

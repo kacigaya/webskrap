@@ -52,8 +52,10 @@ from webskrap.interfaces.mcp_browser import browser_tabs as browser_tabs
 from webskrap.interfaces.mcp_browser import browser_text as browser_text
 from webskrap.interfaces.mcp_browser import browser_view as browser_view
 from webskrap.interfaces.mcp_browser import browser_wait_for as browser_wait_for
+from webskrap.interfaces.mcp_browser import browser_watch as browser_watch
 from webskrap.interfaces.mcp_browser import (
     close_owned_sessions,
+    close_viewers,
     idle_timeout_s,
     reap_idle_sessions,
     register_browser_tools,
@@ -142,6 +144,7 @@ async def _fetch_lifespan(_server: MCPServer) -> AsyncIterator[FetchRuntime]:
                     reaper.cancel()
                     with suppress(asyncio.CancelledError, Exception):
                         await reaper
+                await close_viewers()
                 await close_owned_sessions()
             finally:
                 await runtime.close()

@@ -327,6 +327,7 @@ def test_browser_tools_are_registered() -> None:
         "browser_press",
         "browser_solve_captcha",
         "browser_screenshot",
+        "browser_watch",
         "browser_eval",
         "browser_close",
         "browser_list",

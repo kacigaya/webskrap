@@ -9,6 +9,11 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `webskrap browser watch` and MCP `browser_watch` open a private, read-only live
+  view of a running browser session. Viewer links expire after 15 minutes.
+
 ## [4.1.1] - 2026-11-23
 
 ### Fixed

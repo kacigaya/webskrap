@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 from collections.abc import Awaitable, Callable, Coroutine
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any, TypeVar
 from uuid import uuid4
@@ -21,7 +22,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from webskrap.browser import actions, browser_session
+from webskrap.browser import actions, browser_session, live_view
 from webskrap.browser.actions import DEFAULT_ACTION_TIMEOUT_MS, ELEMENT_ACTIONS
 from webskrap.browser.browser_session import DEFAULT_NAVIGATION_TIMEOUT_MS, SessionPage
 from webskrap.config.models import GpuBackend
@@ -698,6 +699,21 @@ def screenshot_command(
         print_json(result)
         return
     console.print(f"[bold]Screenshot:[/bold] {result['path']}", soft_wrap=True)
+
+
+@browser_app.command("watch")
+def watch_command(
+    session: Annotated[str, typer.Argument(help="Browser session name.")] = "default",
+) -> None:
+    """Serve a read-only live view until Ctrl+C or link expiry."""
+
+    async def watch() -> None:
+        url, task = await live_view.start(session)
+        typer.echo(url)
+        await task
+
+    with suppress(KeyboardInterrupt):
+        _run(watch(), "human")
 
 
 @browser_app.command("view")
