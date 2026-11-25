@@ -29,6 +29,7 @@ async def test_live_view_requires_token_and_stays_with_original_session(
     )
     monkeypatch.setattr(live_view, "FRAME_WAIT_S", 0.05)
     monkeypatch.setattr(live_view, "_IDLE_S", math.inf)
+    monkeypatch.setattr(live_view, "_MOTION_WINDOW_S", 0)
     connection = AsyncMock(spec=CDPConnection)
     clicks: list[object] = []
     casts: list[object] = []
@@ -36,9 +37,13 @@ async def test_live_view_requires_token_and_stays_with_original_session(
     handlers: dict[str, Callable[[dict[str, object]], None]] = {}
     connection.on.side_effect = lambda method, handler, **_: handlers.__setitem__(method, handler)
 
-    def emit(frame: bytes, session_id: int) -> None:
+    def emit(frame: bytes, session_id: int, metadata: dict[str, float] | None = None) -> None:
         handlers["Page.screencastFrame"](
-            {"data": base64.b64encode(frame).decode(), "sessionId": session_id}
+            {
+                "data": base64.b64encode(frame).decode(),
+                "sessionId": session_id,
+                "metadata": metadata or {},
+            }
         )
 
     def send(method: str, params: object = None, **_: object) -> dict[str, object]:
@@ -130,11 +135,12 @@ async def test_live_view_requires_token_and_stays_with_original_session(
         assert headers["Content-Type"] == "image/png"
         assert headers["Cache-Control"] == "no-store"
         assert (headers["X-WebSkrap-Frame"], headers["X-WebSkrap-Target"]) == ("1", "tab")
+        assert "X-WebSkrap-Size" not in headers
         assert (await asyncio.to_thread(request, "/frame?after=1", address.fragment))[0] == 204
-        emit(b"second", 2)
+        emit(b"second", 2, {"deviceWidth": 100.4, "deviceHeight": 50})
         status, headers, body = await asyncio.to_thread(request, "/frame?after=1", address.fragment)
         assert (status, body, headers["Content-Type"]) == (200, b"second", "image/jpeg")
-        assert headers["X-WebSkrap-Frame"] == "2"
+        assert (headers["X-WebSkrap-Frame"], headers["X-WebSkrap-Size"]) == ("2", "100x50")
         scroll = "/scroll?x=.25&y=.5&dx=0&dy=120"
         assert (await asyncio.to_thread(request, scroll, "wrong", "POST"))[0] == 404
         assert (await asyncio.to_thread(request, scroll, address.fragment, "POST"))[0] == (
@@ -226,11 +232,17 @@ async def test_live_view_streams_motion_as_jpeg_and_follows_the_current_tab(
             await asyncio.sleep(0.01)
         assert feed.page is not None
         for number in range(3):
-            handlers["Page.screencastFrame"]({"data": "AA==", "sessionId": number})
+            handlers["Page.screencastFrame"](
+                {
+                    "data": "AA==",
+                    "sessionId": number,
+                    "metadata": {"deviceWidth": 100, "deviceHeight": 50},
+                }
+            )
         while len(casts) < 3:
             await asyncio.sleep(0.01)
-        assert casts[1:] == [{"format": "jpeg", "quality": 85}, {"format": "png"}]
-        assert (feed.number, feed.target) == (3, "tab")
+        assert casts[1:] == [{"format": "jpeg", "quality": 90}, {"format": "png"}]
+        assert (feed.number, feed.target, feed.size) == (3, "tab", "100x50")
         pages.append("popup")
         await cast
     assert feed.page is None
@@ -265,7 +277,7 @@ async def test_live_view_pauses_the_screencast_without_viewers(
             await asyncio.sleep(0.1)
             assert "Page.screencastFrameAck" not in sent
             assert sent.count("Page.startScreencast") == 1
-            assert await feed.after(0) == (b"\x00", "tab", 3)
+            assert await feed.after(0) == (b"\x00", "tab", 3, "")
             while sent.count("Page.startScreencast") < 2:
                 await asyncio.sleep(0.01)
         assert sent.count("Page.startScreencast") == 2

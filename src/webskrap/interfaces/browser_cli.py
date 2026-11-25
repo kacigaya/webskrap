@@ -228,6 +228,18 @@ def open_command(
         str | None,
         typer.Option("--profile", "-p", help="Bundled profile for --profile-mode locale."),
     ] = None,
+    device_scale_factor: Annotated[
+        float | None,
+        typer.Option(
+            "--device-scale-factor",
+            min=1,
+            max=4,
+            help=(
+                "Render 1 to 4 device pixels per CSS pixel for sharper screenshots and live "
+                "views. Pages see it as devicePixelRatio, which changes the fingerprint."
+            ),
+        ),
+    ] = None,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -269,6 +281,7 @@ def open_command(
             gpu=gpu,
             profile_mode=mode,
             profile=profile,
+            device_scale_factor=device_scale_factor,
         ),
         output_format,
     )

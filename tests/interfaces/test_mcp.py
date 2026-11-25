@@ -1017,6 +1017,7 @@ def test_browser_open_passes_the_webrtc_policy(monkeypatch: Any) -> None:
             "gpu": GpuBackend.AUTO,
             "profile_mode": "native",
             "profile": None,
+            "device_scale_factor": None,
         }
     ]
 
@@ -1032,7 +1033,11 @@ def test_browser_open_passes_the_stealth_launch_settings(monkeypatch: Any) -> No
 
     asyncio.run(
         mcp_server.browser_open(
-            virtual_display=True, gpu=GpuBackend.MESA, profile_mode="locale", profile="desktop-edge"
+            virtual_display=True,
+            gpu=GpuBackend.MESA,
+            profile_mode="locale",
+            profile="desktop-edge",
+            device_scale_factor=2,
         )
     )
 
@@ -1040,6 +1045,7 @@ def test_browser_open_passes_the_stealth_launch_settings(monkeypatch: Any) -> No
     assert calls[0]["gpu"] is GpuBackend.MESA
     assert calls[0]["profile_mode"] == "locale"
     assert calls[0]["profile"] == "desktop-edge"
+    assert calls[0]["device_scale_factor"] == 2
 
 
 def test_browser_open_refuses_full_profile_mode() -> None:

@@ -26,8 +26,8 @@ LIFETIME_S = 900
 FRAME_TIMEOUT_S = 5
 FRAME_WAIT_S = 2
 _FRAME_PACE_S = 1 / 30
-_JPEG_QUALITY = 85
-_MOTION_FRAMES = 3
+_JPEG_QUALITY = 90
+_MOTION_FRAMES = 2
 _MOTION_WINDOW_S = 0.3
 _SETTLE_S = 0.25
 _TAB_CHECK_S = 0.5
@@ -57,21 +57,21 @@ _HTML = b"""<!doctype html>
 <style>
 body { margin: 0; background: #171717; color: #fafafa; font: 1rem system-ui; }
 main { position: fixed; inset: 0; display: grid; place-items: center; }
-img { max-width: 100vw; max-height: 100vh; }
 main:focus-visible { outline: 2px solid #fafafa; outline-offset: -3px; }
 p { position: fixed; bottom: 0; margin: 1rem; padding: .5rem; background: #171717; }
 </style>
 <main aria-label="WebSkrap browser preview" data-scroll="false" data-control="false">
-<img hidden alt="Live viewport of the WebSkrap browser">
+<canvas hidden role="img" aria-label="Live viewport of the WebSkrap browser"></canvas>
 <p role="status">Connecting to WebSkrap...</p>
 </main>
 <script>
 const token = location.hash.slice(1);
 const status = document.querySelector('p');
-const image = document.querySelector('img');
+const image = document.querySelector('canvas');
+const context = image.getContext('2d');
 const panel = document.querySelector('main');
 const headers = {Authorization: 'Bearer ' + token};
-let previous, target, frame = 0;
+let latest, target, frame = 0, painting = 0;
 const control = panel.dataset.control === 'true';
 const keys = new Set([
   'Enter', 'Backspace', 'Delete', 'Tab', 'Home', 'End',
@@ -163,6 +163,33 @@ if (panel.dataset.scroll === 'true') {
   });
 }
 
+async function paint({blob, size}) {
+  const id = ++painting;
+  const full = await createImageBitmap(blob);
+  const [cssWidth, cssHeight] = size || [full.width, full.height];
+  const scale = Math.min(1, innerWidth / cssWidth, innerHeight / cssHeight);
+  const width = cssWidth * scale, height = cssHeight * scale;
+  const pixels = Math.round(width * devicePixelRatio);
+  const bitmap = pixels < full.width ? await createImageBitmap(full, {
+    resizeWidth: pixels,
+    resizeHeight: Math.round(height * devicePixelRatio),
+    resizeQuality: 'high',
+  }) : full;
+  if (bitmap !== full) full.close();
+  if (id === painting) {
+    image.width = bitmap.width;
+    image.height = bitmap.height;
+    image.style.width = width + 'px';
+    image.style.height = height + 'px';
+    context.drawImage(bitmap, 0, 0);
+  }
+  bitmap.close();
+}
+
+addEventListener('resize', () => {
+  if (latest) paint(latest).catch(() => {});
+});
+
 async function update() {
   if (!token) {
     status.textContent = 'Open the full viewer link from WebSkrap.';
@@ -181,16 +208,13 @@ async function update() {
     }
     if (!response.ok) throw new Error();
     if (response.status === 200) {
-      const next = URL.createObjectURL(await response.blob());
+      const size = (response.headers.get('X-WebSkrap-Size') || '').split('x').map(Number);
+      const known = size.length === 2 && size.every(n => n > 0);
+      latest = {blob: await response.blob(), size: known ? size : null};
       const nextTarget = response.headers.get('X-WebSkrap-Target');
       frame = Number(response.headers.get('X-WebSkrap-Frame'));
       if (target !== nextTarget) target = null;
-      const loader = new Image();
-      loader.src = next;
-      await loader.decode();
-      image.src = next;
-      if (previous) URL.revokeObjectURL(previous);
-      previous = next;
+      await paint(latest);
       target = nextTarget;
       image.hidden = false;
       status.hidden = true;
@@ -216,14 +240,15 @@ class _Feed:
         self.page: CDPPage | None = None
         self.frame = b""
         self.target = ""
+        self.size = ""
         self.number = 0
         self.gone = False
         self.polled = -math.inf
         self._fresh = asyncio.Event()
         self._demand = asyncio.Event()
 
-    def publish(self, frame: bytes, target: str) -> None:
-        self.frame, self.target = frame, target
+    def publish(self, frame: bytes, target: str, size: str) -> None:
+        self.frame, self.target, self.size = frame, target, size
         self.number += 1
         self.wake()
 
@@ -240,7 +265,7 @@ class _Feed:
             self._demand.clear()
             await self._demand.wait()
 
-    async def after(self, number: int) -> tuple[bytes, str, int]:
+    async def after(self, number: int) -> tuple[bytes, str, int, str]:
         """Wait briefly for a frame newer than ``number``; an empty frame means none came."""
         self.polled = asyncio.get_running_loop().time()
         self._demand.set()
@@ -252,8 +277,8 @@ class _Feed:
         if self.page is None:
             raise WebSkrapError("The live view is reconnecting")
         if self.number <= number:
-            return b"", self.target, self.number
-        return self.frame, self.target, self.number
+            return b"", self.target, self.number, self.size
+        return self.frame, self.target, self.number, self.size
 
 
 async def _cast(page: CDPPage, directory: Path, feed: _Feed, check: Callable[[], None]) -> None:
@@ -307,7 +332,11 @@ async def _cast(page: CDPPage, directory: Path, feed: _Feed, check: Callable[[],
 
     def on_frame(params: dict[str, Any]) -> None:
         nonlocal lossless, settle
-        feed.publish(base64.b64decode(params["data"]), page.target_id)
+        metadata = params.get("metadata", {})
+        size = ""
+        if "deviceWidth" in metadata and "deviceHeight" in metadata:
+            size = f"{round(metadata['deviceWidth'])}x{round(metadata['deviceHeight'])}"
+        feed.publish(base64.b64decode(params["data"]), page.target_id, size)
         spawn(ack(params["sessionId"]))
         if feed.idle():
             # A restart would act as an ack and keep an unwatched stream running.
@@ -401,7 +430,7 @@ async def _serve(
         await action(page)
         return page.target_id
 
-    async def next_frame(number: int) -> tuple[bytes, str, int]:
+    async def next_frame(number: int) -> tuple[bytes, str, int, str]:
         check()
         return await feed.after(number)
 
@@ -429,7 +458,7 @@ async def _serve(
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-                "connect-src 'self'; img-src blob:; base-uri 'none'; frame-ancestors 'none'",
+                "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
             )
             with suppress(ConnectionError, TimeoutError):
                 self.end_headers()
@@ -458,14 +487,15 @@ async def _serve(
             result = self.wait(next_frame(number), FRAME_WAIT_S + FRAME_TIMEOUT_S)
             if result is None:
                 return
-            body, target, number = result
+            body, target, number, size = result
             if not body:
                 self.respond(204)
                 return
             mime = "image/png" if body.startswith(_PNG_SIGNATURE) else "image/jpeg"
-            self.respond(
-                200, body, mime, {"X-WebSkrap-Target": target, "X-WebSkrap-Frame": str(number)}
-            )
+            headers = {"X-WebSkrap-Target": target, "X-WebSkrap-Frame": str(number)}
+            if size:
+                headers["X-WebSkrap-Size"] = size
+            self.respond(200, body, mime, headers)
 
         def do_POST(self) -> None:
             path, _, query = self.path.partition("?")

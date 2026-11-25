@@ -323,6 +323,10 @@ on the same machine, or use a private port forward for a remote session.
 
 The viewer fits the full browser frame into the panel and saves no frames.
 It streams the page as it changes and shows a lossless image once the page is still.
+For a sharper view on a high-density screen, open the session with
+`--device-scale-factor 2` or MCP `device_scale_factor=2`. Pages then see
+`devicePixelRatio` 2, which changes the browser fingerprint. Rendering four
+times the pixels lowers the frame rate on a CPU-only host.
 Add `--allow-scroll` or set MCP `allow_scroll=true` to let the viewer scroll
 with a wheel, trackpad, or keyboard. Focus the preview to use the arrow and
 Page Up or Page Down keys. Add `--allow-control` or set MCP

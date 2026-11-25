@@ -290,6 +290,32 @@ def test_fake_media_devices_are_opt_in() -> None:
     assert config.browser_args().count(flag) == 1
 
 
+def test_device_scale_factor_is_opt_in_and_keeps_the_css_screen() -> None:
+    flag = "--force-device-scale-factor"
+    profile = Path("/profiles/hidpi")
+    plain = SessionConfig(headless=True, user_data_dir=profile).browser_args()
+    scaled = SessionConfig(headless=True, device_scale_factor=2, user_data_dir=profile)
+
+    args = scaled.browser_args()
+
+    assert not any(arg.startswith(flag) for arg in plain)
+    assert f"{flag}=2" in args
+    assert [a for a in args if a.startswith("--window-")] == [
+        a for a in plain if a.startswith("--window-")
+    ]
+    screen = next(arg for arg in plain if arg.startswith("--screen-info="))
+    doubled = re.sub(r"\d+", lambda match: str(int(match.group()) * 2), screen)
+    assert doubled in args
+    assert SessionConfig(virtual_display=True, device_scale_factor=1.5).virtual_screen() == (
+        Viewport(width=2880, height=1620)
+    )
+    own = SessionConfig(device_scale_factor=2, launch_args=[f"{flag}=3"]).browser_args()
+    assert [arg for arg in own if arg.startswith(flag)] == [f"{flag}=3"]
+    for invalid in (0.5, 5):
+        with pytest.raises(ValidationError):
+            SessionConfig(device_scale_factor=invalid)
+
+
 def test_headless_screen_size_is_configurable() -> None:
     config = SessionConfig(headless=True, headless_screen=Viewport(width=1366, height=768))
 

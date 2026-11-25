@@ -138,6 +138,7 @@ async def browser_open(
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
     solve_recaptcha: bool = False,
+    device_scale_factor: float | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session with no visible window.
 
@@ -188,6 +189,9 @@ async def browser_open(
         profile_mode: native (default; the browser's own identity) or locale
             (the profile's timezone and languages, set at launch; Linux).
         profile: Bundled profile for locale mode; desktop-chrome when null.
+        device_scale_factor: Render 1 to 4 device pixels per CSS pixel for
+            sharper screenshots and live views. Off by default: pages see it
+            as devicePixelRatio, which changes the fingerprint.
 
     These launch settings are fixed: reopening a running session with a
     different requested value is refused.
@@ -207,6 +211,7 @@ async def browser_open(
             gpu=gpu,
             profile_mode=parse_session_profile_mode(profile_mode),
             profile=profile,
+            device_scale_factor=device_scale_factor,
         )
         owned = _owned.get(session)
         if not payload["reused"]:
