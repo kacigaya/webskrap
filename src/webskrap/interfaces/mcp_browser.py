@@ -595,17 +595,20 @@ async def close_viewers() -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def browser_watch(session: str = "default") -> dict[str, str | int]:
-    """Start a local, read-only live viewer and return its private link.
+async def browser_watch(
+    session: str = "default", allow_scroll: bool = False
+) -> dict[str, str | int]:
+    """Start a local live viewer and return its private link.
 
     Open the link in a browser on this machine. The link grants access to the
     session viewport for 15 minutes or until the MCP server exits.
 
     Args:
         session: Browser session name.
+        allow_scroll: Let anyone with the link scroll the tab. Off by default.
     """
     with _tool_errors():
-        url, task = await live_view.start(session)
+        url, task = await live_view.start(session, allow_scroll=allow_scroll)
     _viewers.add(task)
     task.add_done_callback(_viewers.discard)
     return {"url": url, "expires_in_s": live_view.LIFETIME_S}

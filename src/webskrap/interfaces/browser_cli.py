@@ -704,11 +704,14 @@ def screenshot_command(
 @browser_app.command("watch")
 def watch_command(
     session: Annotated[str, typer.Argument(help="Browser session name.")] = "default",
+    allow_scroll: Annotated[
+        bool, typer.Option("--allow-scroll", help="Let anyone with the link scroll the tab.")
+    ] = False,
 ) -> None:
-    """Serve a read-only live view until Ctrl+C or link expiry."""
+    """Serve a live view until Ctrl+C or link expiry."""
 
     async def watch() -> None:
-        url, task = await live_view.start(session)
+        url, task = await live_view.start(session, allow_scroll=allow_scroll)
         typer.echo(url)
         await task
 

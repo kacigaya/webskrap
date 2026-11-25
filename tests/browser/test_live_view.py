@@ -11,12 +11,13 @@ from urllib.parse import urlsplit
 import pytest
 
 from webskrap.browser import live_view
-from webskrap.driver.cdp import CDPConnection
+from webskrap.driver.cdp import CDPConnection, CDPPage
 from webskrap.errors import ErrorCode, WebSkrapError
 
 
+@pytest.mark.parametrize("allow_scroll", [False, True])
 async def test_live_view_requires_token_and_stays_with_original_session(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, allow_scroll: bool
 ) -> None:
     state = {"pid": 42, "port": 9222}
     monkeypatch.setattr(
@@ -34,6 +35,15 @@ async def test_live_view_requires_token_and_stays_with_original_session(
             case "Page.captureScreenshot":
                 assert params == {"format": "jpeg", "quality": 90}
                 return {"data": next(frames)}
+            case "Input.dispatchMouseEvent":
+                assert params == {
+                    "type": "mouseWheel",
+                    "x": 25,
+                    "y": 100,
+                    "deltaX": 0,
+                    "deltaY": 120,
+                }
+                return {}
             case "Target.detachFromTarget":
                 return {}
             case _:
@@ -50,14 +60,19 @@ async def test_live_view_requires_token_and_stays_with_original_session(
         yield connection
 
     monkeypatch.setattr(live_view.targets, "connect", connect)
-    url, task = await live_view.start("visual")
+
+    async def viewport(_: CDPPage) -> dict[str, int]:
+        return {"width": 100, "height": 200}
+
+    monkeypatch.setattr(live_view.cdp_session, "viewport", viewport)
+    url, task = await live_view.start("visual", allow_scroll=allow_scroll)
     address = urlsplit(url)
     assert address.hostname == "127.0.0.1"
 
-    def request(path: str, token: str = "") -> tuple[int, str | None, bytes]:
+    def request(path: str, token: str = "", method: str = "GET") -> tuple[int, str | None, bytes]:
         conn = HTTPConnection(address.hostname, address.port, timeout=2)
         try:
-            conn.request("GET", path, headers={"Authorization": f"Bearer {token}"})
+            conn.request(method, path, headers={"Authorization": f"Bearer {token}"})
             reply = conn.getresponse()
             return reply.status, reply.getheader("Cache-Control"), reply.read()
         finally:
@@ -76,7 +91,20 @@ async def test_live_view_requires_token_and_stays_with_original_session(
             b"first",
         )
         assert (await asyncio.to_thread(request, "/frame", address.fragment))[2] == b"second"
+        scroll = "/scroll?x=.25&y=.5&dx=0&dy=120"
+        assert (await asyncio.to_thread(request, scroll, "wrong", "POST"))[0] == 404
+        assert (await asyncio.to_thread(request, scroll, address.fragment, "POST"))[0] == (
+            204 if allow_scroll else 404
+        )
+        if allow_scroll:
+            bad = "/scroll?x=.25&y=.5&dx=0&dy=nan"
+            assert (await asyncio.to_thread(request, bad, address.fragment, "POST"))[0] == 400
         state["pid"] += 1
+        if allow_scroll:
+            assert (await asyncio.to_thread(request, scroll, address.fragment, "POST"))[0] == 410
+        assert [call.args[0] for call in connection.send.await_args_list].count(
+            "Input.dispatchMouseEvent"
+        ) == int(allow_scroll)
         assert (await asyncio.to_thread(request, "/frame", address.fragment))[0] == 410
         assert [call.args[0] for call in connection.send.await_args_list].count(
             "Page.captureScreenshot"

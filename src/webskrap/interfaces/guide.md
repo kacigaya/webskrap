@@ -264,7 +264,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_wait_for` | `url`, `title`, `matched` |
 | `browser_solve_captcha` | `url`, `title`, `captcha` (`provider`, `state`: `checked`, `challenge`, `gone`, `timeout`, `not_found`) |
 | `browser_eval` | `result`, `result_length`, `result_truncated`, and `result_json` when clipped |
-| `browser_watch` | Private, read-only live viewer link for a local browser. Expires after 15 minutes. |
+| `browser_watch` | Private live viewer link with optional `allow_scroll`. Expires after 15 minutes. |
 | `browser_view` | Inline PNG plus `url`, `title`, `width`, `height`, `scroll_x`, `scroll_y`, `coordinate_system`, `mime_type` |
 | `browser_screenshot` | `url`, `title`, `path`, and `clip` with `target` |
 | `browser_close` | `closed` |
