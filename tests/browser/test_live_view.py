@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import base64
+import math
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from http.client import HTTPConnection
 from pathlib import Path
@@ -25,9 +27,19 @@ async def test_live_view_requires_token_and_stays_with_original_session(
     monkeypatch.setattr(
         live_view.browser_session, "_open_state", lambda _: (tmp_path, state.copy())
     )
+    monkeypatch.setattr(live_view, "FRAME_WAIT_S", 0.05)
+    monkeypatch.setattr(live_view, "_IDLE_S", math.inf)
     connection = AsyncMock(spec=CDPConnection)
     clicks: list[object] = []
-    frames = iter(("Zmlyc3Q=", "c2Vjb25k"))
+    casts: list[object] = []
+    acks: list[object] = []
+    handlers: dict[str, Callable[[dict[str, object]], None]] = {}
+    connection.on.side_effect = lambda method, handler, **_: handlers.__setitem__(method, handler)
+
+    def emit(frame: bytes, session_id: int) -> None:
+        handlers["Page.screencastFrame"](
+            {"data": base64.b64encode(frame).decode(), "sessionId": session_id}
+        )
 
     def send(method: str, params: object = None, **_: object) -> dict[str, object]:
         match method:
@@ -35,9 +47,15 @@ async def test_live_view_requires_token_and_stays_with_original_session(
                 return {"targetInfos": [{"type": "page", "targetId": "tab"}]}
             case "Target.attachToTarget":
                 return {"sessionId": "attached"}
-            case "Page.captureScreenshot":
-                assert params == {"format": "jpeg", "quality": 90}
-                return {"data": next(frames)}
+            case "Page.stopScreencast":
+                return {}
+            case "Page.startScreencast":
+                casts.append(params)
+                emit(b"\x89PNG\r\n\x1a\nfirst", 1)
+                return {}
+            case "Page.screencastFrameAck":
+                acks.append(params)
+                return {}
             case "Input.dispatchMouseEvent":
                 clicks.append(params)
                 return {}
@@ -78,7 +96,7 @@ async def test_live_view_requires_token_and_stays_with_original_session(
         *,
         body: bytes | None = None,
         target: str = "tab",
-    ) -> tuple[int, str | None, bytes]:
+    ) -> tuple[int, dict[str, str], bytes]:
         conn = HTTPConnection(address.hostname, address.port, timeout=2)
         try:
             conn.request(
@@ -91,23 +109,32 @@ async def test_live_view_requires_token_and_stays_with_original_session(
                 },
             )
             reply = conn.getresponse()
-            return reply.status, reply.getheader("Cache-Control"), reply.read()
+            return reply.status, dict(reply.getheaders()), reply.read()
         finally:
             conn.close()
 
     try:
-        status, cache, html = await asyncio.to_thread(request, "/")
-        assert (status, cache) == (200, "no-store")
+        status, headers, html = await asyncio.to_thread(request, "/")
+        assert (status, headers["Cache-Control"]) == (200, "no-store")
         assert b"WebSkrap Live View" in html
         assert address.fragment.encode() not in html
-        assert (await asyncio.to_thread(request, "/frame", "wrong"))[0] == 404
-        connection.send.assert_not_awaited()
-        assert await asyncio.to_thread(request, "/frame", address.fragment) == (
-            200,
-            "no-store",
-            b"first",
-        )
-        assert (await asyncio.to_thread(request, "/frame", address.fragment))[2] == b"second"
+        assert (await asyncio.to_thread(request, "/frame?after=0", "wrong"))[0] == 404
+        assert (await asyncio.to_thread(request, "/frame", address.fragment))[0] == 400
+        assert (await asyncio.to_thread(request, "/frame?after=-1", address.fragment))[0] == 400
+        async with asyncio.timeout(2):
+            while not casts:
+                await asyncio.sleep(0.01)
+        assert casts == [{"format": "png"}]
+        status, headers, body = await asyncio.to_thread(request, "/frame?after=0", address.fragment)
+        assert (status, body) == (200, b"\x89PNG\r\n\x1a\nfirst")
+        assert headers["Content-Type"] == "image/png"
+        assert headers["Cache-Control"] == "no-store"
+        assert (headers["X-WebSkrap-Frame"], headers["X-WebSkrap-Target"]) == ("1", "tab")
+        assert (await asyncio.to_thread(request, "/frame?after=1", address.fragment))[0] == 204
+        emit(b"second", 2)
+        status, headers, body = await asyncio.to_thread(request, "/frame?after=1", address.fragment)
+        assert (status, body, headers["Content-Type"]) == (200, b"second", "image/jpeg")
+        assert headers["X-WebSkrap-Frame"] == "2"
         scroll = "/scroll?x=.25&y=.5&dx=0&dy=120"
         assert (await asyncio.to_thread(request, scroll, "wrong", "POST"))[0] == 404
         assert (await asyncio.to_thread(request, scroll, address.fragment, "POST"))[0] == (
@@ -145,10 +172,8 @@ async def test_live_view_requires_token_and_stays_with_original_session(
                     {"type": kind, "x": 25, "y": 100, "button": "left", "clickCount": 1}
                 )
         assert clicks == expected
-        assert (await asyncio.to_thread(request, "/frame", address.fragment))[0] == 410
-        assert [call.args[0] for call in connection.send.await_args_list].count(
-            "Page.captureScreenshot"
-        ) == 2
+        assert (await asyncio.to_thread(request, "/frame?after=0", address.fragment))[0] == 410
+        assert {"sessionId": 1} in acks
         assert not list(tmp_path.iterdir())
     finally:
         task.cancel()
@@ -166,3 +191,86 @@ async def test_live_view_reports_missing_session(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(live_view.browser_session, "_open_state", missing)
     with pytest.raises(WebSkrapError, match="session is not open"):
         await live_view.start("missing")
+
+
+async def test_live_view_streams_motion_as_jpeg_and_follows_the_current_tab(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name, value in (
+        ("_FRAME_PACE_S", 0),
+        ("_SETTLE_S", 0.05),
+        ("_TAB_CHECK_S", 0.02),
+        ("_IDLE_S", math.inf),
+    ):
+        monkeypatch.setattr(live_view, name, value)
+    connection = AsyncMock(spec=CDPConnection)
+    handlers: dict[str, Callable[[dict[str, object]], None]] = {}
+    connection.on.side_effect = lambda method, handler, **_: handlers.__setitem__(method, handler)
+    casts: list[object] = []
+    pages = ["tab"]
+
+    def send(method: str, params: object = None, **_: object) -> dict[str, object]:
+        if method == "Page.startScreencast":
+            casts.append(params)
+        if method == "Target.getTargets":
+            return {"targetInfos": [{"type": "page", "targetId": page} for page in pages]}
+        return {}
+
+    connection.send.side_effect = send
+    feed = live_view._Feed()
+    cast = asyncio.create_task(
+        live_view._cast(CDPPage(connection, "attached", "tab"), tmp_path, feed, lambda: None)
+    )
+    async with asyncio.timeout(2):
+        while casts != [{"format": "png"}]:
+            await asyncio.sleep(0.01)
+        assert feed.page is not None
+        for number in range(3):
+            handlers["Page.screencastFrame"]({"data": "AA==", "sessionId": number})
+        while len(casts) < 3:
+            await asyncio.sleep(0.01)
+        assert casts[1:] == [{"format": "jpeg", "quality": 85}, {"format": "png"}]
+        assert (feed.number, feed.target) == (3, "tab")
+        pages.append("popup")
+        await cast
+    assert feed.page is None
+    connection.off.assert_called_once()
+
+
+async def test_live_view_pauses_the_screencast_without_viewers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name, value in (("_FRAME_PACE_S", 0), ("_IDLE_S", 0.05), ("_TAB_CHECK_S", 10)):
+        monkeypatch.setattr(live_view, name, value)
+    connection = AsyncMock(spec=CDPConnection)
+    handlers: dict[str, Callable[[dict[str, object]], None]] = {}
+    connection.on.side_effect = lambda method, handler, **_: handlers.__setitem__(method, handler)
+    sent: list[str] = []
+
+    def send(method: str, params: object = None, **_: object) -> dict[str, object]:
+        sent.append(method)
+        return {}
+
+    connection.send.side_effect = send
+    feed = live_view._Feed()
+    cast = asyncio.create_task(
+        live_view._cast(CDPPage(connection, "attached", "tab"), tmp_path, feed, lambda: None)
+    )
+    try:
+        async with asyncio.timeout(2):
+            while "Page.startScreencast" not in sent:
+                await asyncio.sleep(0.01)
+            for number in range(3):
+                handlers["Page.screencastFrame"]({"data": "AA==", "sessionId": number})
+            await asyncio.sleep(0.1)
+            assert "Page.screencastFrameAck" not in sent
+            assert sent.count("Page.startScreencast") == 1
+            assert await feed.after(0) == (b"\x00", "tab", 3)
+            while sent.count("Page.startScreencast") < 2:
+                await asyncio.sleep(0.01)
+        assert sent.count("Page.startScreencast") == 2
+        assert "Page.screencastFrameAck" not in sent
+    finally:
+        cast.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cast

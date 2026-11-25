@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import math
 import secrets
-from collections.abc import Awaitable, Callable
+from collections import deque
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import suppress
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 from time import monotonic
+from typing import Any, TypeVar
 from urllib.parse import parse_qs
 
 from webskrap.browser import browser_session
@@ -20,6 +24,16 @@ from webskrap.errors import ErrorCode, WebSkrapError
 
 LIFETIME_S = 900
 FRAME_TIMEOUT_S = 5
+FRAME_WAIT_S = 2
+_FRAME_PACE_S = 1 / 30
+_JPEG_QUALITY = 85
+_MOTION_FRAMES = 3
+_MOTION_WINDOW_S = 0.3
+_SETTLE_S = 0.25
+_TAB_CHECK_S = 0.5
+_IDLE_S = 5
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_T = TypeVar("_T")
 _CONTROL_KEYS = {
     "Enter",
     "Backspace",
@@ -57,7 +71,7 @@ const status = document.querySelector('p');
 const image = document.querySelector('img');
 const panel = document.querySelector('main');
 const headers = {Authorization: 'Bearer ' + token};
-let previous, target;
+let previous, target, frame = 0;
 const control = panel.dataset.control === 'true';
 const keys = new Set([
   'Enter', 'Backspace', 'Delete', 'Tab', 'Home', 'End',
@@ -155,9 +169,9 @@ async function update() {
     return;
   }
   try {
-    const response = await fetch('./frame', {
+    const response = await fetch('./frame?after=' + frame, {
       headers,
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(9000),
     });
     if (response.status === 404 || response.status === 410) {
       status.textContent = 'This viewer link has expired or is invalid.';
@@ -166,23 +180,28 @@ async function update() {
       return;
     }
     if (!response.ok) throw new Error();
-    const next = URL.createObjectURL(await response.blob());
-    const nextTarget = response.headers.get('X-WebSkrap-Target');
-    if (target !== nextTarget) target = null;
-    image.src = next;
-    if (previous) URL.revokeObjectURL(previous);
-    previous = next;
-    await image.decode();
-    target = nextTarget;
-    image.hidden = false;
-    status.hidden = true;
+    if (response.status === 200) {
+      const next = URL.createObjectURL(await response.blob());
+      const nextTarget = response.headers.get('X-WebSkrap-Target');
+      frame = Number(response.headers.get('X-WebSkrap-Frame'));
+      if (target !== nextTarget) target = null;
+      const loader = new Image();
+      loader.src = next;
+      await loader.decode();
+      image.src = next;
+      if (previous) URL.revokeObjectURL(previous);
+      previous = next;
+      target = nextTarget;
+      image.hidden = false;
+      status.hidden = true;
+    }
   } catch {
     status.textContent = 'Live view disconnected. Open a new link if this one expired.';
     status.hidden = false;
     setTimeout(update, 500);
     return;
   }
-  setTimeout(update, 100);
+  void update();
 }
 update();
 </script>
@@ -190,9 +209,165 @@ update();
 """
 
 
-async def _capture(page: CDPPage) -> bytes:
-    shot = await page.send("Page.captureScreenshot", {"format": "jpeg", "quality": 90})
-    return base64.b64decode(shot["data"])
+class _Feed:
+    """Newest screencast frame of the watched tab, for long-polling viewers."""
+
+    def __init__(self) -> None:
+        self.page: CDPPage | None = None
+        self.frame = b""
+        self.target = ""
+        self.number = 0
+        self.gone = False
+        self.polled = -math.inf
+        self._fresh = asyncio.Event()
+        self._demand = asyncio.Event()
+
+    def publish(self, frame: bytes, target: str) -> None:
+        self.frame, self.target = frame, target
+        self.number += 1
+        self.wake()
+
+    def wake(self) -> None:
+        fresh, self._fresh = self._fresh, asyncio.Event()
+        fresh.set()
+
+    def idle(self) -> bool:
+        return asyncio.get_running_loop().time() - self.polled > _IDLE_S
+
+    async def watched(self) -> None:
+        """Return once a viewer polls again."""
+        while self.idle():
+            self._demand.clear()
+            await self._demand.wait()
+
+    async def after(self, number: int) -> tuple[bytes, str, int]:
+        """Wait briefly for a frame newer than ``number``; an empty frame means none came."""
+        self.polled = asyncio.get_running_loop().time()
+        self._demand.set()
+        if self.number <= number and not self.gone:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self._fresh.wait(), FRAME_WAIT_S)
+        if self.gone:
+            raise WebSkrapError("The watched session closed", code=ErrorCode.NO_SESSION)
+        if self.page is None:
+            raise WebSkrapError("The live view is reconnecting")
+        if self.number <= number:
+            return b"", self.target, self.number
+        return self.frame, self.target, self.number
+
+
+async def _cast(page: CDPPage, directory: Path, feed: _Feed, check: Callable[[], None]) -> None:
+    """Stream ``page`` into ``feed`` until the session's current tab changes.
+
+    Motion streams JPEG; once the page settles, a lossless PNG replaces it.
+    Restarting the screencast makes Chromium send the current view at once.
+    """
+    loop = asyncio.get_running_loop()
+    recent: deque[float] = deque()
+    tasks: set[asyncio.Task[None]] = set()
+    restarts = asyncio.Lock()
+    lossless = True
+    paused = False
+    settle: asyncio.TimerHandle | None = None
+
+    def spawn(coroutine: Coroutine[Any, Any, None]) -> None:
+        task = asyncio.create_task(coroutine)
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    async def restart(png: bool) -> None:
+        params = {"format": "png"} if png else {"format": "jpeg", "quality": _JPEG_QUALITY}
+        async with restarts:
+            with suppress(WebSkrapError):
+                await page.send("Page.stopScreencast")
+            with suppress(WebSkrapError):
+                await page.send("Page.startScreencast", params)
+
+    async def ack(session_id: int) -> None:
+        nonlocal paused
+        await asyncio.sleep(_FRAME_PACE_S)
+        if feed.idle():
+            # Without a viewer, leave the frame unacked so Chromium stops encoding.
+            if paused:
+                return
+            paused = True
+            await feed.watched()
+            paused = False
+            await restart(lossless)
+            return
+        with suppress(WebSkrapError):
+            await page.send("Page.screencastFrameAck", {"sessionId": session_id})
+
+    def settled() -> None:
+        nonlocal lossless
+        if not lossless and not feed.idle():
+            lossless = True
+            recent.clear()
+            spawn(restart(True))
+
+    def on_frame(params: dict[str, Any]) -> None:
+        nonlocal lossless, settle
+        feed.publish(base64.b64decode(params["data"]), page.target_id)
+        spawn(ack(params["sessionId"]))
+        if feed.idle():
+            # A restart would act as an ack and keep an unwatched stream running.
+            return
+        now = loop.time()
+        recent.append(now)
+        while recent[0] < now - _MOTION_WINDOW_S:
+            recent.popleft()
+        if lossless and len(recent) >= _MOTION_FRAMES:
+            lossless = False
+            spawn(restart(False))
+        if settle is not None:
+            settle.cancel()
+        settle = loop.call_later(_SETTLE_S, settled)
+
+    order = directory / targets.PAGE_ORDER_FILE
+    page.connection.on("Page.screencastFrame", on_frame, session_id=page.session_id)
+    feed.page = page
+    try:
+        await restart(True)
+        while True:
+            await asyncio.sleep(_TAB_CHECK_S)
+            check()
+            infos = (await page.connection.send("Target.getTargets"))["targetInfos"]
+            ids = [info["targetId"] for info in infos if info["type"] == "page"]
+            pages = targets._ordered_pages(order, ids, remember=False)
+            if targets.current_page(directory, pages) != page.target_id:
+                return
+    finally:
+        feed.page = None
+        page.connection.off("Page.screencastFrame", on_frame, session_id=page.session_id)
+        if settle is not None:
+            settle.cancel()
+        for task in tasks:
+            task.cancel()
+
+
+async def _follow(
+    session: str, directory: Path, port: int, feed: _Feed, check: Callable[[], None]
+) -> None:
+    """Keep ``feed`` on the session's current tab until the session closes or is replaced."""
+    try:
+        while True:
+            try:
+                check()
+                async with targets.attach(
+                    session,
+                    directory / "user-data",
+                    port,
+                    timeout_ms=FRAME_TIMEOUT_S * 1000,
+                    read_only=True,
+                ) as page:
+                    await _cast(page, directory, feed, check)
+            except WebSkrapError as exc:
+                if exc.code is ErrorCode.NO_SESSION:
+                    return
+            await asyncio.sleep(_TAB_CHECK_S)
+    finally:
+        feed.gone = True
+        feed.wake()
 
 
 async def _serve(
@@ -209,22 +384,26 @@ async def _serve(
     if allow_control:
         html = html.replace(b'data-control="false"', b'data-control="true"')
 
-    async def run(
-        action: Callable[[CDPPage], Awaitable[bytes]], expected_target: str | None
-    ) -> tuple[bytes, str]:
+    feed = _Feed()
+
+    def check() -> None:
         _, current = browser_session._open_state(session)
         if (current["pid"], current["port"]) != (state["pid"], state["port"]):
             raise WebSkrapError("The watched session was replaced", code=ErrorCode.NO_SESSION)
-        async with targets.attach(
-            session,
-            directory / "user-data",
-            state["port"],
-            timeout_ms=FRAME_TIMEOUT_S * 1000,
-            read_only=True,
-        ) as page:
-            if expected_target is not None and page.target_id != expected_target:
-                raise WebSkrapError("The watched tab changed", code=ErrorCode.STALE_REF)
-            return await action(page), page.target_id
+
+    async def run(action: Callable[[CDPPage], Awaitable[None]], expected_target: str | None) -> str:
+        check()
+        page = feed.page
+        if page is None:
+            raise WebSkrapError("The live view is reconnecting")
+        if expected_target is not None and page.target_id != expected_target:
+            raise WebSkrapError("The watched tab changed", code=ErrorCode.STALE_REF)
+        await action(page)
+        return page.target_id
+
+    async def next_frame(number: int) -> tuple[bytes, str, int]:
+        check()
+        return await feed.after(number)
 
     class Handler(BaseHTTPRequestHandler):
         timeout = FRAME_TIMEOUT_S
@@ -237,12 +416,12 @@ async def _serve(
             status: int,
             body: bytes = b"",
             mime: str = "text/plain",
-            target: str | None = None,
+            headers: Mapping[str, str] = {},
         ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", mime)
-            if target is not None:
-                self.send_header("X-WebSkrap-Target", target)
+            for name, value in headers.items():
+                self.send_header(name, value)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("Referrer-Policy", "no-referrer")
@@ -257,12 +436,36 @@ async def _serve(
                 self.wfile.write(body)
 
         def do_GET(self) -> None:
+            path, _, query = self.path.partition("?")
             if self.path == "/":
                 self.respond(200, html, "text/html; charset=utf-8")
-            elif self.path == "/frame":
-                self.perform(_capture, 200, "image/jpeg")
+            elif path == "/frame":
+                self.frame(query)
             else:
                 self.respond(404)
+
+        def frame(self, query: str) -> None:
+            try:
+                values = parse_qs(query, strict_parsing=True, max_num_fields=1)
+                number = int(values["after"][0])
+                if number < 0:
+                    raise ValueError
+            except (KeyError, ValueError):
+                self.respond(400)
+                return
+            if not self.authorized():
+                return
+            result = self.wait(next_frame(number), FRAME_WAIT_S + FRAME_TIMEOUT_S)
+            if result is None:
+                return
+            body, target, number = result
+            if not body:
+                self.respond(204)
+                return
+            mime = "image/png" if body.startswith(_PNG_SIGNATURE) else "image/jpeg"
+            self.respond(
+                200, body, mime, {"X-WebSkrap-Target": target, "X-WebSkrap-Frame": str(number)}
+            )
 
         def do_POST(self) -> None:
             path, _, query = self.path.partition("?")
@@ -290,7 +493,7 @@ async def _serve(
                 self.respond(400)
                 return
 
-            async def scroll(page: CDPPage) -> bytes:
+            async def scroll(page: CDPPage) -> None:
                 viewport = await cdp_session.viewport(page)
                 await page.send(
                     "Input.dispatchMouseEvent",
@@ -302,9 +505,8 @@ async def _serve(
                         "deltaY": dy,
                     },
                 )
-                return b""
 
-            self.perform(scroll, 204)
+            self.perform(scroll)
 
         def click(self, query: str, target: str) -> None:
             try:
@@ -316,7 +518,7 @@ async def _serve(
                 self.respond(400)
                 return
 
-            async def click(page: CDPPage) -> bytes:
+            async def click(page: CDPPage) -> None:
                 viewport = await cdp_session.viewport(page)
                 position = {
                     "x": x * viewport["width"],
@@ -326,9 +528,8 @@ async def _serve(
                 }
                 await page.send("Input.dispatchMouseEvent", {"type": "mousePressed", **position})
                 await page.send("Input.dispatchMouseEvent", {"type": "mouseReleased", **position})
-                return b""
 
-            self.perform(click, 204, expected_target=target)
+            self.perform(click, expected_target=target)
 
         def key(self, target: str) -> None:
             try:
@@ -345,14 +546,13 @@ async def _serve(
                 self.respond(400)
                 return
 
-            async def press(page: CDPPage) -> bytes:
+            async def press(page: CDPPage) -> None:
                 if key in _CONTROL_KEYS:
                     await keyboard.press(page, key)
                 else:
                     await page.send("Input.insertText", {"text": key})
-                return b""
 
-            self.perform(press, 204, expected_target=target)
+            self.perform(press, expected_target=target)
 
         def authorized(self) -> bool:
             credential = self.headers.get("Authorization", "").encode("latin-1")
@@ -366,17 +566,20 @@ async def _serve(
 
         def perform(
             self,
-            action: Callable[[CDPPage], Awaitable[bytes]],
-            status: int,
-            mime: str = "text/plain",
+            action: Callable[[CDPPage], Awaitable[None]],
             *,
             expected_target: str | None = None,
         ) -> None:
             if not self.authorized():
                 return
-            pending = asyncio.run_coroutine_threadsafe(run(action, expected_target), loop)
+            if self.wait(run(action, expected_target), FRAME_TIMEOUT_S) is not None:
+                self.respond(204)
+
+        def wait(self, coroutine: Coroutine[Any, Any, _T], timeout: float) -> _T | None:
+            """Run ``coroutine`` on the viewer loop; on failure, respond and return None."""
+            pending = asyncio.run_coroutine_threadsafe(coroutine, loop)
             try:
-                body, target = pending.result(timeout=FRAME_TIMEOUT_S)
+                return pending.result(timeout=timeout)
             except FutureTimeout:
                 pending.cancel()
                 self.respond(503)
@@ -386,10 +589,10 @@ async def _serve(
                     ErrorCode.STALE_REF: 409,
                 }
                 self.respond(statuses.get(exc.code, 503))
-            else:
-                self.respond(status, body, mime, target if status == 200 else None)
+            return None
 
-    with HTTPServer(("127.0.0.1", 0), Handler) as server:
+    follower = asyncio.create_task(_follow(session, directory, state["port"], feed, check))
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
         thread = Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
@@ -398,6 +601,8 @@ async def _serve(
             )
             await asyncio.sleep(LIFETIME_S)
         finally:
+            follower.cancel()
+            await asyncio.gather(follower, return_exceptions=True)
             await asyncio.to_thread(server.shutdown)
             thread.join()
 

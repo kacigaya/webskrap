@@ -203,6 +203,7 @@ Preview or in a local browser alongside Claude Code or Codex. Open the link
 on the same machine, or use a private port forward for a remote session.
 
 The viewer fits the full browser frame into the panel and saves no frames.
+It streams the page as it changes and shows a lossless image once the page is still.
 Add `--allow-scroll` or set MCP `allow_scroll=true` to let the viewer scroll
 with a wheel, trackpad, or keyboard. Focus the preview to use the arrow and
 Page Up or Page Down keys. Add `--allow-control` or set MCP
