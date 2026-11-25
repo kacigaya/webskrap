@@ -25,13 +25,14 @@ async def test_live_view_requires_token_and_stays_with_original_session(
     connection = AsyncMock(spec=CDPConnection)
     frames = iter(("Zmlyc3Q=", "c2Vjb25k"))
 
-    def send(method: str, *_: object, **__: object) -> dict[str, object]:
+    def send(method: str, params: object = None, **_: object) -> dict[str, object]:
         match method:
             case "Target.getTargets":
                 return {"targetInfos": [{"type": "page", "targetId": "tab"}]}
             case "Target.attachToTarget":
                 return {"sessionId": "attached"}
             case "Page.captureScreenshot":
+                assert params == {"format": "jpeg", "quality": 90}
                 return {"data": next(frames)}
             case "Target.detachFromTarget":
                 return {}

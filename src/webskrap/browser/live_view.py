@@ -62,8 +62,10 @@ async function update() {
   } catch {
     status.textContent = 'Live view disconnected. Open a new link if this one expired.';
     status.hidden = false;
+    setTimeout(update, 500);
+    return;
   }
-  setTimeout(update, 500);
+  setTimeout(update, 100);
 }
 update();
 </script>
@@ -72,7 +74,7 @@ update();
 
 
 async def _capture(page: CDPPage) -> bytes:
-    shot = await page.send("Page.captureScreenshot", {"format": "jpeg", "quality": 65})
+    shot = await page.send("Page.captureScreenshot", {"format": "jpeg", "quality": 90})
     return base64.b64decode(shot["data"])
 
 
