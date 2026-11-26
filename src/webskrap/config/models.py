@@ -187,6 +187,12 @@ class SessionConfig(BaseModel):
     # Supply Chromium's synthetic camera and microphone when a page needs
     # media devices. Permission prompts still follow the normal browser flow.
     fake_media_devices: bool = False
+    # Render this many device pixels per CSS pixel through
+    # --force-device-scale-factor, so screenshots and live views come out
+    # sharper. Pages see it as devicePixelRatio, the resolution media query
+    # and a screen of the same CSS size: a fingerprint change, off by
+    # default. A virtual display grows by the same factor in physical pixels.
+    device_scale_factor: float | None = Field(default=None, ge=1, le=4)
     # Chromium WebRTC IP handling policy. Use "disable_non_proxied_udp" to
     # prevent non-proxied UDP ICE candidates, which avoids WebRTC exposing local
     # or direct public IP candidates on leak-test pages without patching the
@@ -283,6 +289,7 @@ class SessionConfig(BaseModel):
             + self._sandbox_args()
             + self._reduced_fingerprint_surface_args()
             + self._fake_media_args()
+            + self._device_scale_args()
             + self._gpu_args()
             + self._webrtc_ip_handling_args()
             + list(self.launch_args)
@@ -423,8 +430,13 @@ class SessionConfig(BaseModel):
         return self.virtual_display and self.headless
 
     def virtual_screen(self) -> Viewport:
-        """Return the screen size a virtual display is started with."""
-        return self.headless_screen or Viewport(width=1920, height=1080)
+        """Return the screen size a virtual display is started with, in physical pixels.
+
+        :attr:`device_scale_factor` multiplies it, so the screen keeps its CSS size.
+        """
+        screen = self.headless_screen or Viewport(width=1920, height=1080)
+        scale = self.device_scale_factor or 1
+        return Viewport(width=round(screen.width * scale), height=round(screen.height * scale))
 
     def _screen_args(self) -> list[str]:
         # Configure a virtual screen for headless chromium so the browser
@@ -439,10 +451,13 @@ class SessionConfig(BaseModel):
             "--window-position": f"--window-position={x},{y}",
         }
         if not self.virtual_display:
-            # Headless-only flag defining a screen at 0,0. Under a virtual
+            # Headless-only flag defining a screen at 0,0, in physical pixels
+            # while the window size stays in CSS pixels. Under a virtual
             # display the X server is the screen.
-            area = "".join(f" {key}={value}" for key, value in insets.items())
-            candidates["--screen-info"] = f"--screen-info={{{width}x{height}{area}}}"
+            scale = self.device_scale_factor or 1
+            area = "".join(f" {key}={round(value * scale)}" for key, value in insets.items())
+            size = f"{round(width * scale)}x{round(height * scale)}"
+            candidates["--screen-info"] = f"--screen-info={{{size}{area}}}"
         return [
             arg
             for prefix, arg in candidates.items()
@@ -540,6 +555,12 @@ class SessionConfig(BaseModel):
             for prefix, arg in candidates.items()
             if not any(a == prefix or a.startswith(f"{prefix}=") for a in self.launch_args)
         ]
+
+    def _device_scale_args(self) -> list[str]:
+        flag = "--force-device-scale-factor"
+        if self.device_scale_factor is None or any(a.startswith(flag) for a in self.launch_args):
+            return []
+        return [f"{flag}={self.device_scale_factor:g}"]
 
     def _fake_media_args(self) -> list[str]:
         flag = "--use-fake-device-for-media-stream"

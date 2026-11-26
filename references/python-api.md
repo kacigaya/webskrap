@@ -202,3 +202,10 @@ config = SessionConfig(
   On Linux, locale and timezone come from the browser environment.
 - `"full"`: also viewport, screen, device scale, touch and user agent, as
   WebSkrap 2.x did. Each override is a surface that a page can cross-check.
+
+`device_scale_factor` (1 to 4, default None) renders more device pixels per
+CSS pixel through `--force-device-scale-factor`, for sharper screenshots and
+live views. WebSkrap scales the headless screen and the virtual display by
+the same factor, so `screen` keeps its CSS size. Pages still see the new
+`devicePixelRatio` and `resolution` media query, so leave it off on
+detection-sensitive pages. It works without `profile_mode="full"`.

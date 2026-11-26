@@ -72,6 +72,10 @@ for an http or https proxy, set `WEBSKRAP_PROXY_USERNAME` and
 `--virtual-display` runs Chrome headed on a private Xvfb display that lives
 as long as the session. `--gpu mesa` and `--profile-mode locale --profile NAME`
 work as for `fetch`; `full` mode is not offered for sessions.
+`--device-scale-factor 2` renders two device pixels per CSS pixel for sharper
+screenshots and live views. The screen keeps its CSS size, but pages see
+`devicePixelRatio` 2, so it is off by default. Like the other launch settings,
+reopening a running session with a different value is refused.
 
 ```bash
 webskrap browser open https://example.com --decline-cookies
@@ -118,6 +122,24 @@ Commands act on the current tab. `tab-list`, `tab-new [url]`,
 `tab-select <index>` and `tab-close [index]` manage tabs; a popup or a new tab
 becomes current. Current limitations are no network mocking, tracing, or
 video, and history navigation that reloads.
+
+## Watch a session live
+
+```bash
+webskrap browser open https://example.com -s visual --device-scale-factor 2
+webskrap browser watch visual --allow-control
+```
+
+`watch` prints a private `http://127.0.0.1:PORT/#TOKEN` link and serves it
+until Ctrl+C or expiry after 15 minutes. Open the full link on the same
+machine, for example in T3 Code Preview, or through a private port forward.
+The token is in the fragment; anyone with the link and the port can see the
+viewport. `--allow-scroll` adds wheel and key scrolling. `--allow-control`
+adds clicks and typing, so share it only with people trusted to act in the
+session. The viewer follows the current tab, streams page changes, and
+settles to a lossless frame when the page is still. It stops streaming when
+no viewer has polled for 5 seconds. Implementation and tests:
+`src/webskrap/browser/live_view.py`, `tests/browser/test_live_view.py`.
 
 ## Vision and coordinate input
 

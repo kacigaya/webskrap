@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from time import monotonic
 from typing import Any, TypeVar
 
-from webskrap.browser import actions, browser_session
+from webskrap.browser import actions, browser_session, live_view
 from webskrap.browser.browser_session import SessionPage
 from webskrap.config.models import GpuBackend
 from webskrap.config.parsing import (
@@ -58,6 +58,7 @@ class _Owned:
 #: Sessions this server process launched, by name. Only these close at server
 #: shutdown or when idle; sessions the CLI opened keep running.
 _owned: dict[str, _Owned] = {}
+_viewers: set[asyncio.Task[None]] = set()
 
 
 def idle_timeout_s() -> float | None:
@@ -137,6 +138,7 @@ async def browser_open(
     solve_datadome: bool = False,
     solve_perimeterx: bool = False,
     solve_recaptcha: bool = False,
+    device_scale_factor: float | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session with no visible window.
 
@@ -187,6 +189,9 @@ async def browser_open(
         profile_mode: native (default; the browser's own identity) or locale
             (the profile's timezone and languages, set at launch; Linux).
         profile: Bundled profile for locale mode; desktop-chrome when null.
+        device_scale_factor: Render 1 to 4 device pixels per CSS pixel for
+            sharper screenshots and live views. Off by default: pages see it
+            as devicePixelRatio, which changes the fingerprint.
 
     These launch settings are fixed: reopening a running session with a
     different requested value is refused.
@@ -206,6 +211,7 @@ async def browser_open(
             gpu=gpu,
             profile_mode=parse_session_profile_mode(profile_mode),
             profile=profile,
+            device_scale_factor=device_scale_factor,
         )
         owned = _owned.get(session)
         if not payload["reused"]:
@@ -586,6 +592,38 @@ async def browser_screenshot(
     return await _browser_action(session, run, actions.DEFAULT_ACTION_TIMEOUT_MS)
 
 
+async def close_viewers() -> None:
+    """Stop the HTTP viewers started by this MCP server."""
+    tasks = tuple(_viewers)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def browser_watch(
+    session: str = "default", allow_scroll: bool = False, allow_control: bool = False
+) -> dict[str, str | int]:
+    """Start a local live viewer and return its private link.
+
+    Open the link in a browser on this machine. The link grants access to the
+    session viewport for 15 minutes or until the MCP server exits. The view
+    streams page changes and settles to a lossless frame. For a sharper view
+    on a high-density screen, open the session with device_scale_factor=2.
+
+    Args:
+        session: Browser session name.
+        allow_scroll: Let anyone with the link scroll the tab. Off by default.
+        allow_control: Let anyone with the link click, type, and scroll. Off by default.
+    """
+    with _tool_errors():
+        url, task = await live_view.start(
+            session, allow_scroll=allow_scroll, allow_control=allow_control
+        )
+    _viewers.add(task)
+    task.add_done_callback(_viewers.discard)
+    return {"url": url, "expires_in_s": live_view.LIFETIME_S}
+
+
 async def browser_view(session: str = "default") -> CallToolResult:
     """Return the rendered viewport as inline PNG image content and metadata.
 
@@ -811,6 +849,7 @@ def register_browser_tools(mcp: MCPServer) -> None:
         title="Screenshot the page",
         annotations=_hints(read_only=False, idempotent=True),
     )
+    mcp.add_tool(browser_watch, title="Watch the browser live", annotations=_hints(read_only=False))
     mcp.add_tool(browser_view, title="See the browser viewport", annotations=_hints(read_only=True))
     mcp.add_tool(
         browser_mouse,

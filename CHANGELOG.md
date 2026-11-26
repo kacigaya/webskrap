@@ -9,6 +9,16 @@ history, so they summarize each release rather than list every change.
 
 ## [Unreleased]
 
+### Added
+
+- `webskrap browser watch` and MCP `browser_watch` open a private live view
+  of a running browser session, with optional click, typing, and scroll controls. The view
+  streams page changes and settles to a lossless image. Links expire after 15 minutes.
+- `browser open --device-scale-factor`, MCP `browser_open(device_scale_factor=...)`
+  and `SessionConfig(device_scale_factor=...)` render more device pixels per
+  CSS pixel for sharper screenshots and live views. The screen keeps its CSS
+  size. Off by default, because pages see the new `devicePixelRatio`.
+
 ## [4.1.1] - 2026-11-23
 
 ### Fixed

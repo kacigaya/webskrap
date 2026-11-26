@@ -44,7 +44,7 @@ def devtools_path(user_data_dir: Path, port: int) -> str:
     return lines[1]
 
 
-def _ordered_pages(order_file: Path, current: list[str]) -> list[str]:
+def _ordered_pages(order_file: Path, current: list[str], *, remember: bool = True) -> list[str]:
     """Return open page target ids, oldest first, and remember the order.
 
     ``Target.getTargets`` lists targets in no defined order, and each command
@@ -64,7 +64,7 @@ def _ordered_pages(order_file: Path, current: list[str]) -> list[str]:
         known = []
     ordered = [target for target in known if target in current]
     ordered += [target for target in current if target not in ordered]
-    if ordered != known:
+    if remember and ordered != known:
         _write_ids(order_file, ordered)
     return ordered
 
@@ -170,12 +170,17 @@ async def connect(
 
 @asynccontextmanager
 async def attach(
-    name: str, user_data_dir: Path, port: int, *, timeout_ms: float
+    name: str,
+    user_data_dir: Path,
+    port: int,
+    *,
+    timeout_ms: float,
+    read_only: bool = False,
 ) -> AsyncIterator[CDPPage]:
     """Attach to the session browser's current page and detach on exit.
 
-    Uses :func:`current_page`, and creates a blank page when none is open.
-    The browser keeps running.
+    Uses :func:`current_page`. In read-only mode it leaves session files
+    intact and requires an existing tab. The browser keeps running.
 
     Raises:
         WebSkrapError: ``session_unreachable`` when nothing answers on the
@@ -193,16 +198,20 @@ async def attach(
             if info.get("type") == "page":
                 created.append(info["targetId"])
 
-        connection.on("Target.targetCreated", on_created)
-        await connection.send("Target.setDiscoverTargets", {"discover": True})
-        created.clear()
+        if not read_only:
+            connection.on("Target.targetCreated", on_created)
+            await connection.send("Target.setDiscoverTargets", {"discover": True})
+            created.clear()
         targets = await connection.send("Target.getTargets")
         pages = _ordered_pages(
             order_file,
             [info["targetId"] for info in targets["targetInfos"] if info["type"] == "page"],
+            remember=not read_only,
         )
         target_id = current_page(user_data_dir.parent, pages)
         if target_id is None:
+            if read_only:
+                raise WebSkrapError("No browser tab is open")
             target_id = (await connection.send("Target.createTarget", {"url": "about:blank"}))[
                 "targetId"
             ]
@@ -219,7 +228,7 @@ async def attach(
         finally:
             if created:
                 _ordered_pages(order_file, [*pages, *created])
-            if page.pointer is not None and page.pointer != start:
+            if not read_only and page.pointer is not None and page.pointer != start:
                 save_pointer(pointer_file, target_id, page.pointer, {*pages, *created})
             with suppress(WebSkrapError):
                 await connection.send(

@@ -150,6 +150,7 @@ def _session_config(
     gpu: GpuBackend,
     profile_mode: SessionProfileMode,
     profile: str | None,
+    device_scale_factor: float | None = None,
     user_data_dir: Path | None = None,
 ) -> tuple[SessionConfig, BrowserProfile | None]:
     """Return a detached session's config and the profile its launch applies.
@@ -165,6 +166,9 @@ def _session_config(
         WebSkrapError: ``usage`` for an invalid proxy, an unknown profile, or
             locale mode off Linux, where only CDP emulation applies a locale.
     """
+    if device_scale_factor is not None and not 1 <= device_scale_factor <= 4:
+        msg = "device_scale_factor must be from 1 to 4"
+        raise WebSkrapError(msg, code=ErrorCode.USAGE)
     proxy = ProxyConfig(server=persistent_proxy_server(proxy_server)) if proxy_server else None
     config = SessionConfig(
         headless=headless,
@@ -175,6 +179,7 @@ def _session_config(
         virtual_display=virtual_display,
         gpu=gpu,
         profile_mode=profile_mode,
+        device_scale_factor=device_scale_factor,
         user_data_dir=user_data_dir,
     )
     if profile_mode == "native":
@@ -226,6 +231,7 @@ def launch_browser(
     gpu: GpuBackend = GpuBackend.AUTO,
     profile_mode: SessionProfileMode = "native",
     profile: str | None = None,
+    device_scale_factor: float | None = None,
     display_env: dict[str, str] | None = None,
 ) -> tuple[int, int]:
     """Start a detached Chromium and return its (pid, CDP port).
@@ -248,6 +254,7 @@ def launch_browser(
         profile_mode: ``locale`` sets ``profile``'s timezone and languages
             through the browser's environment and ``--accept-lang`` (Linux).
         profile: Bundled profile name for locale mode.
+        device_scale_factor: Device pixels per CSS pixel; None keeps Chromium's.
         display_env: ``DISPLAY`` and ``XAUTHORITY`` of a virtual display.
 
     Raises:
@@ -264,6 +271,7 @@ def launch_browser(
         gpu=gpu,
         profile_mode=profile_mode,
         profile=profile,
+        device_scale_factor=device_scale_factor,
         user_data_dir=directory / "user-data",
     )
     # The locale environment is built from os.environ, credentials included.
@@ -454,6 +462,7 @@ async def open_session(
     gpu: GpuBackend = GpuBackend.AUTO,
     profile_mode: SessionProfileMode = "native",
     profile: str | None = None,
+    device_scale_factor: float | None = None,
 ) -> dict[str, Any]:
     """Start (or reuse) a persistent browser session.
 
@@ -485,12 +494,15 @@ async def open_session(
             languages (Linux). ``full`` emulation is not offered: it ends when
             the CDP connection that set it closes.
         profile: Bundled profile for locale mode; ``desktop-chrome`` when None.
+        device_scale_factor: Render this many device pixels per CSS pixel
+            (1 to 4) for sharper screenshots and live views. Pages see it as
+            ``devicePixelRatio``, which changes the fingerprint.
 
     Returns:
         ``{"session", "pid", "port", "reused", "chromium_sandbox",
         "proxy_server", "proxy_auth", "webrtc_ip_handling_policy",
         "fake_media_devices", "virtual_display", "gpu", "profile_mode",
-        "profile"}``. Every key after ``reused`` describes the running
+        "profile", "device_scale_factor"}``. Every key after ``reused`` describes the running
         browser's launch settings.
 
     Raises:
@@ -520,12 +532,14 @@ async def open_session(
         gpu=gpu,
         profile_mode=profile_mode,
         profile=profile,
+        device_scale_factor=device_scale_factor,
     )
     launch = {
         "virtual_display": config.uses_virtual_display(),
         "gpu": str(gpu),
         "profile_mode": profile_mode,
         "profile": (profile or "desktop-chrome") if profile_mode == "locale" else None,
+        "device_scale_factor": device_scale_factor,
     }
     operation_lock = await _acquire_session_operation_lock(name)
     try:
@@ -579,6 +593,7 @@ async def open_session(
                         gpu=launch_gpu,
                         profile_mode=profile_mode,
                         profile=profile,
+                        device_scale_factor=device_scale_factor,
                         display_env=display_env,
                     )
                 )
@@ -673,6 +688,7 @@ _LAUNCH_DEFAULTS: dict[str, Any] = {
     "gpu": str(GpuBackend.AUTO),
     "profile_mode": "native",
     "profile": None,
+    "device_scale_factor": None,
 }
 
 

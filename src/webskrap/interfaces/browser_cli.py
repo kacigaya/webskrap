@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 from collections.abc import Awaitable, Callable, Coroutine
+from contextlib import suppress
 from pathlib import Path
 from typing import Annotated, Any, TypeVar
 from uuid import uuid4
@@ -21,7 +22,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from webskrap.browser import actions, browser_session
+from webskrap.browser import actions, browser_session, live_view
 from webskrap.browser.actions import DEFAULT_ACTION_TIMEOUT_MS, ELEMENT_ACTIONS
 from webskrap.browser.browser_session import DEFAULT_NAVIGATION_TIMEOUT_MS, SessionPage
 from webskrap.config.models import GpuBackend
@@ -227,6 +228,18 @@ def open_command(
         str | None,
         typer.Option("--profile", "-p", help="Bundled profile for --profile-mode locale."),
     ] = None,
+    device_scale_factor: Annotated[
+        float | None,
+        typer.Option(
+            "--device-scale-factor",
+            min=1,
+            max=4,
+            help=(
+                "Render 1 to 4 device pixels per CSS pixel for sharper screenshots and live "
+                "views. Pages see it as devicePixelRatio, which changes the fingerprint."
+            ),
+        ),
+    ] = None,
     format: FormatOption = "human",
 ) -> None:
     """Start (or reuse) a persistent browser session.
@@ -268,6 +281,7 @@ def open_command(
             gpu=gpu,
             profile_mode=mode,
             profile=profile,
+            device_scale_factor=device_scale_factor,
         ),
         output_format,
     )
@@ -698,6 +712,30 @@ def screenshot_command(
         print_json(result)
         return
     console.print(f"[bold]Screenshot:[/bold] {result['path']}", soft_wrap=True)
+
+
+@browser_app.command("watch")
+def watch_command(
+    session: Annotated[str, typer.Argument(help="Browser session name.")] = "default",
+    allow_scroll: Annotated[
+        bool, typer.Option("--allow-scroll", help="Let anyone with the link scroll the tab.")
+    ] = False,
+    allow_control: Annotated[
+        bool,
+        typer.Option("--allow-control", help="Let anyone with the link click, type, and scroll."),
+    ] = False,
+) -> None:
+    """Serve a live view until Ctrl+C or link expiry."""
+
+    async def watch() -> None:
+        url, task = await live_view.start(
+            session, allow_scroll=allow_scroll, allow_control=allow_control
+        )
+        typer.echo(url)
+        await task
+
+    with suppress(KeyboardInterrupt):
+        _run(watch(), "human")
 
 
 @browser_app.command("view")

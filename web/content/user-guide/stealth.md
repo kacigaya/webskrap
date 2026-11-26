@@ -316,6 +316,13 @@ it reports no hover and no fine pointer. WebSkrap declares a mouse with
 microphone. Permission prompts stay active. Sites can detect the synthetic
 devices, so it is off by default.
 
+`device_scale_factor=2` in `SessionConfig`, or `--device-scale-factor 2` on
+`browser open`, renders two device pixels per CSS pixel through
+`--force-device-scale-factor`. Screenshots and live views get sharper. The
+screen keeps its CSS size: WebSkrap scales the headless screen and the virtual
+display by the same factor. Pages see `devicePixelRatio` 2 and the matching
+`resolution` media query, so it is off by default. Values run from 1 to 4.
+
 ### Virtual display
 
 On Linux, `virtual_display=True` runs the browser headed on a private Xvfb

@@ -20,10 +20,19 @@ and it does not offer Google.
    before editing.
 3. Change the shared implementation when behavior belongs to more than one
    surface. Do not patch each wrapper independently.
-4. Update affected public contracts: models, serialization, errors, command
-   help, MCP schemas, guides, and tests.
-5. Run focused tests during development, then the full validation gate before
-   handoff when practical.
+4. Update affected public contracts: Python models and exports, CLI help, JSON
+   output and exit status, MCP schemas, result shapes, annotations and server
+   instructions, `README.md`, `src/webskrap/interfaces/guide.md`, and unit
+   tests for each surface.
+5. Run the nearest tests while editing, and browser tests when browser
+   behavior changes. Before handoff, run the gate in `CONTRIBUTING.md`; CI runs
+   `.github/workflows/ci.yml`. Run `WEBSKRAP_LIVE=1 pytest -q -m live` only to
+   check public third-party behavior: live tests are not deterministic.
+
+Use the implementation as the source of truth. Read
+`src/webskrap/scraping/results.py` for result fields, `src/webskrap/errors.py` for error
+codes and exits, and `src/webskrap/browser/diagnostics.py` for environment reporting.
+Do not copy these catalogs into the skill.
 
 ## Route by task
 
@@ -36,16 +45,14 @@ and it does not offer Google.
 | Main CLI commands | `src/webskrap/interfaces/cli.py` | `tests/interfaces/test_cli.py`, `tests/browser/test_diagnostics.py` |
 | Persistent browser state | `src/webskrap/browser/browser_session.py`, `src/webskrap/security/paths.py` | `tests/browser/test_browser_session_unit.py`, `tests/security/test_paths.py` |
 | Interactive browser commands | `src/webskrap/interfaces/browser_cli.py`, `src/webskrap/interfaces/mcp_browser.py` | `tests/interfaces/test_browser_cli.py`, `tests/browser/test_browser_integration.py`, `tests/interfaces/test_mcp.py` |
+| Live view (`browser watch`, `browser_watch`) | `src/webskrap/browser/live_view.py` | `tests/browser/test_live_view.py` |
 | MCP tools, resources, or annotations | `src/webskrap/interfaces/mcp_server.py` | `tests/interfaces/test_mcp.py`, `src/webskrap/interfaces/guide.md` |
 | Profiles or stealth defaults | `src/webskrap/config/profiles.py`, `src/webskrap/config/models.py`, `src/webskrap/scraping/client.py` | `tests/config/test_profiles.py`, opt-in bot-detection tests when needed |
 | Cookie rejection | `src/webskrap/browser/consent.py` | `tests/browser/test_consent.py`; `tests/live/test_consent_live.py` only for selector rot |
 | Documentation and examples | `README.md`, `src/webskrap/interfaces/guide.md` | `tests/test_docs.py`, current CLI help, public Python exports |
 
-Search for every constructor, serializer, command, and schema that uses a
-changed model or field. Fetch and search behavior cross Python, CLI, and MCP.
-Persistent browser behavior crosses the browser CLI and MCP. Engine markup
-lives only in `src/webskrap/scraping/search.py`. When an engine changes its page,
-refresh that engine's fixture and fix that one extractor.
+Engine markup lives only in `src/webskrap/scraping/search.py`. When an engine
+changes its page, refresh that engine's fixture and fix that one extractor.
 
 ## Choose the public surface
 
@@ -55,6 +62,7 @@ refresh that engine's fixture and fix that one extractor.
 | Find URLs for a query | `client.search()` | `webskrap search` | `search` |
 | Preserve cookies or storage | `client.session()` | `webskrap browser open` | `browser_open` |
 | See a rendered page or interact with canvas | `browser_session.view()` on a session page | `webskrap browser view` and `mouse` | `browser_view` and `browser_mouse` |
+| Let a person watch or drive a session | Not public | `webskrap browser watch` | `browser_watch` |
 | Click, fill, wait, or run a flow | `session.new_page()` and `human_click()` | `webskrap browser` | `browser_interact` and related tools |
 | Diagnose installation | Inspect raised error | `webskrap doctor` | `doctor` |
 
@@ -66,92 +74,46 @@ Read only the reference needed for the task:
 
 - [Python API](references/python-api.md): sessions, pages, profile modes, consent, links,
   and fingerprint controls.
-- [CLI](references/cli.md): one-shot fetches, persistent browser commands, and
-  Linux ARM64 behavior.
-- [MCP](references/mcp.md): tool selection, confined paths, annotations, and
-  keeping tool results small.
+- [CLI](references/cli.md): one-shot fetches, persistent browser commands,
+  vision and live view, and Linux ARM64 behavior.
+- [MCP](references/mcp.md): tool selection, confined paths, annotations,
+  vision and live view, and keeping tool results small.
 
 ## Visual browser interaction
 
 Use `browser_view` (MCP) or `webskrap browser view --format json` (CLI) when
 layout, images, canvas, or controls missing from the accessibility tree matter.
-MCP returns an image block directly. CLI saves a PNG; open its returned `path`
-with the agent's image-viewing tool before choosing coordinates. A path or
-base64 text alone does not give a model vision. The client and model must
-support image input.
+MCP returns an image block. CLI saves a PNG: open its `path` with an
+image-viewing tool before choosing coordinates. A path alone gives no vision.
 
-The view covers the viewport at one PNG pixel per CSS pixel. Coordinates start
-at its top-left; use the original `width` and `height` if the image viewer
-resizes it. Do not add `scroll_x` or `scroll_y` to mouse coordinates. Full-page
-screenshots are for inspection or export and do not map directly to the mouse.
+One image pixel is one CSS pixel, at any `device_scale_factor`. `(0, 0)` is the
+viewport's top-left. Map a resized preview back to `width` and `height`, and do
+not add `scroll_x` or `scroll_y`. Full-page screenshots do not map to the mouse.
+Prefer refs/selectors for known controls, and take a fresh view after
+scrolling, navigation, or layout changes.
 
-Prefer refs/selectors when they identify a control. Use `browser_mouse` / CLI
-`mouse` for visual targets, then `browser_insert_text` / CLI `insert-text` for
-literal text in the focused control and `browser_press` / CLI `press` for keys.
-Wait for the expected change and take a fresh view after scrolling, navigation,
-or layout changes. Coordinate clicks hit whatever occupies that point.
-Run dependent actions sequentially within a session.
-
-This is the browser's rendered page, available headless without Xvfb. It does
-not show browser chrome, OS dialogs, or a desktop stream. One-shot fetch
-sessions are separate; open a persistent browser to drive a visual flow.
-Read the [CLI](references/cli.md) or [MCP](references/mcp.md) reference for examples.
+To let a person watch or drive a session, use `browser_watch` (MCP) or
+`webskrap browser watch` (CLI). It is not a model input. Hand over the full
+link: its fragment is the access token. `device_scale_factor=2` sharpens the
+view but changes `devicePixelRatio` for every page.
 
 ## Guardrails
 
 - Use public pages, local test servers, or targets the user is authorized to
   access.
-- Keep CAPTCHA handling to the opt-in Cloudflare Turnstile checkbox click
-  (`solve_cloudflare`, `turnstile.py`), DataDome slider drag
-  (`solve_datadome`, `datadome.py`), HUMAN Press & Hold
-  (`solve_perimeterx`, `perimeterx.py`) and reCAPTCHA/hCaptcha checkbox click
-  (`solve_recaptcha`, `browser_solve_captcha`, `recaptcha.py`). Never touch
-  their image or audio challenges. Do not add token injection, solving
-  services, login-wall bypass, credential bypass, or access-control
-  circumvention.
+- Keep CAPTCHA handling in `src/webskrap/challenges/` to the opt-in Cloudflare
+  Turnstile checkbox click (`solve_cloudflare`), DataDome slider drag
+  (`solve_datadome`), HUMAN Press & Hold (`solve_perimeterx`) and
+  reCAPTCHA/hCaptcha checkbox click (`solve_recaptcha`,
+  `browser_solve_captcha`). Never touch their image or audio challenges. Do
+  not add token injection, solving services, login-wall bypass, credential
+  bypass, or access-control circumvention.
 - Do not commit cookies, storage state, proxy credentials, or persistent browser
   data such as `.webskrap/`.
+- Treat live-view links as credentials: never log, publish, or send them to
+  external services. Enable viewer control only when the user asks for it.
 - Preserve Chromium's sandbox by default. Any opt-out must remain explicit and
   outside page-controlled input.
 - Keep MCP file paths confined to their configured roots. Reject absolute paths,
   traversal, and symlink escapes.
 - Prefer public `webskrap` exports. Use private helpers only in tests.
-- Keep changes typed. Add focused tests for parsing, state transitions, output
-  contracts, and tool-safety behavior.
-
-## Public contract checklist
-
-When public behavior changes, check all applicable items:
-
-- Python models and exports
-- CLI arguments, help, JSON output, and exit status
-- MCP input schema, result shape, annotations, and server instructions
-- `README.md` and `src/webskrap/interfaces/guide.md`
-- unit tests for each affected surface
-
-Use the implementation as the source of truth. In particular, read
-`src/webskrap/scraping/results.py` for result fields, `src/webskrap/errors.py` for error
-codes and exits, and `src/webskrap/browser/diagnostics.py` for environment reporting.
-Do not copy these catalogs into the skill.
-
-## Validation
-
-Run the nearest tests while editing. Before handoff, run the repository gate
-when practical:
-
-```bash
-uv run --extra dev pytest -q -m "not browser and not live"
-uv run --extra dev ruff check .
-uv run --extra dev ruff format --check .
-uvx --from pyright==1.1.411 pyright --pythonpath .venv/bin/python src/webskrap
-uv run --extra dev bandit -c pyproject.toml -q -r src/
-uv run --extra dev --with pip-audit==2.9.0 pip-audit
-uv build
-```
-
-Run browser tests when browser behavior changes and the required browsers are
-installed.
-
-Use `WEBSKRAP_LIVE=1 pytest -q -m live` only when explicitly checking public
-third-party behavior. Live tests are non-deterministic and do not replace the
-default suite.

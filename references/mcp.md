@@ -23,6 +23,10 @@ boundaries. Confirm the current contract in `src/webskrap/interfaces/mcp_server.
   session with `webskrap browser open --proxy URL` and the tools reuse it.
   It also takes `virtual_display`, `gpu`, and `profile_mode` `locale` with
   `profile` (Linux). Prefer `virtual_display=True` on protected sites.
+  `device_scale_factor` (1 to 4) sharpens screenshots and live views but
+  changes `devicePixelRatio`; leave it off on protected sites.
+- `browser_watch(session=..., allow_scroll=..., allow_control=...)` returns
+  `url`, a private local live-view link, and `expires_in_s`. See "Live view".
 - After an interaction, `browser_wait_for` waits for one condition: `text`,
   `text_gone`, `selector` with `selector_state`, or `load_state`. Use it
   instead of repeated snapshots.
@@ -148,6 +152,23 @@ a fresh view before choosing more coordinates. Wheel input can finish after the
 call returns. Run dependent actions sequentially in each session. The image
 shows the page, including canvas and frames, not browser chrome, OS dialogs,
 or a live desktop stream. Headless rendering needs no Xvfb.
+
+## Live view
+
+Use `browser_watch` when a person should see the session, not to observe it
+yourself; `browser_view` is the model's image tool. Give the user the full
+`url`, fragment included: the fragment is the access token. The link serves on
+`127.0.0.1` for 15 minutes or until the server exits. Open it on the same
+machine, such as in T3 Code Preview, or through a private port forward.
+
+`allow_scroll` lets the viewer scroll. `allow_control` also lets the viewer
+click and type, so anyone with the link can act in a possibly logged-in
+session. Turn it on only when the user asks to drive the browser. The viewer
+follows the current tab, streams page changes, settles to a lossless frame on
+a still page, and stops streaming when no viewer has polled for 5 seconds. For
+a sharper view on a high-density screen, open the session with
+`device_scale_factor=2`; four times the pixels lowers the frame rate on a
+CPU-only host.
 
 ## Find and scope
 

@@ -602,6 +602,55 @@ def test_launch_fake_media_devices_is_opt_in(
     assert "--use-fake-device-for-media-stream" in commands[0]
 
 
+def test_launch_device_scale_factor_is_opt_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    commands = _capture_launch(monkeypatch)
+
+    _launch(tmp_path, headless=True)
+    _launch(tmp_path, headless=True, device_scale_factor=2)
+
+    assert not any(arg.startswith("--force-device-scale-factor") for arg in commands[0])
+    assert "--force-device-scale-factor=2" in commands[1]
+
+
+def test_open_scales_the_virtual_display_and_records_the_factor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+    _stub_virtual_display(monkeypatch)
+    sizes: list[tuple[int, int]] = []
+
+    async def fake_start(width: int, height: int) -> _FakeDisplay:
+        sizes.append((width, height))
+        return _FakeDisplay()
+
+    monkeypatch.setattr(display.VirtualDisplay, "start", fake_start)
+
+    opened = asyncio.run(
+        browser_session.open_session("hidpi", virtual_display=True, device_scale_factor=2)
+    )
+    reused = asyncio.run(browser_session.open_session("hidpi"))
+
+    assert sizes == [(3840, 2160)]
+    assert launches[0]["device_scale_factor"] == 2
+    assert opened["device_scale_factor"] == reused["device_scale_factor"] == 2
+
+
+@pytest.mark.parametrize("factor", [0.5, 4.5, float("nan")])
+def test_open_rejects_an_out_of_range_device_scale_factor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, factor: float
+) -> None:
+    launches = _stub_session_launch(monkeypatch, tmp_path)
+
+    with pytest.raises(WebSkrapError, match="from 1 to 4") as caught:
+        asyncio.run(browser_session.open_session("hidpi", device_scale_factor=factor))
+
+    assert caught.value.code is ErrorCode.USAGE
+    assert not launches
+
+
 def test_launch_routes_through_the_proxy_and_blocks_webrtc_leaks(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1097,6 +1146,7 @@ def test_headed_session_starts_no_virtual_display(
         pytest.param({"virtual_display": True}, "virtual_display", id="virtual-display"),
         pytest.param({"gpu": GpuBackend.MESA}, "gpu", id="gpu"),
         pytest.param({"profile_mode": "locale"}, "profile_mode", id="locale"),
+        pytest.param({"device_scale_factor": 2}, "device_scale_factor", id="device-scale"),
     ],
 )
 def test_reopen_refuses_a_missing_stealth_setting(

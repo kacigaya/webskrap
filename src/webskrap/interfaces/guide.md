@@ -264,6 +264,7 @@ or a live desktop stream. Headless rendering needs no Xvfb.
 | `browser_wait_for` | `url`, `title`, `matched` |
 | `browser_solve_captcha` | `url`, `title`, `captcha` (`provider`, `state`: `checked`, `challenge`, `gone`, `timeout`, `not_found`) |
 | `browser_eval` | `result`, `result_length`, `result_truncated`, and `result_json` when clipped |
+| `browser_watch` | `url`, a private live viewer link with optional `allow_scroll` or `allow_control`, and `expires_in_s` (15 minutes). Open the session with `device_scale_factor=2` for a sharper view. |
 | `browser_view` | Inline PNG plus `url`, `title`, `width`, `height`, `scroll_x`, `scroll_y`, `coordinate_system`, `mime_type` |
 | `browser_screenshot` | `url`, `title`, `path`, and `clip` with `target` |
 | `browser_close` | `closed` |

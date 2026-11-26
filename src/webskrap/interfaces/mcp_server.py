@@ -52,8 +52,10 @@ from webskrap.interfaces.mcp_browser import browser_tabs as browser_tabs
 from webskrap.interfaces.mcp_browser import browser_text as browser_text
 from webskrap.interfaces.mcp_browser import browser_view as browser_view
 from webskrap.interfaces.mcp_browser import browser_wait_for as browser_wait_for
+from webskrap.interfaces.mcp_browser import browser_watch as browser_watch
 from webskrap.interfaces.mcp_browser import (
     close_owned_sessions,
+    close_viewers,
     idle_timeout_s,
     reap_idle_sessions,
     register_browser_tools,
@@ -87,8 +89,9 @@ Choose a tool
   browser_wait_for, then browser_close. Do not re-fetch to drive a flow.
 
 In a browser session
-- No visible window; virtual_display=True is not headless.
-  Shared with the browser CLI. browser_tabs picks the tab.
+- No visible window; virtual_display=True is not headless. browser_watch
+  gives the user a live link. Shared with the browser CLI; browser_tabs
+  picks the tab.
 - browser_find(text=...) locates known controls with refs and ancestor context.
   browser_snapshot(target=..., depth=...) scopes a tree; boxes=true adds geometry.
 - browser_text reads text without an accessibility tree; pattern= greps lines.
@@ -114,7 +117,7 @@ Keep results small
 Failures and boundaries
 Errors include a code and recovery hint. no_session: browser_open first;
 stale_ref: snapshot again; timeout: raise timeout_ms or weaken load state;
-browser_launch: `webskrap install`. Fetch/search fall back from chrome to Chromium.
+browser_launch: `webskrap install`.
 Known challenge/block pages return blocked: follow its hint; do not retry.
 browser_goto reports it; solve_*=true passes it.
 browser_solve_captcha ticks a checkbox.
@@ -142,6 +145,7 @@ async def _fetch_lifespan(_server: MCPServer) -> AsyncIterator[FetchRuntime]:
                     reaper.cancel()
                     with suppress(asyncio.CancelledError, Exception):
                         await reaper
+                await close_viewers()
                 await close_owned_sessions()
             finally:
                 await runtime.close()

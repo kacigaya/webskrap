@@ -314,6 +314,28 @@ its own permissions.
 Open and close for one session are serialized across processes, so concurrent
 commands cannot launch two browsers on one profile or leave a stale state file.
 
+### Watch a live session
+
+Run `webskrap browser watch visual` for an open session named `visual`, or call
+`browser_watch(session="visual")` through MCP. Open the full link in T3 Code
+Preview or in a local browser alongside Claude Code or Codex. Open the link
+on the same machine, or use a private port forward for a remote session.
+
+The viewer fits the full browser frame into the panel and saves no frames.
+It streams the page as it changes and shows a lossless image once the page is still.
+For a sharper view on a high-density screen, open the session with
+`--device-scale-factor 2` or MCP `device_scale_factor=2`. Pages then see
+`devicePixelRatio` 2, which changes the browser fingerprint. Rendering four
+times the pixels lowers the frame rate on a CPU-only host.
+Add `--allow-scroll` or set MCP `allow_scroll=true` to let the viewer scroll
+with a wheel, trackpad, or keyboard. Focus the preview to use the arrow and
+Page Up or Page Down keys. Add `--allow-control` or set MCP
+`allow_control=true` to also click and type. Click inside the frame to focus it.
+Press Escape to leave viewer focus. Share control links only with people you
+trust to act in that browser session.
+Anyone with the full link and access to the local port can see the viewport. The link expires after 15 minutes.
+Press Ctrl+C to stop the CLI viewer early. MCP viewers stop when the server exits.
+
 ### Vision and coordinate input
 
 ```bash
